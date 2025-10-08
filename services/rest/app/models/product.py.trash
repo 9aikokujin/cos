@@ -1,0 +1,23 @@
+from sqlalchemy import Column, Integer, String
+from sqlalchemy.sql.sqltypes import Boolean
+from app.core.db import Base
+from .timestamp import TimestampMixin
+from sqlalchemy.orm import relationship
+from .associations import product_video_association
+
+
+class Product(Base, TimestampMixin):
+    __tablename__ = "product"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    article_number = Column(String, nullable=False)
+    confirmed = Column(Boolean, default=False)
+
+    s3_url = Column(String, nullable=True)
+
+    videos = relationship(
+        "Videos",
+        secondary=product_video_association,
+        back_populates="products"
+    )

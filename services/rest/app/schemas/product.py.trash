@@ -1,0 +1,33 @@
+from datetime import datetime
+from typing_extensions import Optional, List
+from pydantic import BaseModel, Field
+
+
+class VideoInfo(BaseModel):
+    id: int
+    name: str
+    link: str
+
+
+class ProductCreate(BaseModel):
+    title: str
+    article_number: str
+    confirmed: bool = False
+    s3_url: Optional[str] = None
+    videos: list[int] = Field(default_factory=list)
+
+
+class ProductUpdate(BaseModel):
+    title: Optional[str] = None
+    article_number: Optional[str] = None
+    confirmed: Optional[bool] = None
+    s3_url: Optional[str] = None
+    videos: Optional[list[int]] = None
+    videos_to_remove: Optional[list[int]] = None
+
+
+class ProductFilter(BaseModel):
+    id: Optional[int] = None
+    title: Optional[str] = None
+    article_number: Optional[str] = None
+    confirmed: Optional[bool] = None

@@ -1,0 +1,16 @@
+.diagram__container {
+  width: 100%;
+  max-width: 800px;
+  height: 119px;
+  margin: 0 auto;
+  padding: 0 20px;
+  margin-bottom: 30px;
+}
+
+.diagram__wrap {
+  overflow-y: auto;
+}
+
+.diagram__wrap::-webkit-scrollbar {
+  display: none;
+}

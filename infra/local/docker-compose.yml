@@ -1,0 +1,240 @@
+version: "3.8"
+
+services:
+  # bot:
+  #   build:
+  #     context: ../../services/bot/
+  #   container_name: cos-bot
+  #   environment:
+  #     RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
+  #     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+  #   depends_on:
+  #     - rabbitmq
+  #   restart: always
+
+  # tiktok-parser:
+  #   build:
+  #     context: ../../services/parsers/tiktok/
+  #   container_name: cos-tiktok-parser
+  #   environment:
+  #     RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
+  #     CLICKHOUSE_URL: http://clickhouse:8123
+  #     LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+  #     LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
+  #   depends_on:
+  #     - rabbitmq
+  #     - clickhouse
+  #     - elasticsearch
+  #     - kibana
+  #     - logstash
+  #   restart: always
+
+  # reels-parser:
+  #   build:
+  #     context: ../../services/parsers/reels/
+  #   container_name: cos-reels-parser
+  #   environment:
+  #     RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
+  #     CLICKHOUSE_URL: http://clickhouse:8123
+  #     LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+  #     LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
+  #   depends_on:
+  #     - postgres
+  #     - rabbitmq
+  #     # - analytics-api
+  #     # - clickhouse
+  #     # - elasticsearch
+  #     # - kibana
+  #     # - logstash
+  #     - rest-api
+  #     # - frontend
+  #   restart: always
+
+  # short-parser:
+  #   build:
+  #     context: ../../services/parsers/shorts/
+  #   container_name: cos-short-parser
+  #   environment:
+  #     RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
+  #     CLICKHOUSE_URL: http://clickhouse:8123
+  #     LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+  #     LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
+  #   depends_on:
+  #     - postgres
+  #     - rabbitmq
+  #     - analytics-api
+  #     - clickhouse
+  #     - elasticsearch
+  #     - kibana
+  #     - logstash
+  #     - rest-api
+  #     - frontend
+  #   restart: always
+
+  # frontend:
+  #   build:
+  #     context: ../../services/web/
+  #   container_name: cos-frontend
+  #   # environment:
+  #   #   VITE_API_URL: ${VITE_API_URL}
+  #   ports:
+  #     - "4444:4444"
+  #   depends_on:
+  #     - rest-api
+  #   restart: always
+
+  rest-api:
+    build:
+      context: ../../services/rest/
+    container_name: ${COS_REST_API_CONTAINER}
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ADMIN_ID: ${TELEGRAM_ADMIN_ID}
+
+      COS_POSTGRES_CONTAINER: ${COS_POSTGRES_CONTAINER}
+      COS_POSTGRES_PORT: ${COS_POSTGRES_PORT}
+      COS_POSTGRES_USER: ${COS_POSTGRES_USER}
+      COS_POSTGRES_DB: ${COS_POSTGRES_DB}
+
+      COS_LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
+      COS_LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+
+      COS_RABBITMQ_USER: ${COS_RABBITMQ_USER}
+      COS_RABBITMQ_PASSWORD: ${COS_RABBITMQ_PASSWORD}
+      COS_RABBITMQ_HOST: ${COS_RABBITMQ_HOST}
+
+
+    ports:
+      - "8005:8000"
+    depends_on:
+      - postgres
+      # - rabbitmq
+      - analytics-api
+      - clickhouse
+      - elasticsearch
+      - kibana
+      - logstash
+    volumes:
+      - cos_uploads:/app/uploads
+    restart: always
+
+  analytics-api:
+    build:
+      context: ../../services/analytics/
+    container_name: ns_analytics_api
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_DATABASE: default
+    ports:
+      - "8055:8000"
+    depends_on:
+      - clickhouse
+    restart: always
+
+  postgres:
+    image: postgres:16
+    container_name: ${COS_POSTGRES_CONTAINER}
+    restart: always
+    environment:
+      POSTGRES_USER: ${COS_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${COS_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${COS_POSTGRES_DB}
+    ports:
+      - "${COS_POSTGRES_PORT}:5432"
+    volumes:
+      - cos_pg_data:/var/lib/postgresql/data
+
+  # rabbitmq:
+  #   image: rabbitmq:3-management
+  #   container_name: ${COS_RABBITMQ_CONTAINER}
+  #   restart: always
+  #   environment:
+  #     RABBITMQ_DEFAULT_USER: ${COS_RABBITMQ_USER}
+  #     RABBITMQ_DEFAULT_PASS: ${COS_RABBITMQ_PASSWORD}
+  #   ports:
+  #     - "5672:5672"
+  #     - "${COS_RABBITMQ_MANAGEMENT_PORT}:15672"
+  #   volumes:
+  #     - cos_rabbitmq_data:/var/lib/rabbitmq
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: ${COS_CLICKHOUSE_CONTAINER}
+    restart: always
+    ports:
+      - "${COS_CLICKHOUSE_PORT_HTTP}:8123"
+      - "${COS_CLICKHOUSE_PORT_NATIVE}:9000"
+    volumes:
+      - cos_clickhouse_data:/var/lib/clickhouse
+      - cos_clickhouse_logs:/var/log/clickhouse-server
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.8.1
+    container_name: ${COS_ELASTICSEARCH_CONTAINER}
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=$ELASTIC_PASSWORD
+      - ES_JAVA_OPTS=-Xmx2g -Xms2g
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "${COS_ELASTICSEARCH_PORT}:9200"
+    volumes:
+      - cos_es_data:/usr/share/elasticsearch/data
+    restart: always
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.8.1
+    container_name: ${COS_KIBANA_CONTAINER}
+    depends_on:
+      - elasticsearch
+    ports:
+      - "${COS_KIBANA_PORT}:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+    restart: always
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:7.8.1
+    container_name: ${COS_LOGSTASH_CONTAINER}
+    depends_on:
+      - elasticsearch
+    ports:
+      - "${COS_LOGSTASH_PORT}:5044"
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - xpack.monitoring.enabled=false
+    command: |
+      -e '
+      input {
+        tcp {
+          port => 5044
+          codec => json
+        }
+      }
+      output {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          user => "elastic"
+          password => "${ELASTIC_PASSWORD}"
+          index => "cos-logs"
+        }
+        stdout { codec => rubydebug }
+      }'
+    restart: always
+
+volumes:
+  cos_pg_data:
+  cos_rabbitmq_data:
+  cos_clickhouse_data:
+  cos_clickhouse_logs:
+  cos_es_data:
+  cos_uploads:

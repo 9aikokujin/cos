@@ -1,0 +1,66 @@
+.edit_profile {
+  width: 100%;
+}
+
+.edit_profile__content {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.edit_profile__header {
+  width: 100%;
+  max-width: 800px;
+  padding: 60px 15px 20px;
+  justify-content: space-between;
+}
+
+.edit_profile__title {
+  font-family: Museo Sans Cyrl;
+  font-weight: 400;
+  font-size: 30px;
+  line-height: 100%;
+  text-align: center;
+  color: #382f31;
+}
+
+.edit__form {
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 800px;
+  padding: 0 15px;
+  padding-bottom: 20px;
+  overflow-y: auto;
+}
+
+.edit__form::-webkit-scrollbar {
+  display: none;
+}
+
+.edit__form__label {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 450px;
+}
+
+.edit__form__label span {
+  padding-left: 26px;
+  font-family: Museo Sans Cyrl;
+  font-weight: 300;
+  font-size: 10px;
+  line-height: 20px;
+  color: #ff84a5;
+}
+
+.edit_social {
+  margin-top: 13px;
+  width: 100%;
+  gap: 14px;
+  align-items: center;
+}
+
+.edit_btn {
+  margin-top: 48px;
+}

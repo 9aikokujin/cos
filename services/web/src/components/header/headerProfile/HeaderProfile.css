@@ -1,0 +1,17 @@
+.header__profile {
+  gap: 9px;
+}
+
+.header__login {
+  font-family: Museo Sans Cyrl;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 100%;
+  text-align: right;
+  color: white;
+}
+
+.header_icon {
+  width: 40px;
+  height: 40px;
+}

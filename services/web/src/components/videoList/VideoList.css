@@ -1,0 +1,11 @@
+.video__list {
+  width: 100%;
+  max-width: 800px;
+  padding: 0 15px;
+  padding-bottom: 20px;
+  overflow-y: auto;
+}
+
+.video__list::-webkit-scrollbar {
+  display: none;
+}

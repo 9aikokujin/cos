@@ -1,0 +1,146 @@
+from datetime import date as dt_date
+from http.client import HTTPException
+from fastapi import APIRouter, Depends, Query
+from typing import Optional
+from app.services.videohistory import VideoHistoryService
+from app.schemas.videohistory import HistoryParams
+from app.models.user import User, UserRole
+from app.api.v1.dependencies import require_role
+from sqlalchemy.ext.asyncio.session import AsyncSession
+from fastapi.responses import StreamingResponse
+from app.models.channel import ChannelType
+import io
+import csv
+
+from app.core.db import get_db
+
+router = APIRouter()
+
+
+@router.get("/")
+async def get_all_video_history(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
+    params: HistoryParams = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VideoHistoryService(db)
+
+    result = await service.get_all_filtered(
+        user=user,
+        **params.model_dump()
+    )
+    return result
+
+
+@router.get("/filtered_stats")
+async def get_filtered_history(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
+    params: HistoryParams = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VideoHistoryService(db)
+
+    # Возвращаем агрегированные данные по датам
+    result = await service.get_aggregated_views_by_date(
+        user=user,
+        **params.model_dump()
+    )
+    return result
+
+
+@router.get("/daily-article-count")
+async def daily_video_with_article_count(
+    date_from: Optional[dt_date] = Query(None),
+    date_to: Optional[dt_date] = Query(None),
+    channel_id: Optional[int] = Query(None),
+    channel_type: Optional[str] = Query(None),
+    user_id: Optional[int] = Query(None),
+    article: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VideoHistoryService(db)
+
+    result = await service.get_daily_video_with_article_count(
+        date_from=date_from,
+        date_to=date_to,
+        channel_id=channel_id,
+        channel_type=channel_type,
+        user_id=user_id,
+        article=article,
+    )
+
+    return [
+        {"date": r.date.isoformat(), "video_count": r.video_count}
+        for r in result
+    ]
+
+
+@router.get("/download-stats-csv")
+async def download_video_stats_csv(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
+    channel_type: Optional[str] = Query(None, description="youtube, tiktok, instagram, likee"),
+    user_id: Optional[int] = Query(None, description="Только для админа"),
+    date_from: Optional[dt_date] = Query(None, description="Дата публикации ОТ (включительно)"),
+    date_to: Optional[dt_date] = Query(None, description="Дата публикации ДО (включительно)"),
+    db: AsyncSession = Depends(get_db),
+):
+    # Проверка: обычный пользователь не может указать чужой user_id
+    if user.role != UserRole.ADMIN:
+        if user_id is not None and user_id != user.id:
+            raise HTTPException(status_code=403, detail="Недостаточно прав")
+        actual_user_id = user.id
+    else:
+        actual_user_id = user_id  # может быть None (все пользователи) или конкретный ID
+
+    # Валидация channel_type
+    actual_channel_type = None
+    if channel_type:
+        try:
+            actual_channel_type = ChannelType(channel_type.lower())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Неверный тип канала. Допустимые значения: {[t.value for t in ChannelType]}"
+            )
+
+    service = VideoHistoryService(db)
+    stats, sorted_dates = await service.get_video_stats_for_csv(
+        user=user,
+        channel_type=actual_channel_type,
+        target_user_id=actual_user_id,
+        pub_date_from=date_from,
+        pub_date_to=date_to,
+    )
+
+    # Генерация CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    header = ["Ссылка на ролик"] + [d.isoformat() for d in sorted_dates]
+    writer.writerow(header)
+
+    for item in stats:
+        row = [item["link"]]
+        daily_views = item["daily_views"]
+        for d in sorted_dates:
+            row.append(daily_views.get(d, ""))
+        writer.writerow(row)
+
+    output.seek(0)
+    filename = f"video_stats_{dt_date.today().isoformat()}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/{id}")
+async def get_video_history(
+    id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
+):
+    service = VideoHistoryService(db)
+    result = await service.get_by_id(id, user)
+    return result

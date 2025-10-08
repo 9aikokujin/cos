@@ -1,0 +1,22 @@
+.custom__button {
+  flex-shrink: 0;
+  max-width: 450px;
+  width: 100%;
+  min-width: 300px;
+  height: 44px;
+  background-color: #ffe0e5;
+  box-shadow: 0px 1px 7px 0px #382f3133;
+  box-shadow: 0px 0px 30px 0px #382f311f;
+  border-radius: 30px;
+  font-family: Museo Sans Cyrl;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 100%;
+  text-align: center;
+  color: #382f31;
+}
+
+._pink {
+  background-color: #ff84a5;
+  color: white;
+}
