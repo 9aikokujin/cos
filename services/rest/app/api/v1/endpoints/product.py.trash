@@ -1,0 +1,261 @@
+import csv
+import os
+from io import StringIO
+from fastapi import (
+    APIRouter, Depends, Query,
+    UploadFile, File, HTTPException, Form
+)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio.session import AsyncSession
+from typing import Optional
+
+from app.core.db import get_db
+from app.models.user import User, UserRole
+from app.models.videos import Videos
+from app.models.channel import Channel
+from app.api.v1.dependencies import require_role
+from app.schemas.product import ProductCreate, ProductUpdate
+from app.services.product import ProductService
+
+
+UPLOAD_DIR = "uploads/products"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+router = APIRouter()
+
+
+@router.get("/")
+async def get_products(
+    id: Optional[int] = Query(None),
+    title: Optional[str] = Query(None),
+    article_number: Optional[str] = Query(None),
+    confirmed: Optional[bool] = Query(None),
+    page: Optional[int] = Query(None, ge=1),
+    size: Optional[int] = Query(None, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
+):
+    service = ProductService(db)
+
+    result = await service.get_all_filtered_paginated(
+        user=user,
+        id=id,
+        title=title,
+        article_number=article_number,
+        confirmed=confirmed,
+        page=page,
+        size=size
+    )
+    return result
+
+
+@router.get("/{product_id}")
+async def get_product(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
+):
+    service = ProductService(db)
+    product = await service.get_by_id(product_id, user)
+    return product
+
+
+@router.post("/")
+async def create_product(
+    title: str = Form(...),
+    article_number: str = Form(...),
+    confirmed: bool = Form(False),
+    videos: list[int] = Form([]),
+    file: UploadFile = File(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN))
+):
+    file_path = None
+    if file:
+        file_name = f"{title}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+
+    product_new = ProductCreate(
+        title=title,
+        article_number=article_number,
+        confirmed=confirmed,
+        s3_url=file_path,
+        videos=videos,
+    )
+
+    service = ProductService(db)
+    product = await service.create(product_new, user)
+    return product
+
+
+@router.patch("/{product_id}")
+async def update_product(
+    product_id: int,
+    title: Optional[str] = Form(None),
+    article_number: Optional[str] = Form(None),
+    confirmed: Optional[bool] = Form(None),
+    videos: Optional[list[int]] = Form(None),
+    videos_to_remove: Optional[list[int]] = Form(None),
+    file: UploadFile = File(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
+):
+    service = ProductService(db)
+    product = await service.get_by_id(product_id, user)
+
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Логика для обычного пользователя
+    if user.role == UserRole.USER:
+        if any([title, article_number, confirmed, file]):
+            raise HTTPException(
+                status_code=403,
+                detail="Обычный юзер не может изменять поля товара",
+            )
+
+        if videos or videos_to_remove:
+            # Проверка доступа к видео (для добавления и удаления)
+            user_channels = await db.execute(
+                select(Channel).where(Channel.user_id == user.id)
+            )
+            user_channel_ids = [
+                channel.id for channel in user_channels.scalars().all()
+            ]
+
+            # Проверка для добавляемых видео
+            if videos:
+                valid_videos = await db.execute(
+                    select(Videos).where(
+                        Videos.id.in_(videos),
+                        Videos.channel_id.in_(user_channel_ids)
+                    )
+                )
+                valid_video_ids = [
+                    video.id for video in valid_videos.scalars().all()
+                ]
+                if len(valid_video_ids) != len(videos):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Вы можете добавлять только видео из своих каналов",
+                    )
+
+            # Проверка для удаляемых видео
+            if videos_to_remove:
+                valid_videos = await db.execute(
+                    select(Videos).where(
+                        Videos.id.in_(videos_to_remove),
+                        Videos.channel_id.in_(user_channel_ids)
+                    )
+                )
+                valid_video_ids = [
+                    video.id for video in valid_videos.scalars().all()
+                ]
+                if len(valid_video_ids) != len(videos_to_remove):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Вы можете удалять только видео из своих каналов",
+                    )
+
+            # Формируем объект ProductUpdate
+            product_update = ProductUpdate(
+                videos=videos,
+                videos_to_remove=videos_to_remove
+            )
+            updated_product = await service.update(
+                product_id, product_update, user)
+            return updated_product
+
+        return product  # Если ничего не передано, возвращаем без изменений
+
+    # Логика для администратора
+    file_path = product.s3_url
+    if file:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+        file_name = f"{product_id}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, file_name)
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+
+    product_update = ProductUpdate(
+        title=title,
+        article_number=article_number,
+        confirmed=confirmed,
+        s3_url=file_path if file else product.s3_url,
+        videos=videos,
+        videos_to_remove=videos_to_remove
+    )
+
+    updated_product = await service.update(product_id, product_update, user)
+    return updated_product
+
+
+@router.delete("/{product_id}/image")
+async def delete_product_image(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN))
+):
+    service = ProductService(db)
+    product = await service.delete_image(product_id, user)
+    return product
+
+
+@router.delete("/{product_id}")
+async def delete_product(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN))
+):
+    service = ProductService(db)
+    product = await service.get_by_id(product_id, user)
+
+    # удаляем файл если был
+    if product.s3_url and os.path.exists(product.s3_url):
+        os.remove(product.s3_url)
+
+    await service.delete(product_id, user)
+    return {"message": "Product deleted"}
+
+# =============|||||||||================
+#    Добавление товаров через CSV
+# =============|||||||||================
+
+
+@router.post("/upload-csv/")
+async def upload_products_csv(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role(UserRole.ADMIN))
+):
+    if not file.filename.endswith(".csv"):
+        raise HTTPException(status_code=400,
+                            detail="Разрешены только CSV файлы")
+
+    content = await file.read()
+    decoded = content.decode("utf-8")
+    reader = csv.DictReader(StringIO(decoded))
+
+    products_to_create = []
+    for row in reader:
+        if not row.get("title") or not row.get("article_number"):
+            continue
+        products_to_create.append({
+            "title": row["title"],
+            "article_number": row["article_number"],
+            "s3_url": row.get("s3_url")
+        })
+
+    service = ProductService(db)
+    created_products = []
+
+    # Создаем продукты по одному
+    for product_data in products_to_create:
+        product_create_dto = ProductCreate(**product_data)
+        product = await service.create(product_create_dto, user)
+        created_products.append(product)
+
+    return {"created": len(created_products), "products": created_products}

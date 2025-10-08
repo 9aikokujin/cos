@@ -1,0 +1,36 @@
+from datetime import datetime
+from typing_extensions import Optional
+from pydantic import BaseModel, field_validator
+
+from app.models.videos import VideoType
+
+
+class VideosCreate(BaseModel):
+    type: VideoType
+    link: str
+    name: Optional[str] = None
+    channel_id: int
+    image: Optional[str] = None
+    article: Optional[str] = None
+    amount_views: Optional[int] = None
+    amount_likes: Optional[int] = None
+    amount_comments: Optional[int] = None
+
+
+class VideosUpdate(BaseModel):
+    type: Optional[VideoType] = None
+    link: Optional[str] = None
+    name: Optional[str] = None
+    image: Optional[str] = None
+    article: Optional[str] = None
+    amount_views: Optional[int] = None
+    amount_likes: Optional[int] = None
+    amount_comments: Optional[int] = None
+
+
+class VideoFilter(BaseModel):
+    id: Optional[int] = None
+    type: Optional[VideoType] = None
+    link: Optional[str] = None
+    name: Optional[str] = None
+    article: Optional[str] = None

@@ -1,0 +1,25 @@
+from pydantic_settings import BaseSettings
+
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+class Settings(BaseSettings):
+    DATABASE_URL: str
+    TELEGRAM_BOT_TOKEN: str
+    TELEGRAM_ADMIN_ID: int
+
+    COS_LOGSTASH_PORT: int | str
+    COS_LOGSTASH_HOST: str
+
+    COS_RABBITMQ_USER: str
+    COS_RABBITMQ_PASSWORD: str
+    COS_RABBITMQ_HOST: str
+
+
+    model_config = {
+        "env_file": ".env"
+    }
+
+settings = Settings()

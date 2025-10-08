@@ -1,0 +1,12 @@
+.account_list {
+  max-width: 800px;
+  width: 100%;
+  gap: 25px;
+  padding: 0 15px;
+  padding-bottom: 20px;
+  overflow-y: auto;
+}
+
+.account_list::-webkit-scrollbar {
+  display: none;
+}

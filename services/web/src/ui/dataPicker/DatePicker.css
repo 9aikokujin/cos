@@ -1,0 +1,64 @@
+.calendar__month {
+  font-family: Museo Sans Cyrl;
+  font-weight: 400;
+  font-size: 20px;
+  line-height: 100%;
+  text-align: center;
+  color: #382f31;
+  margin-bottom: 10px;
+}
+
+.calendar__header {
+  height: 24px;
+  font-family: Inter;
+  font-weight: 400;
+  font-size: 11px;
+  line-height: 100%;
+  text-align: center;
+  vertical-align: middle;
+  color: #b3b3b3;
+}
+
+.calendar__week_number {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background-color: #382f31;
+  font-family: Museo Sans Cyrl;
+  font-weight: 400;
+  font-size: 11px;
+  line-height: 100%;
+  text-align: center;
+  vertical-align: middle;
+  color: #ff84a5;
+}
+
+.calendar__day {
+  width: 27px;
+  height: 27px;
+  font-family: Museo Sans Cyrl;
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 100%;
+  text-align: center;
+  vertical-align: middle;
+  color: #b3b3b3;
+}
+
+.calendar__day._active {
+  background-color: #ffe0e5;
+  border-radius: 100%;
+  color: #382f31;
+}
+
+.calendar__day._week_end {
+  color: #17a1fa;
+}
+
+.calendar__day._week_end._another_month {
+  color: #1270b0;
+}
+
+.calendar__day._another_month {
+  color: #616161;
+}

@@ -1,0 +1,201 @@
+import os
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
+
+from app.repositories.product import ProductRepository
+from app.schemas.product import ProductCreate, ProductUpdate
+from app.models.user import User, UserRole
+from app.models.videos import Videos
+from app.models.product import Product
+from app.models.channel import Channel
+
+
+class ProductService:
+    def __init__(self, db: AsyncSession):
+        self.repo = ProductRepository(db)
+
+    async def get_all_filtered_paginated(
+        self,
+        user: User,
+        title: Optional[str] = None,
+        article_number: Optional[str] = None,
+        confirmed: Optional[bool] = None,
+        id: Optional[int] = None,
+        videos: Optional[list[int]] = None,
+        page: Optional[int] = None,
+        size: Optional[int] = None
+    ):
+        # Для обычных пользователей всегда показываем только подтвержденные товары
+        if user.role != UserRole.ADMIN:
+            confirmed_filter = True  # всегда True для не-админов
+            return await self.repo.get_all_filtered_paginated(
+                title=title,
+                article_number=article_number,
+                confirmed=confirmed_filter,  # используем фильтр подтвержденных
+                id=id,
+                videos=videos,
+                page=page,
+                size=size
+            )
+        else:
+            # Для админов используем переданный фильтр или None
+            return await self.repo.get_all_filtered_paginated(
+                title=title,
+                article_number=article_number,
+                confirmed=confirmed,
+                id=id,
+                videos=videos,
+                page=page,
+                size=size
+            )
+
+    async def get_by_id(self, id: int, user: User):
+        product = await self.repo.get_by_id(id)
+        if not product:
+            raise ValueError("Продукт не найден")
+
+        if user.role != UserRole.ADMIN and not product.confirmed:
+            raise ValueError("Недостаточно прав для просмотра этого продукта")
+
+        # Если пользователь — не админ, фильтруем видео, оставляя только его
+        if user.role != UserRole.ADMIN:
+            # Получаем ID каналов пользователя
+            user_channels = await self.repo.db.execute(
+                select(Channel.id).where(Channel.user_id == user.id)
+            )
+            user_channel_ids = set(user_channels.scalars().all())
+
+            # Фильтруем видео: оставляем только те, чьи channel_id в списке пользователя
+            filtered_videos = [
+                video for video in product.videos
+                if video.channel_id in user_channel_ids
+            ]
+            # Подменяем список видео в продукте
+            product.videos = filtered_videos
+
+        return product
+
+    async def create(self, dto: ProductCreate, user: User) -> Product:
+        videos_objs = []
+        if dto.videos:
+            query = select(Videos).where(Videos.id.in_(dto.videos))
+            result = await self.repo.db.execute(query)
+            videos_objs = result.scalars().all()
+        else:
+            videos_objs = []
+
+        product_data = dto.model_dump(exclude={'videos'})
+        product = Product(**product_data)
+        product.videos = videos_objs
+
+        self.repo.db.add(product)
+        await self.repo.db.commit()
+        await self.repo.db.refresh(product)
+        return product
+
+    async def update(self, id: int, dto: ProductUpdate, user: User):
+        product = await self.repo.get_by_id(id)
+
+        if not product:
+            raise ValueError("Продукт не найден")
+
+        # Получаем список полей, которые пытается изменить пользователь (кроме videos и videos_to_remove)
+        update_data = dto.model_dump(exclude_unset=True, exclude_none=True)
+        non_video_fields = {k for k in update_data.keys() if k not in ("videos", "videos_to_remove")}
+
+        # Если пользователь пытается изменить НЕ видео-поля — требуем ADMIN
+        if non_video_fields and user.role != UserRole.ADMIN:
+            raise ValueError("Недостаточно прав для изменения полей продукта. Только администратор может изменять название, описание и т.д.")
+
+        # Обновляем не-video поля (если есть и права есть)
+        for field in non_video_fields:
+            setattr(product, field, update_data[field])
+
+        # Обработка видео — разрешаем обычному пользователю, если он владеет видео
+        current_videos = [video.id for video in product.videos]
+        updated_videos = set(current_videos)  # используем set для удобства
+
+        # Удаление видео
+        if dto.videos_to_remove is not None:
+            if user.role != UserRole.ADMIN:
+                # Проверяем, что пользователь владеет каналами, к которым привязаны видео
+                user_channels = await self.repo.db.execute(
+                    select(Channel.id).where(Channel.user_id == user.id)
+                )
+                user_channel_ids = user_channels.scalars().all()
+                valid_videos = await self.repo.db.execute(
+                    select(Videos.id).where(
+                        Videos.id.in_(dto.videos_to_remove),
+                        Videos.channel_id.in_(user_channel_ids)
+                    )
+                )
+                valid_video_ids = set(valid_videos.scalars().all())
+                invalid = set(dto.videos_to_remove) - valid_video_ids
+                if invalid:
+                    raise ValueError(f"Вы не можете удалить видео {invalid} — они не принадлежат вашим каналам")
+
+            updated_videos -= set(dto.videos_to_remove)
+
+        # Добавление новых видео
+        if dto.videos is not None:
+            if user.role != UserRole.ADMIN:
+                user_channels = await self.repo.db.execute(
+                    select(Channel.id).where(Channel.user_id == user.id)
+                )
+                user_channel_ids = user_channels.scalars().all()
+                valid_videos = await self.repo.db.execute(
+                    select(Videos.id).where(
+                        Videos.id.in_(dto.videos),
+                        Videos.channel_id.in_(user_channel_ids)
+                    )
+                )
+                valid_video_ids = set(valid_videos.scalars().all())
+                invalid = set(dto.videos) - valid_video_ids
+                if invalid:
+                    raise ValueError(f"Вы не можете добавить видео {invalid} — они не принадлежат вашим каналам")
+
+            updated_videos |= set(dto.videos)  # объединяем
+
+        # Обновляем связи с видео
+        if dto.videos is not None or dto.videos_to_remove is not None:
+            # Загружаем видео объекты
+            if updated_videos:
+                query = select(Videos).where(Videos.id.in_(updated_videos))
+                result = await self.repo.db.execute(query)
+                product.videos = result.scalars().all()
+            else:
+                product.videos = []
+
+        await self.repo.db.commit()
+        await self.repo.db.refresh(product)
+        return product
+
+    async def delete(self, id: int, user: User):
+        product = await self.repo.get_by_id(id)
+        if not product:
+            raise ValueError("Продукт не найден")
+        # Проверка прав доступа
+        if user.role != UserRole.ADMIN:
+            raise ValueError("Недостаточно прав для удаления этого продукта")
+
+        await self.repo.delete(id)
+        await self.repo.db.commit()
+        return product
+
+    async def delete_image(self, id: int, user: User):
+        product = await self.repo.get_by_id(id)
+
+        if not product:
+            raise ValueError("Продукт не найден")
+        if user.role != UserRole.ADMIN:
+            raise ValueError("Недостаточно прав для изменения этого продукта")
+
+        if product.s3_url and os.path.exists(product.s3_url):
+            os.remove(product.s3_url)
+
+        product.s3_url = None
+
+        await self.repo.db.commit()
+        await self.repo.db.refresh(product)
+        return product
