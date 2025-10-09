@@ -1,13 +1,10 @@
-import os
 import asyncio
 import httpx
 import random
 from typing import Union
 from playwright.async_api import async_playwright
 # from urllib.parse import urlparse
-from dotenv import load_dotenv
 from utils.logger import TCPLogger
-load_dotenv()
 
 
 class TikTokParser:
@@ -89,6 +86,12 @@ class TikTokParser:
         if not self.proxy_list:
             self.logger.send("WARNING", "Список прокси пуст, используем без прокси")
 
+        # Объявляем ресурсы заранее
+        playwright = None
+        browser = None
+        context = None
+        page = None
+
         async def get_proxy_config(proxy_str):
             try:
                 if "@" in proxy_str:
@@ -107,10 +110,9 @@ class TikTokParser:
                 self.logger.send("ERROR", f"Неверный формат прокси '{proxy_str}': {str(e)}")
                 return None
 
-        async def create_browser_with_proxy(proxy_str):
+        async def create_browser_with_proxy(proxy_str, playwright):
             proxy_config = await get_proxy_config(proxy_str) if proxy_str else None
-            p = await async_playwright().start()
-            browser = await p.chromium.launch(
+            browser = await playwright.chromium.launch(
                 headless=True,
                 args=[
                     "--disable-blink-features=AutomationControlled",
@@ -123,16 +125,17 @@ class TikTokParser:
                 proxy=proxy_config
             )
             page = await context.new_page()
-            return browser, page
-
-        # --- Этап 1: собираем список видео ---
-        current_proxy = random.choice(self.proxy_list) if self.proxy_list else None
-        browser, page = await create_browser_with_proxy(current_proxy)
-        if not browser:
-            raise Exception("Не удалось создать браузер даже для первой прокси")
-
+            return browser, context, page
         all_videos_data = []
+
         try:
+            playwright = await async_playwright().start()
+            current_proxy = random.choice(self.proxy_list) if self.proxy_list else None
+            browser, context, page = await create_browser_with_proxy(current_proxy, playwright)
+
+            if not browser:
+                raise Exception("Не удалось создать браузер даже для первой прокси")
+
             for attempt in range(1, max_retries + 1):
                 try:
                     await page.goto(url, wait_until="networkidle", timeout=60000)
@@ -177,16 +180,47 @@ class TikTokParser:
                         await asyncio.sleep(5)
                     else:
                         raise
-        finally:
-            await browser.close()
 
-        # --- Этап 2: обработка видео + качаем картинки с каруселью прокси ---
+        except Exception as main_error:
+            self.logger.send("ERROR", f"Критическая ошибка в TikTokParser: {main_error}")
+            raise
+
+        finally:
+            # Закрываем в правильном порядке: page → context → browser → playwright
+            close_errors = []
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    close_errors.append(f"page.close(): {e}")
+
+            if context:
+                try:
+                    await context.close()
+                except Exception as e:
+                    close_errors.append(f"context.close(): {e}")
+
+            if browser:
+                try:
+                    await browser.close()
+                except Exception as e:
+                    close_errors.append(f"browser.close(): {e}")
+
+            if playwright:
+                try:
+                    await playwright.stop()
+                except Exception as e:
+                    close_errors.append(f"playwright.stop(): {e}")
+
+            if close_errors:
+                self.logger.send("WARNING", f"Ошибки при закрытии ресурсов Playwright: {close_errors}")
+            else:
+                self.logger.send("INFO", "✅ Все ресурсы Playwright корректно закрыты")
+
         async def download_image(url: str, proxy: str = None) -> Union[bytes, None]:
             try:
-                # Добавляем схему, если прокси задан и не содержит её
                 if proxy and not proxy.startswith(("http://", "https://")):
                     proxy = "http://" + proxy
-
                 async with httpx.AsyncClient(proxy=proxy, timeout=20.0) as client:
                     resp = await client.get(url)
                     resp.raise_for_status()
@@ -204,7 +238,7 @@ class TikTokParser:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 files = {"file": (file_name, image_bytes, "image/jpeg")}
                 resp = await client.post(
-                    f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/{video_id}/upload-image/",
+                    f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -213,12 +247,11 @@ class TikTokParser:
         processed_count = 0
         image_queue = []
 
-        # шаг 1: отправляем метаданные видео в API
         for video_data in all_videos_data:
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
                     check_resp = await client.get(
-                        f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/?link={video_data['link']}"
+                        f"https://sn.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
                     )
                     video_id = None
                     is_new = False
@@ -229,7 +262,7 @@ class TikTokParser:
                         if videos:
                             video_id = videos[0]['id']
                             update_resp = await client.patch(
-                                f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/{video_id}",
+                                f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}",
                                 json={"amount_views": video_data["amount_views"]}
                             )
                             update_resp.raise_for_status()
@@ -240,7 +273,7 @@ class TikTokParser:
 
                     if is_new:
                         create_resp = await client.post(
-                            f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/",
+                            "https://sn.dev-klick.cyou/api/v1/videos/",
                             json=video_data
                         )
                         create_resp.raise_for_status()
@@ -252,7 +285,6 @@ class TikTokParser:
                 self.logger.send("ERROR", f"Ошибка при обработке {video_data.get('link')}: {e}")
                 continue
 
-        # шаг 2: качаем фото пакетами по 15/прокси
         idx = 0
         while idx < len(image_queue):
             if not self.proxy_list:
@@ -277,7 +309,6 @@ class TikTokParser:
 
             idx += 15
 
-            # если прошли все прокси и фото ещё остались → ждём минуту
             if idx < len(image_queue) and self.current_proxy_index == 0 and self.proxy_list:
                 self.logger.send("WARNING", "⏳ Все прокси использованы, ждём 1 минуту...")
                 await asyncio.sleep(60)

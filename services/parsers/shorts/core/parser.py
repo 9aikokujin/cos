@@ -40,7 +40,7 @@ class ShortsParser:
                 except ValueError:
                     continue
 
-        # Если арабские шаблоны не сработали — пробуем латинские
+        # Если арабские шаблоны не сработали — пробуем латинские (как раньше)
         clean_text = (
             text.upper()
             .replace("VIEWS", "")
@@ -152,7 +152,13 @@ class ShortsParser:
                 url = url + '/shorts'
         self.logger.send("INFO", f"Переход на канал {url}")
 
-        # --- Утилиты для Playwright ---
+        # Объявляем все ресурсы заранее, чтобы они были доступны в finally
+        playwright = None
+        browser = None
+        context = None
+        page = None
+
+        # --- Вспомогательные функции ---
         async def get_proxy_config(proxy_str):
             try:
                 if "@" in proxy_str:
@@ -171,11 +177,10 @@ class ShortsParser:
                 self.logger.send("INFO", f"Неверный формат прокси '{proxy_str}': {str(e)}")
                 return None
 
-        async def create_browser_with_proxy(proxy_str):
+        async def create_browser_with_proxy(proxy_str, playwright):
             proxy_config = await get_proxy_config(proxy_str) if proxy_str else None
-            p = await async_playwright().start()
             self.logger.send("INFO", f"Создаём браузер с прокси: {proxy_config}")
-            browser = await p.chromium.launch(
+            browser = await playwright.chromium.launch(
                 headless=True,
                 args=[
                     "--disable-blink-features=AutomationControlled",
@@ -188,46 +193,45 @@ class ShortsParser:
                 proxy=proxy_config
             )
             page = await context.new_page()
-            return browser, page
+            return browser, context, page  # ← возвращаем context!
 
-        # --- Этап 1: собираем список видео ---
+        # --- Основной парсинг ---
         current_proxy = random.choice(self.proxy_list) if self.proxy_list else None
         self.logger.send("INFO", f"Используемый прокси: {current_proxy}")
-        browser, page = await create_browser_with_proxy(current_proxy)
-        if not browser:
-            self.logger.send("ERROR", "Не удалось создать браузер даже для первой прокси")
-            raise Exception("Не удалось создать браузер даже для первой прокси")
 
         all_videos_data = []
+
         try:
+            playwright = await async_playwright().start()
+            browser, context, page = await create_browser_with_proxy(current_proxy, playwright)
+
             for attempt in range(1, max_retries + 1):
                 try:
                     self.logger.send("INFO", f"Попытка загрузки страницы {url}, попытка {attempt}/{max_retries}")
                     await page.goto(url, wait_until="networkidle", timeout=60000)
                     self.logger.send("INFO", f"🌐 Открыл профиль {url} через прокси {current_proxy}")
 
-                    # Проверка на наличие окна с куки
+                    # Обработка куки
                     try:
                         cookie_popup = await page.query_selector("div.qqtRac")
                         if cookie_popup:
-                            self.logger.send("INFO", "Обнаружено окно с куки")
                             accept_button = await page.query_selector("button[aria-label='Accept all']")
                             if accept_button:
                                 await accept_button.click()
+                                await page.wait_for_timeout(2000)
                                 self.logger.send("INFO", "Нажата кнопка 'Accept all'")
-                                await page.wait_for_timeout(2000)  # Даём время на обработку
                             else:
                                 self.logger.send("WARNING", "Кнопка 'Accept all' не найдена")
                     except Exception as e:
                         self.logger.send("ERROR", f"Ошибка при обработке окна с куки: {e}")
 
-                    # Сохраняем начальное содержимое страницы
+                    # Сохранение HTML для отладки
                     page_content = await page.content()
-                    self.logger.send("INFO", f"Длина начального содержимого страницы: {len(page_content)} символов")
                     with open(f"page_initial_{attempt}.html", "w", encoding="utf-8") as f:
                         f.write(page_content)
                     self.logger.send("INFO", f"Сохранено начальное содержимое страницы в page_initial_{attempt}.html")
 
+                    # Поиск видео
                     # Проверяем разные селекторы
                     selectors = [
                         "ytm-shorts-lockup-view-model",  # Мобильная версия
@@ -256,27 +260,21 @@ class ShortsParser:
                             link_el = await video.query_selector("a.shortsLockupViewModelHostEndpoint")
                             video_url = await link_el.get_attribute("href") if link_el else None
                             full_url = f"https://www.youtube.com{video_url}" if video_url else ""
-                            self.logger.send("INFO", f"URL видео: {full_url}")
+                            if not full_url or full_url == "https://www.youtube.com":
+                                self.logger.send("WARNING", "Пропущено видео без URL")
+                                continue
 
                             title_el = await video.query_selector("h3 a")
                             title = await title_el.get_attribute("title") if title_el else ""
                             video_title = title[:30].rsplit(" ", 1)[0] if len(title) > 30 else title
-                            self.logger.send("INFO", f"Название видео: {video_title}")
 
                             views_el = await video.query_selector(".shortsLockupViewModelHostOutsideMetadataSubhead span")
-                            self.logger.send("INFO", f"Изначально найденные просмотры: {views_el}")
                             views_text = await views_el.inner_text() if views_el else "0"
-                            self.logger.send("INFO", f"Только текст просмотров: {views_text}")
                             views = self.parse_views(views_text)
-                            self.logger.send("INFO", f"Преобразованные просмотры: {views_text} -> {views}")
 
                             img_el = await video.query_selector("img.ytCoreImageHost")
                             img_url = await img_el.get_attribute("src") if img_el else None
                             self.logger.send("INFO", f"URL изображения: {img_url}")
-
-                            if not full_url:
-                                self.logger.send("WARNING", "Пропущено видео без URL")
-                                continue
 
                             all_videos_data.append({
                                 "type": "youtube",
@@ -286,20 +284,54 @@ class ShortsParser:
                                 "amount_views": views,
                                 "image_url": img_url
                             })
-                            self.logger.send("INFO", f"Добавлено видео в список: {video_title} ({full_url})")
+                            self.logger.send("INFO", f"Добавлено видео: {video_title} ({full_url})")
                         except Exception as e:
                             self.logger.send("ERROR", f"Ошибка парсинга видео: {e}")
                             continue
-                    break
+                    break  # Успех — выходим из цикла попыток
+
                 except Exception as e:
                     self.logger.send("WARNING", f"Попытка {attempt} не удалась: {e}")
                     if attempt < max_retries:
                         await asyncio.sleep(5)
                     else:
                         raise
+
+        except Exception as main_error:
+            self.logger.send("ERROR", f"Критическая ошибка в parse_channel: {main_error}")
+            raise
+
         finally:
-            await browser.close()
-            self.logger.send("INFO", "Браузер закрыт")
+            # Закрываем в строгом порядке: page → context → browser → playwright
+            close_errors = []
+            if page:
+                try:
+                    await page.close()
+                except Exception as e:
+                    close_errors.append(f"page.close(): {e}")
+
+            if context:
+                try:
+                    await context.close()
+                except Exception as e:
+                    close_errors.append(f"context.close(): {e}")
+
+            if browser:
+                try:
+                    await browser.close()
+                except Exception as e:
+                    close_errors.append(f"browser.close(): {e}")
+
+            if playwright:
+                try:
+                    await playwright.stop()
+                except Exception as e:
+                    close_errors.append(f"playwright.stop(): {e}")
+
+            if close_errors:
+                self.logger.send("WARNING", f"Ошибки при закрытии ресурсов Playwright: {close_errors}")
+            else:
+                self.logger.send("INFO", "Все ресурсы Playwright успешно закрыты")
 
         # --- Этап 2: обработка видео + качаем картинки с каруселью прокси ---
         async def download_image(url: str, proxy: str = None) -> Union[bytes, None]:
