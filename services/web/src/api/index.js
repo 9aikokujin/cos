@@ -5,14 +5,14 @@ import statistic from "./statistic";
 import video from "./video";
 
 export const instance = axios.create({
-  baseURL: "https://sn.dev-klick.cyou/api/v1",
+  baseURL: "https://cosmeya.dev-klick.cyou/api/v1",
   headers: {
     "Content-Type": "application/json",
   },
 });
 
 export const analiticInstance = axios.create({
-  baseURL: "https://analytics.sn.dev-klick.cyou/",
+  baseURL: "https://analytics.cosmeya.dev-klick.cyou/",
   headers: {
     "Content-Type": "application/json",
   },

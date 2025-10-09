@@ -238,7 +238,7 @@ class TikTokParser:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 files = {"file": (file_name, image_bytes, "image/jpeg")}
                 resp = await client.post(
-                    f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -251,7 +251,7 @@ class TikTokParser:
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
                     check_resp = await client.get(
-                        f"https://sn.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
+                        f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
                     )
                     video_id = None
                     is_new = False
@@ -262,7 +262,7 @@ class TikTokParser:
                         if videos:
                             video_id = videos[0]['id']
                             update_resp = await client.patch(
-                                f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}",
+                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                 json={"amount_views": video_data["amount_views"]}
                             )
                             update_resp.raise_for_status()
@@ -273,7 +273,7 @@ class TikTokParser:
 
                     if is_new:
                         create_resp = await client.post(
-                            "https://sn.dev-klick.cyou/api/v1/videos/",
+                            "https://cosmeya.dev-klick.cyou/api/v1/videos/",
                             json=video_data
                         )
                         create_resp.raise_for_status()
