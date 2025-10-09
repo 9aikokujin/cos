@@ -9,9 +9,9 @@ class ChannelRead(BaseModel):
     id: int
     type: ChannelType
     link: str
-    start_views: Optional[int] = 0
-    start_likes: Optional[int] = 0
-    start_comments: Optional[int] = 0
+    start_views: Optional[int]
+    start_likes: Optional[int]
+    start_comments: Optional[int]
 
     created_at: datetime
     updated_at: datetime
@@ -24,9 +24,9 @@ class ChannelCreate(BaseModel):
     type: ChannelType
     link: str
     name_channel: Optional[str] = None
-    start_views: Optional[int] = 0
-    start_likes: Optional[int] = 0
-    start_comments: Optional[int] = 0
+    start_views: Optional[int]
+    start_likes: Optional[int]
+    start_comments: Optional[int]
 
 
 class ChannelUpdate(BaseModel):

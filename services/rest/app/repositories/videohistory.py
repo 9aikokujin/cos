@@ -25,6 +25,8 @@ class VideoHistoryRepository:
         channel_type: Optional[str] = None,
         user_id: Optional[int] = None,
         article: Optional[str] = None,
+        date_published_to: Optional[datetime] = None,
+        date_published_from: Optional[datetime] = None,
     ):
         query = select(VideoHistory).join(VideoHistory.video)
 
@@ -52,6 +54,14 @@ class VideoHistoryRepository:
         if channel_type is not None:
             query = query.where(Channel.type == channel_type)
 
+        if date_published_to is not None:
+            query = query.where(
+                VideoHistory.date_published <= date_published_to)
+
+        if date_published_from is not None:
+            query = query.where(
+                VideoHistory.date_published >= date_published_from)
+
         current_user = User(id=user_id)
         if current_user.role == UserRole.USER:
             query = query.where(Channel.user_id == current_user.id)
@@ -69,6 +79,18 @@ class VideoHistoryRepository:
                                date_from: datetime) -> list[VideoHistory]:
         result = await self.db.execute(
             select(VideoHistory).where(VideoHistory.created_at >= date_from)
+        )
+        return result.scalars().all()
+
+    async def get_by_date_published_to(self, date_published_to: datetime) -> list[VideoHistory]:
+        result = await self.db.execute(
+            select(VideoHistory).where(VideoHistory.date_published <= date_published_to)
+        )
+        return result.scalars().all()
+
+    async def get_by_date_published_from(self, date_published_from: datetime) -> list[VideoHistory]:
+        result = await self.db.execute(
+            select(VideoHistory).where(VideoHistory.date_published >= date_published_from)
         )
         return result.scalars().all()
 
@@ -145,6 +167,8 @@ class VideoHistoryRepository:
         video_id: Optional[int] = None,
         channel_id: Optional[int] = None,
         channel_type: Optional[str] = None,
+        date_published_to: Optional[datetime] = None,
+        date_published_from: Optional[datetime] = None,
         user_id: Optional[int] = None,
         article: Optional[str] = None,
     ):
@@ -176,6 +200,14 @@ class VideoHistoryRepository:
 
         if date_from is not None:
             query = query.where(VideoHistory.created_at >= date_from)
+
+        if date_published_to is not None:
+            query = query.where(
+                VideoHistory.date_published <= date_published_to)
+
+        if date_published_from is not None:
+            query = query.where(
+                VideoHistory.date_published >= date_published_from)
 
         if user_id is not None:
             query = query.where(Channel.user_id == user_id)

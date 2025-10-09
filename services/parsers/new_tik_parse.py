@@ -1,15 +1,73 @@
 import asyncio
+from datetime import datetime, timezone
 import random
 import re
-from typing import List, Dict, Optional, Union
+from typing import Optional, Union
 from playwright.async_api import async_playwright
 import httpx
 
 
 class TikTokParser:
-    def __init__(self, proxy_list: list = None):
-        self.proxy_list = proxy_list or []
-        self.current_proxy_index = 0
+    def __init__(self):
+        pass
+
+    async def scroll_until(self, page, url: str, selector: str, delay: float = 3.0, max_idle_rounds: int = 5):
+        prev_count = 0
+        idle_rounds = 0
+        max_scroll_attempts = 3
+
+        for attempt in range(max_scroll_attempts):
+            print(f"INFO: Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
+
+            while True:
+                await page.evaluate("""
+                    async () => {
+                        return new Promise((resolve) => {
+                            let totalHeight = 0;
+                            const distance = 1000;
+                            const timer = setInterval(() => {
+                                const scrollHeight = document.body.scrollHeight;
+                                window.scrollBy(0, distance);
+                                totalHeight += distance;
+
+                                if (totalHeight >= scrollHeight) {
+                                    clearInterval(timer);
+                                    resolve();
+                                }
+                            }, 100);
+                        });
+                    }
+                """)
+
+                await page.wait_for_timeout(int(delay * 1000))
+
+                refresh_button = await page.query_selector('button.emuynwa3.css-z9i4la-Button-StyledButton.ehk74z00')
+                if refresh_button:
+                    print("INFO: Обнаружена кнопка 'Refresh'. Кликаем для перезагрузки страницы.")
+                    await refresh_button.click()
+                    await page.wait_for_timeout(3000)
+
+                current_count = await page.eval_on_selector_all(selector, "els => els.length")
+                print(f"INFO: Текущее количество элементов: {current_count}")
+
+                if current_count == prev_count:
+                    idle_rounds += 1
+                    if idle_rounds >= max_idle_rounds:
+                        print(f"INFO: Достигнут конец списка видео профиля {url}")
+                        print(f"INFO: Спарсил все видео в количестве {current_count}")
+                        break
+                else:
+                    idle_rounds = 0
+                    prev_count = current_count
+
+                is_at_bottom = await page.evaluate("""
+                    () => (window.innerHeight + window.scrollY) >= document.body.scrollHeight;
+                """)
+                if is_at_bottom and idle_rounds >= max_idle_rounds:
+                    print(f"INFO: Достигнут конец страницы для {url}")
+                    break
+
+        return prev_count
 
     async def get_proxy_config(self, proxy_str: str) -> Optional[dict]:
         try:
@@ -60,34 +118,34 @@ class TikTokParser:
                 print(f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
                 return None, str(e)
 
-    async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3):
-        # Извлекаем username из URL и убираем лишние пробелы
+    async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
+        proxy_list = proxy_list or []
+        current_proxy_index = 0
         url = url.strip()
         match = re.search(r"@([a-zA-Z0-9_.-]+)", url)
         if not match:
             raise ValueError(f"Не удалось извлечь username из URL: {url}")
         username = match.group(1)
 
-        proxy = random.choice(self.proxy_list) if self.proxy_list else None
+        proxy = random.choice(proxy_list) if proxy_list else None
         proxy_config = await self.get_proxy_config(proxy) if proxy else None
 
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False)
+            browser = await p.chromium.launch(
+                headless=False,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--start-maximized"
+                ],
+            )
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-                viewport={"width": 390, "height": 844},
+                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080},
                 proxy=proxy_config
             )
             page = await context.new_page()
 
-            # === Эвазия от детекта автоматизации ===
-            try:
-                from playwright_stealth import stealth_async
-                await stealth_async(page)
-            except ImportError:
-                print("⚠️ playwright_stealth не установлен. Рекомендуется установить: pip install playwright-stealth")
-
-            # === Сбор всех ответов от TikTok API ===
+            # === Перехват API-ответов ===
             tiktok_responses = []
 
             async def handle_response(response):
@@ -95,6 +153,7 @@ class TikTokParser:
                     try:
                         data = await response.json()
                         if data.get("itemList") is not None:
+                            print(f"📌 Захвачен API-ответ с {len(data['itemList'])} видео")
                             tiktok_responses.append(data)
                     except Exception as e:
                         print(f"❌ Ошибка парсинга ответа: {e}")
@@ -102,32 +161,56 @@ class TikTokParser:
             page.on("response", handle_response)
 
             print(f"🌐 Открываем профиль: {url} (username: {username})")
-            await page.goto(url, wait_until="networkidle", timeout=60000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            # Даём немного времени на завершение фоновых запросов
-            await asyncio.sleep(5)
+            # Проверка: не закрыт ли TikTok в регионе (например, Гонконг)
+            page_content = await page.content()
+            if "discontinued operating TikTok in Hong Kong" in page_content:
+                print("❌ TikTok недоступен в этом регионе (например, Гонконг). Пропускаем профиль.")
+                await browser.close()
+                return
 
-            # === Извлекаем данные из собранных ответов ===
+            # Ждём появления первого видео-элемента
+            try:
+                await page.wait_for_selector("div[id^='column-item-video-container-']", timeout=15000)
+            except Exception as e:
+                print(f"⚠️ Не удалось дождаться первого видео-элемента: {e}. Продолжаем без скролла.")
+            
+            await asyncio.sleep(3)
+
+            # 🚀 Скроллим до конца, чтобы загрузить все видео
+            print("⏳ Начинаем прокрутку страницы для загрузки всех видео...")
+            total_videos_count = await self.scroll_until(
+                page,
+                url,
+                selector="div[id^='column-item-video-container-']",
+                delay=2.5,
+                max_idle_rounds=4
+            )
+            print(f"✅ Прокрутка завершена. Обнаружено {total_videos_count} видео на странице.")
+
+            # Даём время на завершение последних API-запросов
+            await asyncio.sleep(3)
+
+            # === Сбор всех видео из всех API-ответов ===
             all_videos_data = []
-            has_more = False
-            cursor = "0"
 
-            if tiktok_responses:
-                # Берём последний (самый свежий) ответ
-                data = tiktok_responses[-1]
-                item_list = data.get("itemList", [])
-                has_more = data.get("hasMore", False)
-                cursor = data.get("cursor", "0")
-
-                print(f"📥 Получено {len(item_list)} видео (cursor={cursor}, hasMore={has_more})")
-
+            for response_data in tiktok_responses:
+                item_list = response_data.get("itemList", [])
                 for item in item_list:
                     video_id_str = str(item.get("id"))
                     stats = item.get("stats", {})
-                    # Обратите внимание: в вашем JSON cover находится в video.cover
                     video_info = item.get("video", {})
                     cover = video_info.get("cover") or video_info.get("dynamicCover") or video_info.get("originCover")
+                    create_time = item.get("createTime")
 
+                    if create_time:
+                        dt_utc = datetime.fromtimestamp(create_time, tz=timezone.utc)
+                        date_published = dt_utc.strftime('%Y-%m-%dT00:00:00')
+                    else:
+                        date_published = None
+
+                    # Исправлено: убраны лишние пробелы в ссылке
                     link = f"https://www.tiktok.com/@{username}/video/{video_id_str}"
 
                     all_videos_data.append({
@@ -138,14 +221,15 @@ class TikTokParser:
                         "amount_views": int(stats.get("playCount", 0)),
                         "amount_likes": int(stats.get("diggCount", 0)),
                         "amount_comments": int(stats.get("commentCount", 0)),
-                        "image_url": cover
+                        "image_url": cover,
+                        "date_published": date_published
                     })
-            else:
-                print("⚠️ Не найдено ни одного ответа от api/post/item_list/")
+
+            print(f"✅ Всего собрано {len(all_videos_data)} видео из {len(tiktok_responses)} API-запросов.")
 
             await browser.close()
 
-        # --- Этап 2 и 3 остаются без изменений ---
+        # --- Этап 2: Отправка данных в API ---
         processed_count = 0
         image_queue = []
 
@@ -170,7 +254,8 @@ class TikTokParser:
                                 json={
                                     "amount_views": video_data["amount_views"],
                                     "amount_likes": video_data["amount_likes"],
-                                    "amount_comments": video_data["amount_comments"]
+                                    "amount_comments": video_data["amount_comments"],
+                                    "date_published": video_data["date_published"]
                                 }
                             )
                             update_resp.raise_for_status()
@@ -196,14 +281,14 @@ class TikTokParser:
                 print(f"❌ Ошибка при обработке {video_data.get('link')}: {e}")
                 continue
 
-        # --- Этап 3: загрузка изображений с ротацией прокси ---
+        # --- Этап 3: Загрузка изображений с ротацией прокси ---
         idx = 0
         while idx < len(image_queue):
-            if not self.proxy_list:
+            if not proxy_list:
                 proxy = None
             else:
-                proxy = self.proxy_list[self.current_proxy_index]
-                self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxy_list)
+                proxy = proxy_list[current_proxy_index]
+                current_proxy_index = (current_proxy_index + 1) % len(proxy_list)
 
             batch = image_queue[idx: idx + 15]
             print(f"🌐 Прокси {proxy}: загружаем {len(batch)} изображений")
@@ -221,11 +306,12 @@ class TikTokParser:
 
             idx += 15
 
-            if idx < len(image_queue) and self.current_proxy_index == 0 and self.proxy_list:
+            if idx < len(image_queue) and current_proxy_index == 0 and proxy_list:
                 print("⏳ Все прокси исчерпаны. Ждём 60 секунд...")
                 await asyncio.sleep(60)
 
         print(f"✅ Успешно обработано {processed_count} видео")
+
 
 async def main():
     proxy_list = [
@@ -234,10 +320,11 @@ async def main():
         "EWQAQZdvRX:RfBJ5g7XCu@45.150.35.251:42181",
         "DXF9lzZUmM:tHzHG71cSJ@109.120.131.180:49057",
     ]
-    parser = TikTokParser(proxy_list=proxy_list)
-    url = "https://www.tiktok.com/@shura_urassai"
+    parser = TikTokParser()
+    url = "https://www.tiktok.com/@nastya.beomaa?_t=ZN-8zpTn99jMve&_r=1"
     user_id = 1
-    await parser.parse_channel(url, channel_id=1, user_id=user_id)
+    await parser.parse_channel(url, channel_id=9, user_id=user_id,
+                               proxy_list=proxy_list)
 
 if __name__ == "__main__":
     asyncio.run(main())

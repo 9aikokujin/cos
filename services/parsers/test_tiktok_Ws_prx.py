@@ -324,9 +324,9 @@ async def main():
         "RrBtY9EOET:NW311l4sNb@77.221.150.61:35966",
     ]
     parser = TikTokParser(proxy_list=proxy_list)
-    url = "https://www.tiktok.com/@s1rxszz"
+    url = "https://www.tiktok.com/@nastya.beomaa?_t=ZN-8zpTn99jMve&_r=1"
     user_id = 1
-    await parser.parse_channel(url, channel_id=30, user_id=user_id)
+    await parser.parse_channel(url, channel_id=5, user_id=user_id)
 
 if __name__ == "__main__":
     asyncio.run(main())

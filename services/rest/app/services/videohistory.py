@@ -25,6 +25,8 @@ class VideoHistoryService:
         user_id: Optional[int] = None,
         channel_id: Optional[int] = None,
         channel_type: Optional[ChannelType] = None,
+        date_published_to: Optional[dt_date] = None,
+        date_published_from: Optional[dt_date] = None,
         video_id: Optional[int] = None,
     ):
         # Если пользователь не админ, он видит только свою историю
@@ -39,6 +41,8 @@ class VideoHistoryService:
             user_id=user_id,
             channel_id=channel_id,
             channel_type=channel_type,
+            date_published_to=date_published_to,
+            date_published_from=date_published_from,
             video_id=video_id,
         )
 

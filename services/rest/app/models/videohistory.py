@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, ForeignKey
+from sqlalchemy import Column, Integer, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from app.core.db import Base
 from .timestamp import TimestampMixin
@@ -11,6 +11,7 @@ class VideoHistory(Base, TimestampMixin):
     amount_views = Column(Integer, nullable=False)
     amount_likes = Column(Integer, nullable=False)
     amount_comments = Column(Integer, nullable=False)
+    date_published = Column(DateTime, nullable=True)
 
     video_id = Column(ForeignKey("videos.id"), nullable=False, index=True)
 

@@ -599,7 +599,7 @@ class InstagramParser:
             except Exception as e:
                 print(f"❌ Ошибка загрузки превью {image_url} для видео {video_id}: {e}")
 
-        async def save_video_and_image(channel_id: int, reel_code: str, reel_url: str, play_count: int, image_url: str):
+        async def save_video_and_image(channel_id: int, reel_code: str, reel_url: str, play_count: int, image_url: str, date_published: str):
             video_data = {
                 "type": "instagram",
                 "channel_id": 5,
@@ -607,6 +607,7 @@ class InstagramParser:
                 "name": reel_code,
                 "amount_views": play_count,
                 "image_url": image_url,
+                "date_published": date_published
             }
             try:
                 async with httpx.AsyncClient(verify=False) as client:
@@ -677,7 +678,7 @@ class InstagramParser:
                         .get("candidates", [{}])[0]
                         .get("url")
                     )
-                    await save_video_and_image(channel_id, reel_code, reel_url, play_count, image_url)
+                    await save_video_and_image(channel_id, reel_code, reel_url, play_count, image_url, date_published)
 
                 # старый формат (graphql user.timeline_media)
                 media_edges = (
@@ -696,7 +697,7 @@ class InstagramParser:
                     reel_url = f"https://www.instagram.com/reel/{reel_code}/"
                     play_count = node.get("video_play_count", 0)
                     image_url = node.get("display_url")
-                    await save_video_and_image(channel_id, reel_code, reel_url, play_count, image_url)
+                    await save_video_and_image(channel_id, reel_code, reel_url, play_count, image_url, date_published)
 
                 if "play_count" in str(json_resp):
                     print(f"🎯 Нашли play_count в {url}")

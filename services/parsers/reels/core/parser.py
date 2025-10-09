@@ -7,7 +7,7 @@ from playwright_stealth import Stealth
 import httpx
 
 from utils.logger import TCPLogger
-
+# собирать юрл видосов, каждый открывать (только новые юрлы) брать оттуда дата создания видео
 
 class InstagramParser:
     def __init__(self, logger: TCPLogger):
@@ -526,6 +526,7 @@ class InstagramParser:
                 "name": reel_code,
                 "amount_views": play_count,
                 "image_url": image_url,
+                ""
             }
             try:
                 async with httpx.AsyncClient() as client:
