@@ -356,7 +356,7 @@ class ShortsParser:
                 files = {"file": (file_name, image_bytes, "image/jpeg")}
                 try:
                     resp = await client.post(
-                        f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                        f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                         files=files,
                     )
                     resp.raise_for_status()
@@ -375,7 +375,7 @@ class ShortsParser:
                 async with httpx.AsyncClient(timeout=20.0) as client:
                     self.logger.send("INFO", f"Проверка видео по ссылке: {video_data['link']}")
                     check_resp = await client.get(
-                        f"https://sn.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
+                        f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
                     )
                     video_id = None
                     is_new = False
@@ -387,7 +387,7 @@ class ShortsParser:
                             video_id = videos[0]['id']
                             self.logger.send("INFO", f"Видео уже существует, ID: {video_id}, обновляем просмотры")
                             update_resp = await client.patch(
-                                f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}",
+                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                 json={"amount_views": video_data["amount_views"]}
                             )
                             update_resp.raise_for_status()
@@ -399,7 +399,7 @@ class ShortsParser:
                     if is_new:
                         self.logger.send("INFO", f"Создаём новое видео: {video_data['name']}")
                         create_resp = await client.post(
-                            "https://sn.dev-klick.cyou/api/v1/videos/",
+                            "https://cosmeya.dev-klick.cyou/api/v1/videos/",
                             json=video_data
                         )
                         create_resp.raise_for_status()

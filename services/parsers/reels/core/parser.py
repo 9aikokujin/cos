@@ -15,7 +15,7 @@ class InstagramParser:
 
     async def deactivate_account_by_username(self, username: str):
         """Деактивирует аккаунт в локальной БД по username через API."""
-        api_base = "https://sn.dev-klick.cyou/api/v1/accounts"
+        api_base = "https://cosmeya.dev-klick.cyou/api/v1/accounts"
 
         async with httpx.AsyncClient() as client:
             try:
@@ -510,7 +510,7 @@ class InstagramParser:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     files = {"file": (file_name, image_bytes, "image/jpeg")}
                     resp = await client.post(
-                        f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                        f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                         files=files,
                     )
                     resp.raise_for_status()
@@ -530,7 +530,7 @@ class InstagramParser:
             try:
                 async with httpx.AsyncClient() as client:
                     check_resp = await client.get(
-                        f"https://sn.dev-klick.cyou/api/v1/videos/?link={reel_url}", timeout=20.0
+                        f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={reel_url}", timeout=20.0
                     )
                     video_id = None
                     is_new = False
@@ -547,7 +547,7 @@ class InstagramParser:
                             if existing_video.get('image') is None:
                                 # Если фото нет, обновляем просмотры и добавляем в очередь на скачивание фото
                                 update_resp = await client.patch(
-                                    f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}",
+                                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                     json={"amount_views": play_count},
                                     timeout=20.0
                                 )
@@ -561,7 +561,7 @@ class InstagramParser:
                             else:
                                 # Если фото есть, просто обновляем просмотры
                                 update_resp = await client.patch(
-                                    f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}",
+                                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                     json={"amount_views": play_count},
                                     timeout=20.0
                                 )
@@ -574,7 +574,7 @@ class InstagramParser:
 
                     if is_new:
                         resp = await client.post(
-                            "https://sn.dev-klick.cyou/api/v1/videos/",
+                            "https://cosmeya.dev-klick.cyou/api/v1/videos/",
                             json=video_data,
                             timeout=20.0,
                         )

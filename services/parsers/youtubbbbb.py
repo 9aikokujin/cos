@@ -317,7 +317,7 @@ class ShortsParser:
             files = {"file": (file_name, image_bytes, "image/jpeg")}
             try:
                 resp = await client.post(
-                    f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -329,7 +329,7 @@ class ShortsParser:
         link = data["link"]
         async with httpx.AsyncClient(timeout=20.0) as client:
             try:
-                check_resp = await client.get(f"https://sn.dev-klick.cyou/api/v1/videos/?link={link}")
+                check_resp = await client.get(f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={link}")
                 video_id = None
                 exists = False
 
@@ -351,10 +351,10 @@ class ShortsParser:
                 }
 
                 if exists:
-                    await client.patch(f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/", json=payload)
+                    await client.patch(f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/", json=payload)
                     print(f"Обновлено видео {video_id}")
                 else:
-                    resp = await client.post("https://sn.dev-klick.cyou/api/v1/videos/", json=payload)
+                    resp = await client.post("https://cosmeya.dev-klick.cyou/api/v1/videos/", json=payload)
                     video_id = resp.json().get("id")
                     print(f"Создано новое видео: {video_id}")
 

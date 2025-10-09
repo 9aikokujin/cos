@@ -4,9 +4,9 @@ services:
   # bot:
   #   build:
   #     context: ../../services/bot/
-  #   container_name: sn-bot
+  #   container_name: cos-bot
   #   environment:
-  #     RABBITMQ_URL: "amqp://${SN_RABBITMQ_USER}:${SN_RABBITMQ_PASSWORD}@rabbitmq/"
+  #     RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
   #     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
   #   depends_on:
   #     - rabbitmq
@@ -15,12 +15,12 @@ services:
   tiktok-parser:
     build:
       context: ../../services/parsers/tiktok/
-    container_name: sn-tiktok-parser
+    container_name: cos-tiktok-parser
     environment:
-      RABBITMQ_URL: "amqp://${SN_RABBITMQ_USER}:${SN_RABBITMQ_PASSWORD}@rabbitmq/"
+      RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
       CLICKHOUSE_URL: http://clickhouse:8123
-      LOGSTASH_HOST: ${SN_LOGSTASH_HOST}
-      LOGSTASH_PORT: ${SN_LOGSTASH_PORT}
+      LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+      LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
     depends_on:
       - postgres
       - rabbitmq
@@ -36,12 +36,12 @@ services:
   reels-parser:
     build:
       context: ../../services/parsers/reels/
-    container_name: sn-reels-parser
+    container_name: cos-reels-parser
     environment:
-      RABBITMQ_URL: "amqp://${SN_RABBITMQ_USER}:${SN_RABBITMQ_PASSWORD}@rabbitmq/"
+      RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
       CLICKHOUSE_URL: http://clickhouse:8123
-      LOGSTASH_HOST: ${SN_LOGSTASH_HOST}
-      LOGSTASH_PORT: ${SN_LOGSTASH_PORT}
+      LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+      LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
     depends_on:
       - postgres
       - rabbitmq
@@ -57,12 +57,12 @@ services:
   short-parser:
     build:
       context: ../../services/parsers/shorts/
-    container_name: sn-short-parser
+    container_name: cos-short-parser
     environment:
-      RABBITMQ_URL: "amqp://${SN_RABBITMQ_USER}:${SN_RABBITMQ_PASSWORD}@rabbitmq/"
+      RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
       CLICKHOUSE_URL: http://clickhouse:8123
-      LOGSTASH_HOST: ${SN_LOGSTASH_HOST}
-      LOGSTASH_PORT: ${SN_LOGSTASH_PORT}
+      LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+      LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
     depends_on:
       - postgres
       - rabbitmq
@@ -78,12 +78,12 @@ services:
   likee-parser:
     build:
       context: ../../services/parsers/likee/
-    container_name: sn-likee-parser
+    container_name: cos-likee-parser
     environment:
-      RABBITMQ_URL: "amqp://${SN_RABBITMQ_USER}:${SN_RABBITMQ_PASSWORD}@rabbitmq/"
+      RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
       CLICKHOUSE_URL: http://clickhouse:8123
-      LOGSTASH_HOST: ${SN_LOGSTASH_HOST}
-      LOGSTASH_PORT: ${SN_LOGSTASH_PORT}
+      LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
+      LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
     depends_on:
       - postgres
       - rabbitmq
@@ -99,7 +99,7 @@ services:
   # frontend:
   #   build:
   #     context: ../../services/web/
-  #   container_name: sn-frontend
+  #   container_name: cos-frontend
   #   # environment:
   #   #   VITE_API_URL: ${VITE_API_URL}
   #   ports:
@@ -110,23 +110,23 @@ services:
   rest-api:
     build:
       context: ../../services/rest/
-    container_name: ${SN_REST_API_CONTAINER}
+    container_name: ${COS_REST_API_CONTAINER}
     environment:
       DATABASE_URL: ${DATABASE_URL}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_ADMIN_ID: ${TELEGRAM_ADMIN_ID}
 
-      SN_POSTGRES_CONTAINER: ${SN_POSTGRES_CONTAINER}
-      SN_POSTGRES_PORT: ${SN_POSTGRES_PORT}
-      SN_POSTGRES_USER: ${SN_POSTGRES_USER}
-      SN_POSTGRES_DB: ${SN_POSTGRES_DB}
+      COS_POSTGRES_CONTAINER: ${COS_POSTGRES_CONTAINER}
+      COS_POSTGRES_PORT: ${COS_POSTGRES_PORT}
+      COS_POSTGRES_USER: ${COS_POSTGRES_USER}
+      COS_POSTGRES_DB: ${COS_POSTGRES_DB}
 
-      SN_LOGSTASH_PORT: ${SN_LOGSTASH_PORT}
-      SN_LOGSTASH_HOST: ${SN_LOGSTASH_HOST}
+      COS_LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
+      COS_LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
 
-      SN_RABBITMQ_USER: ${SN_RABBITMQ_USER}
-      SN_RABBITMQ_PASSWORD: ${SN_RABBITMQ_PASSWORD}
-      SN_RABBITMQ_HOST: ${SN_RABBITMQ_HOST}
+      COS_RABBITMQ_USER: ${COS_RABBITMQ_USER}
+      COS_RABBITMQ_PASSWORD: ${COS_RABBITMQ_PASSWORD}
+      COS_RABBITMQ_HOST: ${COS_RABBITMQ_HOST}
 
     ports:
       - "8005:8000"
@@ -134,27 +134,27 @@ services:
       - postgres
       - rabbitmq
     volumes:
-      - sn_uploads:/app/uploads
+      - cos_uploads:/app/uploads
     restart: always
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -f https://sn.dev-klick.cyou/docs# || exit 1"]
+      test: ["CMD-SHELL", "curl -f https://cosmeya.dev-klick.cyou/docs# || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   postgres:
     image: postgres:16
-    container_name: ${SN_POSTGRES_CONTAINER}
+    container_name: ${COS_POSTGRES_CONTAINER}
     restart: always
     environment:
-      POSTGRES_USER: ${SN_POSTGRES_USER}
-      POSTGRES_PASSWORD: ${SN_POSTGRES_PASSWORD}
-      POSTGRES_DB: ${SN_POSTGRES_DB}
+      POSTGRES_USER: ${COS_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${COS_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${COS_POSTGRES_DB}
     ports:
-      - "${SN_POSTGRES_PORT}:5432"
+      - "${COS_POSTGRES_PORT}:5432"
     volumes:
-      - sn_pg_data:/var/lib/postgresql/data
+      - cos_pg_data:/var/lib/postgresql/data
 
   # analytics-api:
   #   build:
@@ -173,31 +173,31 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: ${SN_RABBITMQ_CONTAINER}
+    container_name: ${COS_RABBITMQ_CONTAINER}
     restart: always
     environment:
-      RABBITMQ_DEFAULT_USER: ${SN_RABBITMQ_USER}
-      RABBITMQ_DEFAULT_PASS: ${SN_RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_USER: ${COS_RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${COS_RABBITMQ_PASSWORD}
     ports:
-      - "${SN_RABBITMQ_PORT}:5672"
-      - "${SN_RABBITMQ_MANAGEMENT_PORT}:15672"
+      - "${COS_RABBITMQ_PORT}:5672"
+      - "${COS_RABBITMQ_MANAGEMENT_PORT}:15672"
     volumes:
-      - sn_rabbitmq_data:/var/lib/rabbitmq
+      - cos_rabbitmq_data:/var/lib/rabbitmq
 
   # clickhouse:
   #   image: clickhouse/clickhouse-server:23.8
-  #   container_name: ${SN_CLICKHOUSE_CONTAINER}
+  #   container_name: ${COS_CLICKHOUSE_CONTAINER}
   #   restart: always
   #   ports:
-  #     - "${SN_CLICKHOUSE_PORT_HTTP}:8123"
-  #     - "${SN_CLICKHOUSE_PORT_NATIVE}:9000"
+  #     - "${COS_CLICKHOUSE_PORT_HTTP}:8123"
+  #     - "${COS_CLICKHOUSE_PORT_NATIVE}:9000"
   #   volumes:
-  #     - sn_clickhouse_data:/var/lib/clickhouse
-  #     - sn_clickhouse_logs:/var/log/clickhouse-server
+  #     - cos_clickhouse_data:/var/lib/clickhouse
+  #     - cos_clickhouse_logs:/var/log/clickhouse-server
 
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:7.8.1
-    container_name: ${SN_ELASTICSEARCH_CONTAINER}
+    container_name: ${COS_ELASTICSEARCH_CONTAINER}
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
@@ -210,18 +210,18 @@ services:
     mem_limit: 4g
     mem_reservation: 3g
     ports:
-      - "${SN_ELASTICSEARCH_PORT}:9200"
+      - "${COS_ELASTICSEARCH_PORT}:9200"
     volumes:
-      - sn_es_data:/usr/share/elasticsearch/data
+      - cos_es_data:/usr/share/elasticsearch/data
     restart: always
 
   kibana:
     image: docker.elastic.co/kibana/kibana:7.8.1
-    container_name: ${SN_KIBANA_CONTAINER}
+    container_name: ${COS_KIBANA_CONTAINER}
     depends_on:
       - elasticsearch
     ports:
-      - "${SN_KIBANA_PORT}:5601"
+      - "${COS_KIBANA_PORT}:5601"
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=elastic
@@ -230,11 +230,11 @@ services:
 
   logstash:
     image: docker.elastic.co/logstash/logstash:7.8.1
-    container_name: ${SN_LOGSTASH_CONTAINER}
+    container_name: ${COS_LOGSTASH_CONTAINER}
     depends_on:
       - elasticsearch
     ports:
-      - "${SN_LOGSTASH_PORT}:5044"
+      - "${COS_LOGSTASH_PORT}:5044"
     environment:
       - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
       - xpack.monitoring.enabled=false
@@ -251,16 +251,16 @@ services:
           hosts => ["http://elasticsearch:9200"]
           user => "elastic"
           password => "${ELASTIC_PASSWORD}"
-          index => "sn-logs"
+          index => "cos-logs"
         }
         stdout { codec => rubydebug }
       }'
     restart: always
 
 volumes:
-  sn_pg_data:
-  sn_rabbitmq_data:
-  # sn_clickhouse_data:
-  # sn_clickhouse_logs:
-  sn_es_data:
-  sn_uploads:
+  cos_pg_data:
+  cos_rabbitmq_data:
+  # cos_clickhouse_data:
+  # cos_clickhouse_logs:
+  cos_es_data:
+  cos_uploads:

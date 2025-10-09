@@ -1,0 +1,55 @@
+name: CI/CD
+on:
+  push:
+    branches:
+      - master
+jobs:
+  build-test:
+    name: Server Deployment
+    runs-on: ubuntu-latest
+    env:
+      COS_POSTGRES_USER: ${{ secrets.COS_POSTGRES_USER }}
+      COS_POSTGRES_PASSWORD: ${{ secrets.COS_POSTGRES_PASSWORD }}
+      COS_POSTGRES_DB: ${{ secrets.COS_POSTGRES_DB }}
+      COS_POSTGRES_PORT: ${{ secrets.COS_POSTGRES_PORT }}
+      COS_POSTGRES_CONTAINER: ${{ secrets.COS_POSTGRES_CONTAINER }}
+      COS_RABBITMQ_USER: ${{ secrets.COS_RABBITMQ_USER }}
+      COS_RABBITMQ_PASSWORD: ${{ secrets.COS_RABBITMQ_PASSWORD }}
+      COS_RABBITMQ_PORT: ${{ secrets.COS_RABBITMQ_PORT }}
+      COS_RABBITMQ_MANAGEMENT_PORT: ${{ secrets.COS_RABBITMQ_MANAGEMENT_PORT }}
+      COS_RABBITMQ_CONTAINER: ${{ secrets.COS_RABBITMQ_CONTAINER }}
+      COS_RABBITMQ_HOST: ${{ secrets.COS_RABBITMQ_HOST }}
+      COS_CLICKHOUSE_PORT_HTTP: ${{ secrets.COS_CLICKHOUSE_PORT_HTTP }}
+      COS_CLICKHOUSE_PORT_NATIVE: ${{ secrets.COS_CLICKHOUSE_PORT_NATIVE }}
+      COS_CLICKHOUSE_CONTAINER: ${{ secrets.COS_CLICKHOUSE_CONTAINER }}
+      COS_ELASTICSEARCH_PORT: ${{ secrets.COS_ELASTICSEARCH_PORT }}
+      COS_ELASTICSEARCH_CONTAINER: ${{ secrets.COS_ELASTICSEARCH_CONTAINER }}
+      ELASTIC_PASSWORD: ${{ secrets.ELASTIC_PASSWORD }}
+      COS_KIBANA_PORT: ${{ secrets.COS_KIBANA_PORT }}
+      COS_KIBANA_CONTAINER: ${{ secrets.COS_KIBANA_CONTAINER }}
+      KIBANA_PASSWORD: ${{ secrets.KIBANA_PASSWORD }}
+      COS_LOGSTASH_PORT: ${{ secrets.COS_LOGSTASH_PORT }}
+      COS_LOGSTASH_CONTAINER: ${{ secrets.COS_LOGSTASH_CONTAINER }}
+      COS_LOGSTASH_HOST: ${{ secrets.COS_LOGSTASH_HOST }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      COS_REST_API_CONTAINER: ${{ secrets.COS_REST_API_CONTAINER }}
+      TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
+
+    steps:
+      - name: Set up Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Navigate to infra/production
+        run: cd infra/production
+
+      - name: Run Docker Compose
+        run: |
+          cd infra/production
+          docker-compose down || true
+          docker-compose up -d --build
