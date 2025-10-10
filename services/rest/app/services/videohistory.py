@@ -64,7 +64,7 @@ class VideoHistoryService:
             raise ValueError("Ошибка при создании истории")
         return video_history
 
-    async def get_aggregated_views_by_date(
+    async def get_aggregated_views_by_date_art(
         self,
         user: User,
         **filters
@@ -73,7 +73,18 @@ class VideoHistoryService:
         if user.role == UserRole.USER:
             filters["user_id"] = user.id
 
-        return await self.repo.get_aggregated_by_date(**filters)
+        return await self.repo.get_aggregated_by_date_art(**filters)
+
+    async def get_aggregated_views_by_date_all(
+        self,
+        user: User,
+        **filters
+    ):
+        # Если пользователь — не админ, добавляем фильтр по его user_id
+        if user.role == UserRole.USER:
+            filters["user_id"] = user.id
+
+        return await self.repo.get_aggregated_by_date_all(**filters)
 
     async def get_video_stats_for_csv(
         self,
@@ -164,19 +175,79 @@ class VideoHistoryService:
 
         subq = (
             select(
-                func.date(VideoHistory.created_at).label("view_date"),
+                func.date(VideoHistory.date_published).label("view_date"),
                 VideoHistory.video_id
             )
             .distinct()
             .join(Videos, VideoHistory.video_id == Videos.id)
             .where(Videos.article.isnot(None))
+            .where(VideoHistory.date_published.isnot(None))
         )
 
         if date_from is not None:
-            subq = subq.where(VideoHistory.created_at >= date_from)
+            subq = subq.where(VideoHistory.date_published >= date_from)
         if date_to is not None:
             subq = subq.where(
-                VideoHistory.created_at <= date_to + timedelta(days=1))
+                VideoHistory.date_published < date_to + timedelta(days=1)
+            )
+
+        if channel_id is not None:
+            subq = subq.where(Videos.channel_id == channel_id)
+        if article is not None:
+            subq = subq.where(Videos.article == article)
+
+        subq = subq.join(Channel, Videos.channel_id == Channel.id)
+        if user_id is not None:
+            subq = subq.where(Channel.user_id == user_id)
+        if channel_type is not None:
+            subq = subq.where(Channel.type == channel_type)
+
+        subq = subq.subquery()
+
+        query = (
+            select(
+                subq.c.view_date.label("date"),
+                func.count(subq.c.video_id).label("video_count")
+            )
+            .group_by(subq.c.view_date)
+            .order_by(subq.c.view_date)
+        )
+
+        result = await self.repo.db.execute(query)
+        rows = result.all()
+
+        return [
+            DailyVideoCount(date=row.date, video_count=row.video_count)
+            for row in rows
+        ]
+
+    async def get_daily_video_count_all(
+        self,
+        date_from: Optional[dt_date] = None,
+        date_to: Optional[dt_date] = None,
+        channel_id: Optional[int] = None,
+        channel_type: Optional[str] = None,
+        user_id: Optional[int] = None,
+        article: Optional[str] = None,
+    ) -> List[DailyVideoCount]:
+
+        subq = (
+            select(
+                func.date(VideoHistory.date_published).label("view_date"),
+                VideoHistory.video_id
+            )
+            .distinct()
+            .join(Videos, VideoHistory.video_id == Videos.id)
+            .where(VideoHistory.date_published.isnot(None))
+        )
+
+        if date_from is not None:
+            subq = subq.where(VideoHistory.date_published >= date_from)
+        if date_to is not None:
+            subq = subq.where(
+                VideoHistory.date_published < date_to + timedelta(days=1)
+            )
+
         if channel_id is not None:
             subq = subq.where(Videos.channel_id == channel_id)
         if article is not None:

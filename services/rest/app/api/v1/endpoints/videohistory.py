@@ -32,8 +32,8 @@ async def get_all_video_history(
     return result
 
 
-@router.get("/filtered_stats")
-async def get_filtered_history(
+@router.get("/filtered_stats_art")
+async def get_filtered_history_with_article(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
     params: HistoryParams = Depends(),
     db: AsyncSession = Depends(get_db),
@@ -41,14 +41,30 @@ async def get_filtered_history(
     service = VideoHistoryService(db)
 
     # Возвращаем агрегированные данные по датам
-    result = await service.get_aggregated_views_by_date(
+    result = await service.get_aggregated_views_by_date_art(
         user=user,
         **params.model_dump()
     )
     return result
 
 
-@router.get("/daily-article-count")
+@router.get("/filtered_stats_all")
+async def get_filtered_history_all(
+    user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
+    params: HistoryParams = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VideoHistoryService(db)
+
+    # Возвращаем агрегированные данные по датам
+    result = await service.get_aggregated_views_by_date_all(
+        user=user,
+        **params.model_dump()
+    )
+    return result
+
+
+@router.get("/daily_article_count")
 async def daily_video_with_article_count(
     date_from: Optional[dt_date] = Query(None),
     date_to: Optional[dt_date] = Query(None),
@@ -75,7 +91,34 @@ async def daily_video_with_article_count(
     ]
 
 
-@router.get("/download-stats-csv")
+@router.get("/daily_count_all")
+async def daily_video_count_all(
+    date_from: Optional[dt_date] = Query(None),
+    date_to: Optional[dt_date] = Query(None),
+    channel_id: Optional[int] = Query(None),
+    channel_type: Optional[str] = Query(None),
+    user_id: Optional[int] = Query(None),
+    article: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    service = VideoHistoryService(db)
+
+    result = await service.get_daily_video_count_all(
+        date_from=date_from,
+        date_to=date_to,
+        channel_id=channel_id,
+        channel_type=channel_type,
+        user_id=user_id,
+        article=article,
+    )
+
+    return [
+        {"date": r.date.isoformat(), "video_count": r.video_count}
+        for r in result
+    ]
+
+
+@router.get("/download_stats_csv")
 async def download_video_stats_csv(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
     channel_type: Optional[str] = Query(None, description="youtube, tiktok, instagram, likee"),

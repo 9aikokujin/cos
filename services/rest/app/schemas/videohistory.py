@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing_extensions import Optional
+from typing_extensions import Optional, List
 from datetime import datetime
 
 
@@ -31,6 +31,7 @@ class HistoryParams(BaseModel):
     channel_id: Optional[int] = None
     channel_type: Optional[str] = None
     user_id: Optional[int] = None
+    articles: Optional[List[str]] = None
     date_published_to: Optional[datetime] = None
     date_published_from: Optional[datetime] = None
 

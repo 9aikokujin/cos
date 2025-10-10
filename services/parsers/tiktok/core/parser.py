@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 import re
+from urllib.parse import urlparse
 import httpx
 import random
 from typing import Union, Optional
@@ -17,9 +18,10 @@ class TikTokParser:
         prev_count = 0
         idle_rounds = 0
         max_scroll_attempts = 3
+        final_count = 0
 
         for attempt in range(max_scroll_attempts):
-            self.logger.send("INFO", f"INFO: Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
+            self.logger.send("INFO", f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
 
             while True:
                 await page.evaluate("""
@@ -45,18 +47,19 @@ class TikTokParser:
 
                 refresh_button = await page.query_selector('button.emuynwa3.css-z9i4la-Button-StyledButton.ehk74z00')
                 if refresh_button:
-                    self.logger.send("INFO", "INFO: Обнаружена кнопка 'Refresh'. Кликаем для перезагрузки страницы.")
+                    self.logger.send("INFO", "Обнаружена кнопка 'Refresh'. Кликаем для перезагрузки страницы.")
                     await refresh_button.click()
                     await page.wait_for_timeout(3000)
 
                 current_count = await page.eval_on_selector_all(selector, "els => els.length")
-                self.logger.send("INFO", f"INFO: Текущее количество элементов: {current_count}")
+                self.logger.send("INFO", f"Текущее количество элементов: {current_count}")
 
                 if current_count == prev_count:
                     idle_rounds += 1
                     if idle_rounds >= max_idle_rounds:
-                        self.logger.send("INFO", f"INFO: Достигнут конец списка видео профиля {url}")
-                        self.logger.send("INFO", f"INFO: Спарсил все видео в количестве {current_count}")
+                        self.logger.send("INFO", f"Достигнут конец списка видео профиля {url}")
+                        self.logger.send("INFO", f"Спарсил все видео в количестве {current_count}")
+                        final_count = current_count
                         break
                 else:
                     idle_rounds = 0
@@ -66,10 +69,30 @@ class TikTokParser:
                     () => (window.innerHeight + window.scrollY) >= document.body.scrollHeight;
                 """)
                 if is_at_bottom and idle_rounds >= max_idle_rounds:
-                    self.logger.send("INFO", f"INFO: Достигнут конец страницы для {url}")
+                    self.logger.send("INFO", f"Достигнут конец страницы для {url}")
+                    final_count = current_count
                     break
 
-        return prev_count
+        # 🔍 Проверка: если после всех попыток количество видео не выросло — сохраняем HTML
+        if final_count == 0:
+            # На всякий случай получим текущее количество
+            final_count = await page.eval_on_selector_all(selector, "els => els.length")
+
+        if final_count == prev_count and final_count > 0:
+            self.logger.send("WARNING", "ℹ️ Количество видео не изменилось после всех попыток прокрутки. Сохраняем HTML страницы.")
+            try:
+                html_content = await page.content()
+                # Генерируем имя файла: безопасное из URL
+                parsed = urlparse(url)
+                safe_name = parsed.path.strip("/").replace("@", "_").replace("/", "_")
+                filename = f"tiktok_profile_{safe_name}_{int(asyncio.get_event_loop().time())}.html"
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+                self.logger.send("INFO", f"✅ HTML сохранён в файл: {filename}")
+            except Exception as e:
+                self.logger.send("ERROR", f"❌ Ошибка при сохранении HTML: {e}")
+
+        return final_count
 
     async def get_proxy_config(self, proxy_str: str) -> Optional[dict]:
         try:
@@ -111,7 +134,7 @@ class TikTokParser:
             files = {"file": (file_name, image_bytes, "image/jpeg")}
             try:
                 resp = await client.post(
-                    f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                    f"http://127.0.0.1:8000/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -143,7 +166,6 @@ class TikTokParser:
         proxy = random.choice(proxy_list) if proxy_list else None
         proxy_config = await self.get_proxy_config(proxy) if proxy else None
 
-        # === Объявляем ресурсы заранее для корректного закрытия ===
         playwright = None
         browser = None
         context = None
@@ -152,10 +174,15 @@ class TikTokParser:
         try:
             playwright = await async_playwright().start()
             browser = await playwright.chromium.launch(
-                headless=True,
+                headless=False,
                 args=[
+                    "--headless=new",
                     "--disable-blink-features=AutomationControlled",
-                    "--start-maximized"
+                    "--start-maximized",
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--window-size=1920,1080"
                 ],
             )
             context = await browser.new_context(
@@ -163,69 +190,76 @@ class TikTokParser:
                 viewport={"width": 1920, "height": 1080},
                 proxy=proxy_config
             )
+            # print(f"PROXYYYYYYYYY {proxy_config}")
             page = await context.new_page()
-
-            # === Перехват API-ответов ===
-            tiktok_responses = []
-
-            async def handle_response(response):
-                if "api/post/item_list/" in response.url and response.status == 200:
-                    try:
-                        data = await response.json()
-                        if data.get("itemList") is not None:
-                            self.logger.send("INFO", f"📌 Захвачен API-ответ с {len(data['itemList'])} видео")
-                            tiktok_responses.append(data)
-                    except Exception as e:
-                        self.logger.send("ERROR", f"❌ Ошибка парсинга ответа: {e}")
-
-            page.on("response", handle_response)
+            from playwright_stealth import stealth_sync
+            stealth_sync(page)
 
             self.logger.send("INFO", f"🌐 Открываем профиль: {url} (username: {username})")
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            # Ждём появления первого видео-элемента
             try:
                 await page.wait_for_selector("div[id^='column-item-video-container-']", timeout=15000)
             except Exception as e:
-                self.logger.send("ERROR", f"⚠️ Не удалось дождаться первого видео-элемента: {e}. Продолжаем без скролла.")
+                self.logger.send("ERROR", f"⚠️ Не удалось дождаться первого видео-элемента: {e}")
 
             await asyncio.sleep(3)
 
-            # 🚀 Скроллим до конца, чтобы загрузить все видео
-            self.logger.send("INFO", "⏳ Начинаем прокрутку страницы для загрузки всех видео...")
+            # 🚀 Шаг 1. Скроллим до конца
+            self.logger.send("INFO", "⏳ Скроллим страницу до самого низа...")
             total_videos_count = await self.scroll_until(
                 page,
                 url,
                 selector="div[id^='column-item-video-container-']",
                 delay=2.5,
-                max_idle_rounds=4
+                max_idle_rounds=5
             )
-            self.logger.send("INFO", f"✅ Прокрутка завершена. Обнаружено {total_videos_count} видео на странице.")
+            self.logger.send("INFO", f"✅ Скролл завершён. DOM содержит {total_videos_count} видео. Подгружаем API-ответы...")
 
-            # Даём время на завершение последних API-запросов
-            await asyncio.sleep(3)
+            # 🚀 Шаг 2. Перехватываем API после прогрузки контента
+            tiktok_responses = []
 
-            # === Сбор всех видео из всех API-ответов ===
+            async def handle_response(response):
+                if "/api/post/item_list/" in response.url:
+                    try:
+                        data = await response.json()
+                        if data.get("itemList"):
+                            tiktok_responses.append(data)
+                            self.logger.send("INFO", f"📥 +{len(data['itemList'])} видео (всего: {sum(len(r['itemList']) for r in tiktok_responses)})")
+                    except:
+                        pass
+
+            page.on("response", handle_response)
+
+            # Теперь скроллим МЕДЛЕННО и ЖДЁМ загрузки
+            await self.scroll_until(page, url, selector="...", delay=4.0, max_idle_rounds=3)
+
+            # 🚀 Шаг 3. Мягко обновляем страницу, чтобы TikTok вызвал item_list запросы заново
+            # self.logger.send("INFO", "🔄 Обновляем страницу для сбора всех item_list...")
+            # await page.reload(wait_until="networkidle", timeout=60000)
+            await asyncio.sleep(10)  # подождать пока все lazy-загрузки отработают
+
+            self.logger.send("INFO", f"✅ Собрано {len(tiktok_responses)} item_list ответов.")
+
+            # 🚀 Шаг 4. Собираем видео из всех ответов
             all_videos_data = []
+            seen_ids = set()
 
             for response_data in tiktok_responses:
-                item_list = response_data.get("itemList", [])
-                for item in item_list:
-                    video_id_str = str(item.get("id"))
+                for item in response_data.get("itemList", []):
+                    vid = str(item.get("id"))
+                    if vid in seen_ids:
+                        continue
+                    seen_ids.add(vid)
                     stats = item.get("stats", {})
                     video_info = item.get("video", {})
                     cover = video_info.get("cover") or video_info.get("dynamicCover") or video_info.get("originCover")
-                    create_time = item.get("createTime")
-                    description = video_info.get("desc")
-                    video_title = self.generate_short_title(description, max_length=30)
+                    desc = item.get("desc") or ""
+                    video_title = self.generate_short_title(desc, 30)
+                    link = f"https://www.tiktok.com/@{username}/video/{vid}"
 
-                    if create_time:
-                        dt_utc = datetime.fromtimestamp(create_time, tz=timezone.utc)
-                        date_published = dt_utc.strftime('%Y-%m-%dT00:00:00')
-                    else:
-                        date_published = None
-
-                    link = f"https://www.tiktok.com/@{username}/video/{video_id_str}"
+                    ts = item.get("createTime")
+                    date_published = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT00:00:00") if ts else None
 
                     all_videos_data.append({
                         "type": "tiktok",
@@ -239,63 +273,40 @@ class TikTokParser:
                         "date_published": date_published
                     })
 
-            self.logger.send("INFO", f"✅ Всего собрано {len(all_videos_data)} видео из {len(tiktok_responses)} API-запросов.")
+            self.logger.send("INFO", f"🎯 Всего собрано {len(all_videos_data)} уникальных видео из {len(tiktok_responses)} ответов.")
 
-        except Exception as main_error:
-            self.logger.send("ERROR", f"Критическая ошибка при парсинге профиля {url}: {main_error}")
-            raise
+        except Exception as e:
+            self.logger.send("ERROR", f"❌ Критическая ошибка при парсинге {url}: {e}")
 
         finally:
-            # === Корректное закрытие ресурсов ===
-            close_errors = []
-            if page:
-                try:
-                    await page.close()
-                except Exception as e:
-                    close_errors.append(f"page.close(): {e}")
-            if context:
-                try:
-                    await context.close()
-                except Exception as e:
-                    close_errors.append(f"context.close(): {e}")
-            if browser:
-                try:
-                    await browser.close()
-                except Exception as e:
-                    close_errors.append(f"browser.close(): {e}")
-            if playwright:
-                try:
-                    await playwright.stop()
-                except Exception as e:
-                    close_errors.append(f"playwright.stop(): {e}")
+            # Закрытие ресурсов
+            for obj, name in [(page, "page"), (context, "context"), (browser, "browser"), (playwright, "playwright")]:
+                if obj:
+                    try:
+                        await obj.close() if hasattr(obj, "close") else await obj.stop()
+                    except Exception as e:
+                        self.logger.send("ERROR", f"⚠️ Ошибка при закрытии {name}: {e}")
+            self.logger.send("INFO", "✅ Все ресурсы Playwright закрыты корректно")
 
-            if close_errors:
-                self.logger.send("WARNING", f"Ошибки при закрытии ресурсов Playwright: {close_errors}")
-            else:
-                self.logger.send("INFO", "✅ Все ресурсы Playwright корректно закрыты")
-
-        # --- Этап 2: Отправка данных в API ---
+        # --- Отправка данных ---
         processed_count = 0
         image_queue = []
 
         for video_data in all_videos_data:
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
-                    self.logger.send("INFO", f"Проверка видео: {video_data['link']}")
-                    check_resp = await client.get(
-                        f"https://sn.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
-                    )
-                    video_id = None
+                    self.logger.send("INFO", f"🔍 Проверка видео: {video_data['link']}")
+                    check_resp = await client.get(f"http://127.0.0.1:8000/api/v1/videos/?link={video_data['link']}")
                     is_new = False
+                    video_id = None
 
                     if check_resp.status_code == 200:
-                        result = check_resp.json()
-                        videos = result.get("videos", [])
-                        if videos:
-                            video_id = videos[0]['id']
-                            self.logger.send("INFO", f"Видео уже существует (ID: {video_id}), обновляем статистику")
-                            update_resp = await client.patch(
-                                f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}",
+                        res = check_resp.json()
+                        vids = res.get("videos", [])
+                        if vids:
+                            video_id = vids[0]['id']
+                            await client.patch(
+                                f"http://127.0.0.1:8000/api/v1/videos/{video_id}",
                                 json={
                                     "amount_views": video_data["amount_views"],
                                     "amount_likes": video_data["amount_likes"],
@@ -303,56 +314,39 @@ class TikTokParser:
                                     "date_published": video_data["date_published"]
                                 }
                             )
-                            update_resp.raise_for_status()
                         else:
                             is_new = True
                     else:
                         is_new = True
 
                     if is_new:
-                        self.logger.send("INFO", f"Создаём новое видео: {video_data['name']}")
-                        create_resp = await client.post(
-                            "https://sn.dev-klick.cyou/api/v1/videos/",
-                            json=video_data
-                        )
-                        create_resp.raise_for_status()
-                        video_id = create_resp.json()['id']
-                        self.logger.send("INFO", f"✅ Создано видео с ID: {video_id}")
+                        resp = await client.post("http://127.0.0.1:8000/api/v1/videos/", json=video_data)
+                        resp.raise_for_status()
+                        video_id = resp.json()["id"]
+                        self.logger.send("INFO", f"✅ Создано новое видео {video_id}")
                         if video_data.get("image_url"):
                             image_queue.append((video_id, video_data["image_url"]))
-                            self.logger.send("INFO", f"🖼️ Добавлено изображение в очередь: {video_data['image_url']}")
                 processed_count += 1
             except Exception as e:
-                self.logger.send("ERROR", f"❌ Ошибка при обработке {video_data.get('link')}: {e}")
-                continue
+                self.logger.send("ERROR", f"⚠️ Ошибка при обработке {video_data.get('link')}: {e}")
 
-        # --- Этап 3: Загрузка изображений с ротацией прокси ---
+        self.logger.send("INFO", f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
+
+        # --- Загрузка изображений ---
         idx = 0
         while idx < len(image_queue):
-            if not proxy_list:
-                proxy = None
-            else:
-                proxy = proxy_list[current_proxy_index]
-                current_proxy_index = (current_proxy_index + 1) % len(proxy_list)
+            proxy = proxy_list[current_proxy_index] if proxy_list else None
+            current_proxy_index = (current_proxy_index + 1) % len(proxy_list) if proxy_list else 0
+            batch = image_queue[idx:idx + 15]
+            self.logger.send("INFO", f"🖼️ Загружаем {len(batch)} изображений через {proxy or 'без прокси'}")
 
-            batch = image_queue[idx: idx + 15]
-            self.logger.send("INFO", f"🌐 Прокси {proxy}: загружаем {len(batch)} изображений")
-
-            for video_id, image_url in batch:
+            for vid, img_url in batch:
                 try:
-                    status, resp_text = await self.upload_image(video_id, image_url, proxy=proxy)
-                    if status == 200:
-                        self.logger.send("INFO", f"✅ Фото для видео {video_id} загружено")
-                    else:
-                        self.logger.send("ERROR", f"⚠️ Ошибка загрузки фото для видео {video_id}: статус {status}")
+                    status, _ = await self.upload_image(vid, img_url, proxy=proxy)
+                    self.logger.send("INFO", f"{'✅' if status == 200 else '⚠️'} Фото для видео {vid} → статус {status}")
                 except Exception as e:
-                    self.logger.send("ERROR", f"❌ Исключение при загрузке фото для {video_id}: {e}")
-                await asyncio.sleep(4.0)
-
+                    self.logger.send("ERROR", f"❌ Ошибка загрузки фото {vid}: {e}")
+                await asyncio.sleep(3.0)
             idx += 15
 
-            if idx < len(image_queue) and current_proxy_index == 0 and proxy_list:
-                self.logger.send("WARNING", "⏳ Все прокси исчерпаны. Ждём 60 секунд...")
-                await asyncio.sleep(60)
-
-        self.logger.send("INFO", f"✅ Успешно обработано {processed_count} видео")
+        self.logger.send("INFO", f"🎉 Парсинг завершён: {processed_count} видео обработано.")

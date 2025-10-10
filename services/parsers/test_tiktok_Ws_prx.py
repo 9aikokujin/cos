@@ -48,6 +48,24 @@ class TikTokParser:
                     return caption[start:start + len(tag)]
         return None
 
+    async def simulate_user_interaction(page):
+        """Эмулирует действия пользователя: случайные движения мыши и задержки."""
+        try:
+            # Случайное движение мыши в пределах видимой области
+            await page.mouse.move(
+                random.randint(100, 1000),
+                random.randint(100, 800)
+            )
+            await page.wait_for_timeout(random.randint(500, 1500))
+
+            # Случайный скролл на небольшое расстояние
+            await page.evaluate("window.scrollBy(0, 100)")
+            await page.wait_for_timeout(random.randint(300, 1000))
+
+            print("INFO: Выполнена эмуляция пользовательского поведения")
+        except Exception as e:
+            print(f"ERROR: Ошибка при эмуляции поведения: {e}")
+
     async def scroll_until(self, page, url: str, selector: str, delay: float = 3.0, max_idle_rounds: int = 5):
         prev_count = 0
         idle_rounds = 0
@@ -133,7 +151,7 @@ class TikTokParser:
             proxy_config = await get_proxy_config(proxy_str) if proxy_str else None
             p = await async_playwright().start()
             browser = await p.chromium.launch(
-                headless=False,
+                headless=True,
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--start-maximized"
@@ -188,7 +206,7 @@ class TikTokParser:
                                 "channel_id": channel_id,
                                 "link": video_url,
                                 "name": video_title,
-                                "article": article,
+                                # "article": article,
                                 "amount_views": views,
                                 "image_url": img_url
                             })
@@ -317,16 +335,27 @@ class TikTokParser:
 
 async def main():
     proxy_list = [
-        "mGACNmVTQp:xcdWpe44dU@77.221.150.170:63969",
-        "sAH2j6St9i:qdImpC6Lum@77.221.150.171:31388",
-        "cP1EN6Kf8l:A7tZYPTOYF@77.221.150.31:26441",
-        "0VREPcE2A4:eHe9c7lQ76@77.221.150.190:60507",
-        "RrBtY9EOET:NW311l4sNb@77.221.150.61:35966",
+        "iuZKi4BGyp:vHKtDTzA0z@45.150.35.98:24730",
+        "QgSnMzKNDg:rQR6PpWyH6@45.150.35.140:37495",
+        # "nGzc2Uw9o1:IOEIP5yqHF@45.150.35.72:30523",
+        "ljpOi6p4wE:AzWMnGcwT9@45.150.35.75:56674",
+        "mpiv4PCpJG:oFct8hLGU3@109.120.131.51:52137",
+        "BnpDZPR6sd:dIciqNGo7d@45.150.35.97:51776",
+        "3fNux7Ul42:pkfkTaLi9D@109.120.131.31:59895",
+        # "dnyqkeZB92:y38H1PzPef@45.150.35.28:27472",
+        "udWhRyA0GU:laqpdeslpC@45.150.35.225:22532",
+        "qMGdKOcu0w:MfeGgg0Dh9@45.150.35.205:23070",
+        "cpeFm6Dh5x:bQXTp4e1gf@45.150.35.111:22684",
+        "K6dlqo2Xbn:KJ7TE9kPO7@45.150.35.51:49586",
+        "db2JltFuja:8MItiT5T12@45.150.35.10:58894",
+        "79zEDvbAVA:xJBsip0IQK@45.150.35.4:58129",
+        "mBQnv9UCPd:e3VkzkB9p5@45.150.35.74:55101",
+        "IDWsfoHdf1:z6d3r0tnzM@45.150.35.244:42679",
     ]
     parser = TikTokParser(proxy_list=proxy_list)
     url = "https://www.tiktok.com/@nastya.beomaa?_t=ZN-8zpTn99jMve&_r=1"
     user_id = 1
-    await parser.parse_channel(url, channel_id=5, user_id=user_id)
+    await parser.parse_channel(url, channel_id=1, user_id=user_id)
 
 if __name__ == "__main__":
     asyncio.run(main())
