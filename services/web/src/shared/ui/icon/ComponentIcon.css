@@ -1,0 +1,64 @@
+.component-icon {
+    display: inline-block;
+    vertical-align: middle;
+    transition: opacity 0.2s ease-in-out;
+    cursor: pointer;
+  }
+  
+  /* размеры (можно подстроить под свой дизайн) */
+  .component-icon--sm {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .component-icon--md {
+    width: 24px;
+    height: 24px;
+  }
+  
+  .component-icon--lg {
+    width: 32px;
+    height: 32px;
+  }
+  
+  .component-icon--xl {
+    width: 48px;
+    height: 48px;
+  }
+  
+  /* loader (анимация мигания) */
+  .component-icon__loader {
+    display: inline-block;
+    background-color: #e0e0e0;
+    border-radius: 50%;
+    animation: component-icon-pulse 1.2s ease-in-out infinite;
+  }
+  
+  /* размеры лоадера совпадают с размерами иконки */
+  .component-icon__loader.component-icon--sm {
+    width: 16px;
+    height: 16px;
+  }
+  .component-icon__loader.component-icon--md {
+    width: 24px;
+    height: 24px;
+  }
+  .component-icon__loader.component-icon--lg {
+    width: 32px;
+    height: 32px;
+  }
+  .component-icon__loader.component-icon--xl {
+    width: 48px;
+    height: 48px;
+  }
+  
+  /* keyframes для мигания */
+  @keyframes component-icon-pulse {
+    0%, 100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  
