@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import API from "@/app/api";
 import { useModalStore } from "@/app/store/modal/store";
 
 import { ButtonIcon, Button } from "@/shared/ui/button/Button";
@@ -51,22 +52,26 @@ const SettingsSocial = ({ data }) => {
     setSocialsData((prev) => prev.filter((item) => item.type !== type));
   };
 
-  const handleSubmitAll = () => {
-    const fullData = {
+  const handleSubmitAll = async () => {
+    const registerData = {
       username: data.username,
       fullname: data.fullname,
       first_name: data.first_name,
       last_name: data.last_name,
-      socials: socialsData.map((s) => ({
-        type: s.type,
-        link: s.link,
-        start_views: Number(s.start_views) || 0,
-        start_likes: Number(s.start_likes) || 0,
-        start_comments: Number(s.start_comments) || 0,
-      })),
+      nickname: "",
     };
 
-    console.log("🚀 Финальные данные для отправки:", fullData);
+    const socialsArray = data.socials.map((s) => ({
+      type: s.type,
+      link: s.link,
+      start_views: Number(s.start_views) || 0,
+      start_likes: Number(s.start_likes) || 0,
+      start_comments: Number(s.start_comments) || 0,
+    }));
+
+    await API.auth.register(registerData);
+    await Promise.all(socialsArray.map((social) => API.account.createAccount(social)));
+
     closeModal();
   };
   return (
@@ -78,9 +83,7 @@ const SettingsSocial = ({ data }) => {
             <div className="social_name _flex_sb">
               <p className="_name">{s.type}</p>
               <div className="_flex" style={{ gap: 10 }}>
-              {s.saved ? (
-                  <ButtonIcon name="edit" onClick={() => handleEdit(s.type)} />
-                ) : null}
+                {s.saved ? <ButtonIcon name="edit" onClick={() => handleEdit(s.type)} /> : null}
                 <ButtonIcon name="trash" onClick={() => handleDelete(s.type)} />
               </div>
             </div>
