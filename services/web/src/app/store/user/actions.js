@@ -4,7 +4,7 @@ export const createAuthActions = (set, get) => ({
   register: async (data) => {
     set({ isLoading: true });
     try {
-      const response = await API.auth.register(data, token);
+      const response = await API.auth.register(data);
       set({ user: response, isAuthenticated: true });
       return { success: true, user: response };
     } catch (err) {
@@ -30,7 +30,7 @@ export const createAuthActions = (set, get) => ({
     try {
       const response = await API.auth.authTG();
       if (response.status) {
-        set({ user: response, userTG: user, isAuthenticated: true });
+        set({ user: response, userTG: user, isAuthenticated: response.status });
       } else {
         set({ userTG: user });
       }
