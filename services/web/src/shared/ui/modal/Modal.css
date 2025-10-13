@@ -1,0 +1,42 @@
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  z-index: 1000;
+}
+
+.modal-overlay.blur {
+  backdrop-filter: blur(6px);
+  align-items: center;
+}
+
+.modal-bottom {
+  position: relative;
+  background: #fff;
+  width: 100%;
+  max-width: 800px;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+}
+
+.modal-center {
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.modal_close_btn {
+  position: absolute;
+  top: 31px;
+  right: 20px;
+  width: 10px;
+  height: 10px;
+  z-index: 10;
+}
