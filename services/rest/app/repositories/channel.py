@@ -107,7 +107,10 @@ class ChannelRepository:
             type=dto.type,
             link=dto.link,
             name_channel=channel_name,
-            user_id=user_id
+            user_id=user_id,
+            start_views=dto.start_views,
+            start_likes=dto.start_likes,
+            start_comments=dto.start_comments
         )
 
         self.db.add(channel)

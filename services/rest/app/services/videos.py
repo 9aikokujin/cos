@@ -123,6 +123,7 @@ class VideosService:
                 name=dto.name,
                 image=dto.image,
                 article=dto.article,
+                # date_published=dto.date_published,
                 # amount_views=dto.amount_views,
                 # amount_likes=dto.amount_likes,
                 # amount_comments=dto.amount_comments
@@ -141,7 +142,8 @@ class VideosService:
             video_id=video.id,
             amount_views=dto.amount_views,
             amount_likes=dto.amount_likes,
-            amount_comments=dto.amount_comments
+            amount_comments=dto.amount_comments,
+            date_published=dto.date_published
         )
         await self.history_service.create(history_dto)
 

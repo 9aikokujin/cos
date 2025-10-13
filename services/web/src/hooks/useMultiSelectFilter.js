@@ -1,0 +1,35 @@
+import { useState, useEffect, useRef } from "react";
+import { useFiltersModalStore } from "@/app/store/filterModal/store";
+
+export const useMultiSelectFilter = (applyLabel = "Применить", onApply) => {
+  const setFooter = useFiltersModalStore((s) => s.setFooter);
+  const close = useFiltersModalStore((s) => s.close);
+
+  const [selected, setSelected] = useState([]);
+  const selectedRef = useRef(selected);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  const toggleSelect = (id) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  };
+
+  const handleApply = () => {
+    const current = selectedRef.current;
+    if (onApply) onApply(current);
+    console.log("✅ Выбранные элементы:", current);
+    close();
+  };
+
+  useEffect(() => {
+    setFooter({
+      text: applyLabel,
+      visible: true,
+      onClick: handleApply,
+    });
+  }, []);
+
+  return { selected, toggleSelect };
+};

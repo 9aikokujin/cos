@@ -7,7 +7,7 @@ from playwright_stealth import Stealth
 import httpx
 
 from utils.logger import TCPLogger
-
+# собирать юрл видосов, каждый открывать (только новые юрлы) брать оттуда дата создания видео
 
 class InstagramParser:
     def __init__(self, logger: TCPLogger):
@@ -343,6 +343,19 @@ class InstagramParser:
 
         return list(reel_data)
 
+    def extract_article_tag(self, caption: str) -> str | None:
+        """Возвращает первый найденный артикул-хештег (#sv, #jw и т.д.) или None."""
+        if not caption:
+            return None
+        caption_lower = caption.lower()
+        for tag in ["#sv", "#jw", "#qz", "#sr", "#fg"]:
+            if tag in caption_lower:
+                # Найти точное написание в оригинале (сохранить регистр)
+                start = caption_lower.find(tag)
+                if start != -1:
+                    return caption[start:start + len(tag)]
+        return None
+
     async def parse_channel(self, url: str, channel_id: int, user_id: int,
                             max_retries: int = 3, proxy_list: list = None,
                             accounts: list = None):
@@ -399,7 +412,7 @@ class InstagramParser:
             return browser, context, page
 
         async def safe_close_all():
-            """Безопасное закрытие всех ресурсов (Playwright >= 1.46 совместимо)"""
+            """Безопасное закрытие всех ресурсов"""
             self.is_closing = True
             close_errors = []
 
@@ -518,14 +531,19 @@ class InstagramParser:
             except Exception as e:
                 self.logger.send("ERROR", f"❌ Ошибка загрузки превью {video_id}: {e}")
 
-        async def save_video_and_image(channel_id: int, reel_code: str, reel_url: str, play_count: int, image_url: str):
+        async def save_video_and_image(channel_id: int, reel_code: str, reel_url: str,
+                                       play_count: int, like_count: int, comment_count: int,
+                                       image_url: str, article: str):
             video_data = {
                 "type": "instagram",
                 "channel_id": channel_id,
                 "link": reel_url,
                 "name": reel_code,
                 "amount_views": play_count,
+                "amount_likes": like_count,
+                "amount_comments": comment_count,
                 "image_url": image_url,
+                "article": article
             }
             try:
                 async with httpx.AsyncClient() as client:
@@ -614,10 +632,12 @@ class InstagramParser:
                 reel_code = media.get("code")
                 reel_url = f"https://www.instagram.com/reel/{reel_code}/"
                 play_count = media.get("play_count", 0)
+                like_count = media.get("like_count", 0)
+                comment_count = media.get("comment_count", 0)
                 image_url = (
                     media.get("image_versions2", {}).get("candidates", [{}])[0].get("url")
                 )
-                await save_video_and_image(channel_id, reel_code, reel_url, play_count, image_url)
+                await save_video_and_image(channel_id, reel_code, reel_url, play_count, like_count, comment_count, image_url, article)
 
             media_edges = (
                 json_resp.get("user", {}).get("edge_owner_to_timeline_media", {}).get("edges", [])
@@ -628,6 +648,7 @@ class InstagramParser:
                     continue
                 reel_code = node.get("shortcode")
                 reel_url = f"https://www.instagram.com/reel/{reel_code}/"
+
                 play_count = node.get("video_play_count", 0)
                 image_url = node.get("display_url")
                 await save_video_and_image(channel_id, reel_code, reel_url, play_count, image_url)

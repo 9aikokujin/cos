@@ -4,6 +4,7 @@ import httpx
 from typing import Union, List, Dict, Optional
 from playwright.async_api import async_playwright
 import random
+import json
 
 # переписать без логгера
 
@@ -176,11 +177,19 @@ class ShortsParser:
         p = await async_playwright().start()
         browser = await p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"],
+            args=[
+                "--headless=new",
+                "--disable-blink-features=AutomationControlled",
+                "--start-maximized",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1920,1080"
+            ],
         )
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 390, "height": 844},
+            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080},
             proxy=proxy_config
         )
         return browser, context
@@ -196,104 +205,198 @@ class ShortsParser:
         }
 
         try:
-            # Лайки
-            like_el = await page.query_selector('factoid-renderer:has-text("Отметки \\"Нравится\\"") .ytwFactoidRendererValue .yt-core-attributed-string')
-            likes_text = await like_el.inner_text() if like_el else "0"
-            metrics["likes"] = self.parse_number(likes_text)
+            # Получаем полный HTML
+            content = await page.content()
+
+            # Ищем ytInitialPlayerResponse
+            match = re.search(r'var ytInitialPlayerResponse\s*=\s*({.*?});', content, re.DOTALL)
+            if not match:
+                print("⚠️ ytInitialPlayerResponse не найден")
+                return metrics
+
+            player_response = json.loads(match.group(1))
+            video_details = player_response.get("videoDetails", {})
 
             # Название
-            title_el = await page.query_selector('#title yt-formatted-string')
-            full_title = await title_el.inner_text() if title_el else ""
-            metrics["name"] = self.generate_short_title(full_title)
+            full_title = video_details.get("title", "")
+            metrics["name"] = full_title
+            print("название:", repr(full_title))
 
-            # Артикул
-            article = self.extract_article_tag(full_title)
-            metrics["article"] = article
+            # Артикулы
+            if full_title:
+                found_tags = []
+                caption_lower = full_title.lower()
+                for tag in ["#sv", "#jw", "#qz", "#sr", "#fg"]:
+                    if tag in caption_lower:
+                        start = full_title.lower().find(tag)
+                        if start != -1:
+                            original_tag = full_title[start:start + len(tag)]
+                            found_tags.append(original_tag)
+                metrics["article"] = ",".join(found_tags) if found_tags else None
+            print("артикулы:", metrics["article"])
 
-            # Просмотры
-            view_el = await page.query_selector('view-count-factoid-renderer .ytwFactoidRendererValue .yt-core-attributed-string')
-            views_text = await view_el.inner_text() if view_el else "0"
-            metrics["views"] = self.parse_number(views_text)
+            # Просмотры и лайки
+            try:
+                metrics["views"] = int(video_details.get("viewCount", "0"))
+            except (ValueError, TypeError):
+                metrics["views"] = 0
 
-            # Комментарии
-            comment_el = await page.query_selector('#comments-button .yt-spec-button-shape-with-label__label .yt-core-attributed-string')
-            comments_text = await comment_el.inner_text() if comment_el else "0"
-            metrics["comments"] = self.parse_number(comments_text)
+            try:
+                metrics["likes"] = int(video_details.get("likeCount", "0"))
+            except (ValueError, TypeError):
+                metrics["likes"] = 0
 
-            # Превью
-            img_el = await page.query_selector("ytm-reel-player-renderer img[src*='http']")
-            if img_el:
-                src = await img_el.get_attribute("src")
-                if src:
-                    metrics["image_url"] = src.split("?")[0]
+            print("просмотры:", metrics["views"])
+            print("лайки:", metrics["likes"])
+
+            # Комментарии — ищем в ytInitialData
+            comments_match = re.search(r'var ytInitialData\s*=\s*({.*?});', content, re.DOTALL)
+            if comments_match:
+                try:
+                    initial_data = json.loads(comments_match.group(1))
+                    # Путь к комментариям может быть разным, но часто:
+                    # contents.twoColumnWatchNextResults.results.results.contents[2].itemSectionRenderer.contents[0].commentsEntryPointHeaderRenderer.commentCount
+                    
+                    def find_comment_count(obj):
+                        if isinstance(obj, dict):
+                            if "commentCount" in obj and isinstance(obj["commentCount"], dict):
+                                count_text = obj["commentCount"].get("simpleText", "0")
+                                return self.parse_number(count_text)
+                            for v in obj.values():
+                                res = find_comment_count(v)
+                                if res is not None:
+                                    return res
+                        elif isinstance(obj, list):
+                            for item in obj:
+                                res = find_comment_count(item)
+                                if res is not None:
+                                    return res
+                        return None
+
+                    comment_count = find_comment_count(initial_data)
+                    if comment_count is not None:
+                        metrics["comments"] = comment_count
+                except Exception as e:
+                    print(f"Ошибка при поиске комментариев в ytInitialData: {e}")
+
+            print("комментарии:", metrics["comments"])
+
+            # Изображение
+            thumbnail = video_details.get("thumbnail", {}).get("thumbnails")
+            if thumbnail and isinstance(thumbnail, list):
+                # Берём самый большой
+                img_url = max(thumbnail, key=lambda x: x.get("width", 0)).get("url")
+                if img_url:
+                    metrics["image_url"] = img_url.split("?")[0]
+            else:
+                # fallback на стандартный URL
+                video_id = video_details.get("videoId", "")
+                if video_id:
+                    metrics["image_url"] = f"https://i.ytimg.com/vi/{video_id}/maxresdefault.jpg"
+
+            print("изображение:", metrics["image_url"])
 
         except Exception as e:
-            print(f"Ошибка извлечения метрик и изображения: {e}")
+            print(f"❌ Ошибка извлечения из JSON: {e}")
 
         return metrics
 
-    async def collect_short_urls(self, url: str, proxy: Optional[str]) -> List[str]:
-        browser, context = await self.create_context_with_proxy(proxy)
-        page = await context.new_page()
-        short_urls = []
-        try:
-            clean_url = url.rstrip()
-            if not clean_url.endswith('/shorts'):
-                clean_url = clean_url.rstrip('/') + '/shorts'
-            await page.goto(clean_url, wait_until="networkidle", timeout=60000)
+    # async def collect_short_urls(self, url: str, proxy: Optional[str]) -> List[str]:
+    #     browser, context = await self.create_context_with_proxy(proxy)
+    #     page = await context.new_page()
+    #     short_urls = []
+    #     try:
+    #         clean_url = url.rstrip()
+    #         if not clean_url.endswith('/shorts'):
+    #             clean_url = clean_url.rstrip('/') + '/shorts'
+    #         await page.goto(clean_url, wait_until="networkidle", timeout=60000)
 
-            # Куки
-            try:
-                accept_btn = await page.query_selector("button[aria-label='Accept all']")
-                if accept_btn:
-                    await accept_btn.click()
-                    await page.wait_for_timeout(2000)
-            except Exception as e:
-                print(f"Ошибка принятия куки: {e}")
+    #         # Куки
+    #         try:
+    #             await page.evaluate("""
+    #                 async () => {
+    #                     return new Promise((resolve) => {
+    #                         const distance = 1000;
+    #                         const timer = setInterval(() => {
+    #                             window.scrollBy(0, distance);
+    #                             if (document.body.scrollHeight - window.scrollY <= window.innerHeight + 100) {
+    #                                 clearInterval(timer);
+    #                                 resolve();
+    #                             }
+    #                         }, 100);
+    #                     });
+    #                 }
+    #             """)
+    #             accept_btn = await page.query_selector('button[jsname="b3VHJd"]')
+    #             if accept_btn:
+    #                 try:
+    #                     # Принудительный клик через JS
+    #                     await page.evaluate("button => button.click()", accept_btn)
+    #                     print("✅ Куки приняты через JavaScript")
+    #                     await page.wait_for_timeout(2000)
+    #                 except Exception as e:
+    #                     print(f"⚠️ Ошибка JS-клика: {e}")
+    #             else:
+    #                 print("ℹ️ Кнопка 'Accept all' не найдена в DOM")
+    #         except Exception as e:
+    #             print(f"❌ Ошибка при принятии кук: {e}")
 
-            selector = "ytm-shorts-lockup-view-model"
-            await self.scroll_until(page, clean_url, selector=selector, delay=4.0)
+    #         selector = "ytm-shorts-lockup-view-model"
+    #         await self.scroll_until(page, clean_url, selector=selector, delay=4.0)
 
-            videos = await page.query_selector_all(selector)
-            for video in videos:
-                link_el = await video.query_selector("a.shortsLockupViewModelHostEndpoint")
-                href = await link_el.get_attribute("href") if link_el else None
-                if href:
-                    full_url = f"https://www.youtube.com{href}"
-                    short_urls.append(full_url)
-                    print(f"Собран URL: {full_url}")
-        finally:
-            await browser.close()
-        return short_urls
+    #         videos = await page.query_selector_all(selector)
+    #         for video in videos:
+    #             link_el = await video.query_selector("a.shortsLockupViewModelHostEndpoint")
+    #             href = await link_el.get_attribute("href") if link_el else None
+    #             if href:
+    #                 full_url = f"https://www.youtube.com{href}"
+    #                 short_urls.append(full_url)
+    #                 print(f"Собран URL: {full_url}")
+    #     finally:
+    #         await browser.close()
+    #     return short_urls
 
-    async def process_short_pair(self, urls: List[str], proxy: Optional[str]) -> List[Dict]:
-        browser, context = await self.create_context_with_proxy(proxy)
-        results = []
-        try:
-            pages = []
-            for url in urls[:2]:
-                page = await context.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                pages.append((page, url))
+    # async def process_short_pair(self, urls: List[str], proxy: Optional[str]) -> List[Dict]:
+    #     browser, context = await self.create_context_with_proxy(proxy)
+    #     results = []
+    #     try:
+    #         pages = []
+    #         for url in urls[:2]:
+    #             page = await context.new_page()
+    #             await page.goto(url, wait_until="networkidle", timeout=30000)
 
-            for page, url in pages:
-                metrics = await self.extract_metrics_from_short_page(page)
-                results.append({
-                    "link": url,
-                    "amount_views": metrics["views"],
-                    "likes": metrics["likes"],
-                    "comments": metrics["comments"],
-                    "article": metrics["article"],
-                    "image_url": metrics["image_url"],
-                    "name": metrics["name"]
-                })
-                print(f"Метрики для {url}: {metrics}")
-        except Exception as e:
-            print(f"Ошибка при обработке пары {urls}: {e}")
-            results = []
-        finally:
-            await context.close()
-        return results
+    #             # >>> ДОБАВЛЕНО: Принятие кук на странице шортса <<<
+    #             accept_btn = await page.query_selector('button[jsname="b3VHJd"]')
+    #             if accept_btn:
+    #                 try:
+    #                     await page.evaluate("button => button.click()", accept_btn)
+    #                     print("✅ Куки на шортсе приняты через JavaScript")
+    #                     await page.wait_for_timeout(2000)
+    #                 except Exception as e:
+    #                     print(f"⚠️ Ошибка JS-клика на шортсе: {e}")
+    #             else:
+    #                 print("ℹ️ Баннер кук на шортсе не обнаружен")
+
+    #             pages.append((page, url))
+
+    #         for page, url in pages:
+    #             metrics = await self.extract_metrics_from_short_page(page)
+    #             results.append({
+    #                 "link": url,
+    #                 "amount_views": metrics["views"],
+    #                 "likes": metrics["likes"],
+    #                 "comments": metrics["comments"],
+    #                 "article": metrics["article"],
+    #                 "image_url": metrics["image_url"],
+    #                 "name": metrics["name"]
+    #             })
+    #             print(f"Метрики для {url}: {metrics}")
+    #     except Exception as e:
+    #         print(f"Ошибка при обработке пары {urls}: {e}")
+    #         results = []
+    #     finally:
+    #         await context.close()
+    #     return results
 
     async def download_image(self, url: str) -> Optional[bytes]:
         try:
@@ -365,61 +468,149 @@ class ShortsParser:
             except Exception as e:
                 print(f"Ошибка отправки в API для {link}: {e}")
 
+    async def parse_shorts_by_scrolling(self, base_url: str, channel_id: int, proxy: Optional[str]):
+        browser, context = await self.create_context_with_proxy(proxy)
+        page = await context.new_page()
+
+        try:
+            clean_url = base_url.rstrip('/')
+            if not clean_url.endswith('/shorts'):
+                clean_url += '/shorts'
+            print(f"Открываем: {clean_url}")
+            await page.goto(clean_url, wait_until="networkidle", timeout=60000)
+
+            # Принимаем куки
+            accept_btn = await page.query_selector('button[jsname="b3VHJd"]')
+            if accept_btn:
+                try:
+                    await page.evaluate("button => button.click()", accept_btn)
+                    print("✅ Куки приняты")
+                    await page.wait_for_timeout(2000)
+                except Exception as e:
+                    print(f"⚠️ Ошибка клика по кукам: {e}")
+
+            processed = 0
+            while True:
+                # Ждём загрузки текущего шортса
+                await page.wait_for_timeout(3000)
+
+                # Извлекаем данные из HTML
+                metrics = await self.extract_metrics_from_short_page(page)
+                current_url = await page.url()
+                if metrics["name"]:
+                    data = {
+                        "link": current_url,
+                        "amount_views": metrics["views"],
+                        "likes": metrics["likes"],
+                        "comments": metrics["comments"],
+                        "article": metrics["article"],
+                        "image_url": metrics["image_url"],
+                        "name": metrics["name"]
+                    }
+                    await self.send_to_api(data, channel_id)
+                    processed += 1
+                    print(f"✅ Обработано видео #{processed}")
+
+                # Ждём 10 секунд перед листанием
+                await page.wait_for_timeout(10000)
+
+                # Проверяем, есть ли кнопка "следующее видео"
+                next_button = await page.query_selector('yt-spec-button-shape-next[aria-label*="next"], yt-spec-button-shape-next[aria-label*="следующ"]')
+                if not next_button:
+                    print("❌ Кнопка 'следующее видео' не найдена — достигнут конец")
+                    break
+
+                # Листаем вниз (имитация свайпа)
+                try:
+                    await page.mouse.wheel(0, 500)  # прокрутка колёсиком
+                    # ИЛИ:
+                    # await page.keyboard.press("ArrowDown")
+                except Exception as e:
+                    print(f"⚠️ Ошибка при листании: {e}")
+                    break
+
+                # Ждём загрузки следующего видео
+                await page.wait_for_timeout(2000)
+
+        except Exception as e:
+            print(f"❌ Ошибка при листании: {e}")
+        finally:
+            await browser.close()
+
+    # async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
+    #     self.proxy_list = proxy_list or []
+    #     clean_base_url = url.strip().rstrip('/')
+    #     if not clean_base_url.endswith('/shorts'):
+    #         clean_base_url += '/shorts'
+    #     print(f"Начало парсинга канала: {clean_base_url}")
+
+    #     # Шаг 1: Сбор URL
+    #     initial_proxy = random.choice(self.proxy_list) if self.proxy_list else None
+    #     short_urls = await self.collect_short_urls(clean_base_url, initial_proxy)
+    #     print(f"Всего собрано Shorts: {len(short_urls)}")
+
+    #     if not short_urls:
+    #         print("Не найдено ни одного Shorts")
+    #         return
+
+    #     # Шаг 2: Обработка парами
+    #     for i in range(0, len(short_urls), 2):
+    #         batch = short_urls[i:i+2]
+    #         success = False
+
+    #         for attempt in range(max_retries):
+    #             current_proxy = self.proxy_list[self.current_proxy_index] if self.proxy_list else None
+    #             print(f"Обработка пары {i//2 + 1}: {batch} через прокси {current_proxy} (попытка {attempt+1})")
+
+    #             metrics_list = await self.process_short_pair(batch, current_proxy)
+    #             if metrics_list:
+    #                 success = True
+    #                 for data in metrics_list:
+    #                     await self.send_to_api(data, channel_id)
+    #                 break
+    #             else:
+    #                 if self.proxy_list:
+    #                     self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxy_list)
+    #                 await asyncio.sleep(2)
+
+    #         if not success:
+    #             print(f"Не удалось обработать пару: {batch}")
+
+    #         # Смена прокси после обработки (даже успешной)
+    #         if self.proxy_list:
+    #             self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxy_list)
+
+    #     print("✅ Парсинг завершён")
+
     async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
         self.proxy_list = proxy_list or []
         clean_base_url = url.strip().rstrip('/')
-        if not clean_base_url.endswith('/shorts'):
-            clean_base_url += '/shorts'
         print(f"Начало парсинга канала: {clean_base_url}")
 
-        # Шаг 1: Сбор URL
-        initial_proxy = random.choice(self.proxy_list) if self.proxy_list else None
-        short_urls = await self.collect_short_urls(clean_base_url, initial_proxy)
-        print(f"Всего собрано Shorts: {len(short_urls)}")
-
-        if not short_urls:
-            print("Не найдено ни одного Shorts")
-            return
-
-        # Шаг 2: Обработка парами
-        for i in range(0, len(short_urls), 2):
-            batch = short_urls[i:i+2]
-            success = False
-
-            for attempt in range(max_retries):
-                current_proxy = self.proxy_list[self.current_proxy_index] if self.proxy_list else None
-                print(f"Обработка пары {i//2 + 1}: {batch} через прокси {current_proxy} (попытка {attempt+1})")
-
-                metrics_list = await self.process_short_pair(batch, current_proxy)
-                if metrics_list:
-                    success = True
-                    for data in metrics_list:
-                        await self.send_to_api(data, channel_id)
-                    break
-                else:
-                    if self.proxy_list:
-                        self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxy_list)
-                    await asyncio.sleep(2)
-
-            if not success:
-                print(f"Не удалось обработать пару: {batch}")
-
-            # Смена прокси после обработки (даже успешной)
-            if self.proxy_list:
-                self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxy_list)
+        proxy = random.choice(self.proxy_list) if self.proxy_list else None
+        await self.parse_shorts_by_scrolling(clean_base_url, channel_id, proxy)
 
         print("✅ Парсинг завершён")
 
 
 async def main():
     proxy_list = [
-        "dCO5hGtkW5:fasW1uvQ7l@45.150.35.46:55676",
-        "Q75n20a1UE:47t7aEhBfc@45.150.35.81:53274",
-        "Q1uPaCjVjZ:fbAyEPHr2H@45.150.35.31:52694",
-        "tiBQYiUvbR:eMEejf37Ah@45.150.35.160:58245",
-        "99GbD8h45V:j8wANJPW91@109.120.131.167:26928",
-        "Kwmxx66N8A:9X8rVKfoGy@45.150.35.244:28304",
-        "XN1u5Cj7QT:7KsZyBgXFx@45.150.35.37:32891"
+        "iuZKi4BGyp:vHKtDTzA0z@45.150.35.98:24730",
+        "QgSnMzKNDg:rQR6PpWyH6@45.150.35.140:37495",
+        "nGzc2Uw9o1:IOEIP5yqHF@45.150.35.72:30523",
+        "ljpOi6p4wE:AzWMnGcwT9@45.150.35.75:56674",
+        "mpiv4PCpJG:oFct8hLGU3@109.120.131.51:52137",
+        "BnpDZPR6sd:dIciqNGo7d@45.150.35.97:51776",
+        "3fNux7Ul42:pkfkTaLi9D@109.120.131.31:59895",
+        "dnyqkeZB92:y38H1PzPef@45.150.35.28:27472",
+        "udWhRyA0GU:laqpdeslpC@45.150.35.225:22532",
+        "qMGdKOcu0w:MfeGgg0Dh9@45.150.35.205:23070",
+        "cpeFm6Dh5x:bQXTp4e1gf@45.150.35.111:22684",
+        "K6dlqo2Xbn:KJ7TE9kPO7@45.150.35.51:49586",
+        "db2JltFuja:8MItiT5T12@45.150.35.10:58894",
+        "79zEDvbAVA:xJBsip0IQK@45.150.35.4:58129",
+        "mBQnv9UCPd:e3VkzkB9p5@45.150.35.74:55101",
+        "IDWsfoHdf1:z6d3r0tnzM@45.150.35.244:42679",
     ]
     parser = ShortsParser()
     url = "https://www.youtube.com/@kotokrabs"

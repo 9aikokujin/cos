@@ -40,7 +40,7 @@ services:
   #     LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
   #   depends_on:
   #     - postgres
-  #     - rabbitmq
+  #     # - rabbitmq
   #     # - analytics-api
   #     # - clickhouse
   #     # - elasticsearch
@@ -112,9 +112,9 @@ services:
       # - rabbitmq
       - analytics-api
       - clickhouse
-      - elasticsearch
-      - kibana
-      - logstash
+      # - elasticsearch
+      # - kibana
+      # - logstash
     volumes:
       - cos_uploads:/app/uploads
     restart: always
@@ -171,65 +171,71 @@ services:
       - cos_clickhouse_data:/var/lib/clickhouse
       - cos_clickhouse_logs:/var/log/clickhouse-server
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.8.1
-    container_name: ${COS_ELASTICSEARCH_CONTAINER}
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=$ELASTIC_PASSWORD
-      - ES_JAVA_OPTS=-Xmx2g -Xms2g
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    ports:
-      - "${COS_ELASTICSEARCH_PORT}:9200"
-    volumes:
-      - cos_es_data:/usr/share/elasticsearch/data
-    restart: always
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:7.17.26
+  #   container_name: ${COS_ELASTICSEARCH_CONTAINER}
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=true
+  #     - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+  #     - ES_JAVA_OPTS=-Xms512m -Xmx512m
+  #     - node.store.allow_mmap=false
+  #     - bootstrap.memory_lock=true
+  #   ulimits:
+  #     memlock:
+  #       soft: -1
+  #       hard: -1
+  #   mem_limit: 2g
+  #   mem_reservation: 1.5g
+  #   ports:
+  #     - "${COS_ELASTICSEARCH_PORT}:9200"
+  #   volumes:
+  #     - cos_es_data:/usr/share/elasticsearch/data
+  #   restart: always
+  #   networks:
+  #     - backend
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:7.8.1
-    container_name: ${COS_KIBANA_CONTAINER}
-    depends_on:
-      - elasticsearch
-    ports:
-      - "${COS_KIBANA_PORT}:5601"
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
-    restart: always
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:7.8.1
+  #   container_name: ${COS_KIBANA_CONTAINER}
+  #   depends_on:
+  #     - elasticsearch
+  #   ports:
+  #     - "${COS_KIBANA_PORT}:5601"
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #     - ELASTICSEARCH_USERNAME=elastic
+  #     - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+  #   restart: always
 
-  logstash:
-    image: docker.elastic.co/logstash/logstash:7.8.1
-    container_name: ${COS_LOGSTASH_CONTAINER}
-    depends_on:
-      - elasticsearch
-    ports:
-      - "${COS_LOGSTASH_PORT}:5044"
-    environment:
-      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
-      - xpack.monitoring.enabled=false
-    command: |
-      -e '
-      input {
-        tcp {
-          port => 5044
-          codec => json
-        }
-      }
-      output {
-        elasticsearch {
-          hosts => ["http://elasticsearch:9200"]
-          user => "elastic"
-          password => "${ELASTIC_PASSWORD}"
-          index => "cos-logs"
-        }
-        stdout { codec => rubydebug }
-      }'
-    restart: always
+  # logstash:
+  #   image: docker.elastic.co/logstash/logstash:7.8.1
+  #   container_name: ${COS_LOGSTASH_CONTAINER}
+  #   depends_on:
+  #     - elasticsearch
+  #   ports:
+  #     - "${COS_LOGSTASH_PORT}:5044"
+  #   environment:
+  #     - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+  #     - xpack.monitoring.enabled=false
+  #   command: |
+  #     -e '
+  #     input {
+  #       tcp {
+  #         port => 5044
+  #         codec => json
+  #       }
+  #     }
+  #     output {
+  #       elasticsearch {
+  #         hosts => ["http://elasticsearch:9200"]
+  #         user => "elastic"
+  #         password => "${ELASTIC_PASSWORD}"
+  #         index => "cos-logs"
+  #       }
+  #       stdout { codec => rubydebug }
+  #     }'
+  #   restart: always
 
 volumes:
   cos_pg_data:

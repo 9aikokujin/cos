@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class Settings(BaseSettings):
     DATABASE_URL: str
     TELEGRAM_BOT_TOKEN: str
@@ -17,9 +18,9 @@ class Settings(BaseSettings):
     COS_RABBITMQ_PASSWORD: str
     COS_RABBITMQ_HOST: str
 
-
     model_config = {
         "env_file": ".env"
     }
+
 
 settings = Settings()

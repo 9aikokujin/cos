@@ -3,7 +3,7 @@ from fastapi.exceptions import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import select
 from sqlalchemy import func
-from typing import Optional
+from typing import Optional, List
 from app.models.videohistory import VideoHistory
 from app.schemas.videohistory import VideoHistoryCreate, VideoAmountViews
 from app.models.videos import Videos
@@ -24,7 +24,9 @@ class VideoHistoryRepository:
         channel_id: Optional[int] = None,
         channel_type: Optional[str] = None,
         user_id: Optional[int] = None,
-        article: Optional[str] = None,
+        articles: Optional[List[str]] = None,
+        date_published_to: Optional[datetime] = None,
+        date_published_from: Optional[datetime] = None,
     ):
         query = select(VideoHistory).join(VideoHistory.video)
 
@@ -40,8 +42,8 @@ class VideoHistoryRepository:
         if date_from is not None:
             query = query.where(VideoHistory.created_at >= date_from)
 
-        if article is not None:
-            query = query.where(Videos.article == article)
+        if articles is not None and len(articles) > 0:
+            query = query.where(Videos.article.in_(articles))
 
         if user_id is not None:
             query = query.where(Channel.user_id == user_id)
@@ -51,6 +53,14 @@ class VideoHistoryRepository:
 
         if channel_type is not None:
             query = query.where(Channel.type == channel_type)
+
+        if date_published_to is not None:
+            query = query.where(
+                VideoHistory.date_published <= date_published_to)
+
+        if date_published_from is not None:
+            query = query.where(
+                VideoHistory.date_published >= date_published_from)
 
         current_user = User(id=user_id)
         if current_user.role == UserRole.USER:
@@ -69,6 +79,18 @@ class VideoHistoryRepository:
                                date_from: datetime) -> list[VideoHistory]:
         result = await self.db.execute(
             select(VideoHistory).where(VideoHistory.created_at >= date_from)
+        )
+        return result.scalars().all()
+
+    async def get_by_date_published_to(self, date_published_to: datetime) -> list[VideoHistory]:
+        result = await self.db.execute(
+            select(VideoHistory).where(VideoHistory.date_published <= date_published_to)
+        )
+        return result.scalars().all()
+
+    async def get_by_date_published_from(self, date_published_from: datetime) -> list[VideoHistory]:
+        result = await self.db.execute(
+            select(VideoHistory).where(VideoHistory.date_published >= date_published_from)
         )
         return result.scalars().all()
 
@@ -137,7 +159,7 @@ class VideoHistoryRepository:
         await self.db.commit()
         return video_history
 
-    async def get_aggregated_by_date(
+    async def get_aggregated_by_date_art(
         self,
         id: Optional[int] = None,
         date_to: Optional[datetime] = None,
@@ -145,8 +167,10 @@ class VideoHistoryRepository:
         video_id: Optional[int] = None,
         channel_id: Optional[int] = None,
         channel_type: Optional[str] = None,
+        date_published_to: Optional[datetime] = None,
+        date_published_from: Optional[datetime] = None,
         user_id: Optional[int] = None,
-        article: Optional[str] = None,
+        articles: Optional[List[str]] = None,
     ):
         query = (
             select(
@@ -177,6 +201,14 @@ class VideoHistoryRepository:
         if date_from is not None:
             query = query.where(VideoHistory.created_at >= date_from)
 
+        if date_published_to is not None:
+            query = query.where(
+                VideoHistory.date_published <= date_published_to)
+
+        if date_published_from is not None:
+            query = query.where(
+                VideoHistory.date_published >= date_published_from)
+
         if user_id is not None:
             query = query.where(Channel.user_id == user_id)
 
@@ -186,8 +218,80 @@ class VideoHistoryRepository:
         if channel_type is not None:
             query = query.where(Channel.type == channel_type)
 
-        if article is not None:
-            query = query.where(Videos.article == article)
+        if articles is not None and len(articles) > 0:
+            query = query.where(Videos.article.in_(articles))
+
+        result = await self.db.execute(query)
+        rows = result.all()
+        print(f"Это ровсы: {rows}")
+        return [
+            VideoAmountViews(
+                date=row.view_date,
+                views=int(row.max_views) if row.max_views is not None else 0,
+                likes=int(row.max_likes) if row.max_likes is not None else 0,
+                comments=int(row.max_comments) if row.max_comments is not None else 0
+            )
+            for row in rows
+        ]
+
+    async def get_aggregated_by_date_all(
+        self,
+        id: Optional[int] = None,
+        date_to: Optional[datetime] = None,
+        date_from: Optional[datetime] = None,
+        video_id: Optional[int] = None,
+        channel_id: Optional[int] = None,
+        channel_type: Optional[str] = None,
+        date_published_to: Optional[datetime] = None,
+        date_published_from: Optional[datetime] = None,
+        user_id: Optional[int] = None,
+        articles: Optional[List[str]] = None,
+    ):
+        query = (
+            select(
+                func.date(VideoHistory.created_at).label("view_date"),
+                func.max(VideoHistory.amount_views).label("max_views"),
+                func.max(VideoHistory.amount_likes).label("max_likes"),
+                func.max(VideoHistory.amount_comments).label("max_comments")
+            )
+            .join(VideoHistory.video)
+            .join(Videos.channel)
+            .group_by(func.date(VideoHistory.created_at))
+            .order_by(func.date(VideoHistory.created_at))
+        )
+
+        if id is not None:
+            query = query.where(VideoHistory.id == id)
+
+        if video_id is not None:
+            query = query.where(VideoHistory.video_id == video_id)
+
+        if date_to is not None:
+            query = query.where(
+                VideoHistory.created_at <= date_to + timedelta(days=1))
+
+        if date_from is not None:
+            query = query.where(VideoHistory.created_at >= date_from)
+
+        if date_published_to is not None:
+            query = query.where(
+                VideoHistory.date_published <= date_published_to)
+
+        if date_published_from is not None:
+            query = query.where(
+                VideoHistory.date_published >= date_published_from)
+
+        if user_id is not None:
+            query = query.where(Channel.user_id == user_id)
+
+        if channel_id is not None:
+            query = query.where(Videos.channel_id == channel_id)
+
+        if channel_type is not None:
+            query = query.where(Channel.type == channel_type)
+
+        if articles is not None and len(articles) > 0:
+            query = query.where(Videos.article.in_(articles))
 
         result = await self.db.execute(query)
         rows = result.all()

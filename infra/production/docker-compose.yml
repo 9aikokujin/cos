@@ -1,16 +1,16 @@
 version: "3.8"
 
 services:
-  # bot:
-  #   build:
-  #     context: ../../services/bot/
-  #   container_name: cos-bot
-  #   environment:
-  #     RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
-  #     TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-  #   depends_on:
-  #     - rabbitmq
-  #   restart: always
+  bot:
+    build:
+      context: ../../services/bot/
+    container_name: cos-bot
+    environment:
+      RABBITMQ_URL: "amqp://${COS_RABBITMQ_USER}:${COS_RABBITMQ_PASSWORD}@rabbitmq/"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+    depends_on:
+      - rabbitmq
+    restart: always
 
   tiktok-parser:
     build:
@@ -30,7 +30,7 @@ services:
       - kibana
       - logstash
       - rest-api
-      # - frontend
+      - frontend
     restart: always
 
   reels-parser:
@@ -51,7 +51,7 @@ services:
       - kibana
       - logstash
       - rest-api
-      # - frontend
+      - frontend
     restart: always
 
   short-parser:
@@ -72,7 +72,7 @@ services:
       - kibana
       - logstash
       - rest-api
-      # - frontend
+      - frontend
     restart: always
 
   likee-parser:
@@ -93,20 +93,21 @@ services:
       - kibana
       - logstash
       - rest-api
-      # - frontend
+      - frontend
     restart: always
 
-  # frontend:
-  #   build:
-  #     context: ../../services/web/
-  #   container_name: cos-frontend
-  #   # environment:
-  #   #   VITE_API_URL: ${VITE_API_URL}
-  #   ports:
-  #     - "4444:4444"
-  #   depends_on:
-  #     - rest-api
-  #   restart: always
+  frontend:
+    build:
+      context: ../../services/web/
+    container_name: cos-frontend
+    # environment:
+    #   VITE_API_URL: ${VITE_API_URL}
+    ports:
+      - "4444:4444"
+    depends_on:
+      - rest-api
+    restart: always
+
   rest-api:
     build:
       context: ../../services/rest/

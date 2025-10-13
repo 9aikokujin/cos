@@ -1,0 +1,48 @@
+.auth_form {
+  border-radius: 16px;
+  background-color: var(--color-white);
+  width: 100%;
+  margin-top: 59px;
+}
+
+.auth_form_container {
+  padding: 40px 30px;
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.auth_form_title {
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 120%;
+  text-align: center;
+  color: var(--color-black);
+  margin-bottom: 25px;
+}
+
+.auth_form_btn {
+    height: 45px;
+    width: 100%;
+    margin-top: 45px;
+}
+
+.social_form {
+  padding-top: 22px;
+  width: 100%;
+  gap: 22px;
+}
+
+.social-input-wrapper {
+    max-height: 0;
+    opacity: 0;
+    transition: all 0.3s ease;
+    margin-top: 0;
+  }
+  
+  .social-input-wrapper.visible {
+    max-height: 45px; /* достаточно для одного input */
+    opacity: 1;
+    margin-top: 20px;
+  }
+  
