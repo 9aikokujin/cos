@@ -29,8 +29,9 @@ export const useAppRouterConfig = () => {
         element: (
           <PrivateRoute
             isAuth={isAuthenticated}
-            userRole={user?.role || "customer"}
-            allowedRoles={["admin", "customer"]}
+            id={user?.id}
+            userRole={user?.role || "user"}
+            allowedRoles={["admin", "user"]}
           />
         ),
         children: routes.filter(

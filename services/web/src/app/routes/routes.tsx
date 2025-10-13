@@ -112,7 +112,7 @@ const userRoutes = [
 ];
 
 // Генерация маршрутов по роли
-export const getRoutesByRole = (role: "admin" | "customer", userId?: string, isAuth: boolean) => {
+export const getRoutesByRole = (role: "admin" | "user", userId?: string, isAuth: boolean) => {
   if (!isAuth) {
     return [...baseRoutes, ...userRoutes, ...adminRoutes];
   }
