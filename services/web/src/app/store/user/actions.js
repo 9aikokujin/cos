@@ -1,7 +1,7 @@
 import API from "@/app/api";
 
 export const createAuthActions = (set, get) => ({
-  register: async (data, token) => {
+  register: async (data) => {
     set({ isLoading: true });
     try {
       const response = await API.auth.register(data, token);
@@ -15,28 +15,28 @@ export const createAuthActions = (set, get) => ({
     }
   },
   authTG: async (data, user) => {
-    set({
-      isAuthenticated: true,
-      user: {
-        id: "123",
-        role: "admin",
-        fullname: "string",
-        first_name: "string",
-        last_name: "string",
-      },
-    });
+    // set({
+    //   isAuthenticated: true,
+    //   user: {
+    //     id: "123",
+    //     role: "admin",
+    //     fullname: "string",
+    //     first_name: "string",
+    //     last_name: "string",
+    //   },
+    // });
 
-    // set({ isLoading: true });
-    // try {
-    //   const response = await API.auth.authTG(data);
-    //   if (response.status) {
-    //     set({ user: response, userTG: user, isAuthenticated: true });
-    //   } else {
-    //     set({ userTG: user });
-    //   }
-    // } finally {
-    //   set({ isLoading: false });
-    // }
+    set({ isLoading: true });
+    try {
+      const response = await API.auth.authTG();
+      if (response.status) {
+        set({ user: response, userTG: user, isAuthenticated: true });
+      } else {
+        set({ userTG: user });
+      }
+    } finally {
+      set({ isLoading: false });
+    }
   },
   setToken: (token) => {
     set({ token });
