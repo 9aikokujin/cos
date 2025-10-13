@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-// import { init, initData, miniApp } from "@telegram-apps/sdk-react";
+import { init, initData, miniApp } from "@telegram-apps/sdk-react";
 
-import App from "./App.jsx";
 import { AppProviders } from "./app/providers/AppProviders.jsx";
+import App from "./App.jsx";
 
 import "@/assets/css/main.css";
 
@@ -24,12 +24,12 @@ const initializeTelegramSDK = async () => {
   }
 };
 
-// initializeTelegramSDK();
+initializeTelegramSDK();
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <AppProviders>
-        <App />
+      <App />
     </AppProviders>
   </StrictMode>
 );

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 
 import { useModalStore } from "@/app/store/modal/store";
+import { useAuthStore } from "@/app/store/user/store";
 
 import SettingsSocial from "@/components/typeModal/settingsSocial/SettingsSocial";
 import Input from "@/shared/ui/input/Input";
@@ -14,6 +15,7 @@ import "./AuthForm.css";
 
 const AuthForm = () => {
   const { openModal } = useModalStore();
+  const { userTG } = useAuthStore();
 
   const {
     register,
@@ -70,13 +72,13 @@ const AuthForm = () => {
     }
 
     const nameParts = fullName.split(" ");
-    const [lastName = "", firstName = "", username = ""] = nameParts;
+    const [lastName = "", firstName = "", secondName = ""] = nameParts;
 
     const userData = {
-      fullname: fullName,
+      fullname: secondName,
       last_name: lastName,
       first_name: firstName,
-      username,
+      username: userTG.username,
       socials: filledSocials.map((name) => ({
         type: name.toLowerCase(),
         link: data[name],

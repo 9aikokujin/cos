@@ -9,3 +9,9 @@ export const SOCIALS = [
   { id: "likee", label: "Likee", icon: likeIcon },
   { id: "tiktok", label: "TikTok", icon: tiktokIcon },
 ];
+
+export const getSocialIcon = (type) => {
+  if (!type) return null;
+  const social = SOCIALS.find((s) => s.id.toLowerCase() === type.toLowerCase());
+  return social ? social.icon : null;
+};
