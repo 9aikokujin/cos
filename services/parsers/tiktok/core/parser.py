@@ -1,12 +1,12 @@
 import asyncio
 from datetime import datetime, timezone
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 import httpx
 import random
 from typing import Union, Optional
 from playwright.async_api import async_playwright
-# from urllib.parse import urlparse
+
 from utils.logger import TCPLogger
 
 
@@ -143,6 +143,26 @@ class TikTokParser:
                 self.logger.send("ERROR", f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
                 return None, str(e)
 
+    def clean_tiktok_profile_url(url: str) -> str:
+        """
+        Очищает URL профиля TikTok от всех параметров, кроме пути.
+        Пример:
+            Вход: https://www.tiktok.com/@mil.beoma?_r=1&_d=...&utm_source=copy...
+            Выход: https://www.tiktok.com/@mil.beoma
+        """
+        parsed = urlparse(url)
+        # Разрешаем только домен tiktok.com и путь вида /@username
+        if "tiktok.com" not in parsed.netloc:
+            raise ValueError("URL не принадлежит TikTok")
+
+        # Путь должен начинаться с /@ — это профиль
+        if not parsed.path.startswith("/@"):
+            raise ValueError("URL не является профилем TikTok")
+
+        # Собираем чистый URL: схема + домен + путь
+        clean = urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
+        return clean
+
     def generate_short_title(self, full_title: str, max_length: int = 30) -> str:
         if not full_title:
             return ""
@@ -154,7 +174,32 @@ class TikTokParser:
             return truncated[:last_space]
         return truncated
 
+    def extract_article_tag(self, caption: str) -> str | None:
+        """Возвращает первый найденный артикул-хештег (#sv, #jw и т.д.) или None."""
+        if not caption:
+            return None
+        caption_lower = caption.lower()
+        for tag in ["#sv", "#jw", "#qz", "#sr", "#fg"]:
+            if tag in caption_lower:
+                # Найти точное написание в оригинале (сохранить регистр)
+                start = caption_lower.find(tag)
+                if start != -1:
+                    return caption[start:start + len(tag)]
+        return None
+
     async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
+
+        # --- ОЧИСТКА URL ---
+        try:
+            clean_url = self.clean_tiktok_profile_url(url)
+            self.logger.send("INFO", f"🧹 Очищенный URL профиля: {clean_url}")
+        except Exception as e:
+            self.logger.send("ERROR", f"Неверный URL TikTok профиля: {url} | Ошибка: {e}")
+            raise ValueError(f"Некорректный URL профиля TikTok: {e}")
+
+        # Далее используем clean_url вместо url
+        url = clean_url
+
         proxy_list = proxy_list or []
         current_proxy_index = 0
         url = url.strip()
@@ -234,10 +279,7 @@ class TikTokParser:
             # Теперь скроллим МЕДЛЕННО и ЖДЁМ загрузки
             await self.scroll_until(page, url, selector="...", delay=4.0, max_idle_rounds=3)
 
-            # 🚀 Шаг 3. Мягко обновляем страницу, чтобы TikTok вызвал item_list запросы заново
-            # self.logger.send("INFO", "🔄 Обновляем страницу для сбора всех item_list...")
-            # await page.reload(wait_until="networkidle", timeout=60000)
-            await asyncio.sleep(10)  # подождать пока все lazy-загрузки отработают
+            await asyncio.sleep(10)
 
             self.logger.send("INFO", f"✅ Собрано {len(tiktok_responses)} item_list ответов.")
 
@@ -255,6 +297,7 @@ class TikTokParser:
                     video_info = item.get("video", {})
                     cover = video_info.get("cover") or video_info.get("dynamicCover") or video_info.get("originCover")
                     desc = item.get("desc") or ""
+                    article = self.extract_article_tag(desc)
                     video_title = self.generate_short_title(desc, 30)
                     link = f"https://www.tiktok.com/@{username}/video/{vid}"
 
@@ -269,6 +312,7 @@ class TikTokParser:
                         "amount_views": int(stats.get("playCount", 0)),
                         "amount_likes": int(stats.get("diggCount", 0)),
                         "amount_comments": int(stats.get("commentCount", 0)),
+                        "article": article,
                         "image_url": cover,
                         "date_published": date_published
                     })
@@ -311,7 +355,8 @@ class TikTokParser:
                                     "amount_views": video_data["amount_views"],
                                     "amount_likes": video_data["amount_likes"],
                                     "amount_comments": video_data["amount_comments"],
-                                    "date_published": video_data["date_published"]
+                                    "date_published": video_data["date_published"],
+                                    "article": video_data["article"]
                                 }
                             )
                         else:

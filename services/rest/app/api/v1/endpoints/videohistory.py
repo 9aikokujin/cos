@@ -1,3 +1,5 @@
+# добавить возможность фильтрации по артиклям (несколько штук) 
+
 from datetime import date as dt_date
 from http.client import HTTPException
 from fastapi import APIRouter, Depends, Query
