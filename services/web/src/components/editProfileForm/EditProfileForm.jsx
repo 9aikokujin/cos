@@ -1,66 +1,77 @@
 import { useForm } from "react-hook-form";
+import { useParams } from "react-router-dom";
 
+import { useBack } from "@/hooks/useBack";
 import { useAuthStore } from "@/app/store/user/store";
+import { useUserProfileData } from "@/hooks/useUserProfileData";
+import { useUserProfileSubmit } from "@/hooks/useUserProfileSubmit";
 
 import Input from "@/shared/ui/input/Input";
 import Checkbox from "@/shared/ui/checkbox/Checkbox";
 import { socialNetworks } from "@/shared/utils/utils";
 import { Button } from "@/shared/ui/button/Button";
-import { useBack } from "@/hooks/useBack";
 
 import "./EditProfileForm.css";
 
 const EditProfileForm = () => {
   const { user } = useAuthStore();
+  const { id: userId } = useParams();
+  console.log("🚀 userId", useParams());
   const goBack = useBack();
 
-  const {
-    register,
-    handleSubmit,
-    watch,
-    setError,
-    clearErrors,
-    formState: { errors },
-  } = useForm({
-    defaultValues: {
-      fullName: "",
-      tgId: "",
-      Instagram: "",
-      YouTube: "",
-      Likee: "",
-      TikTok: "",
-    },
-  });
+  const { register, handleSubmit, setValue, clearErrors, formState: { errors } } = useForm();
 
-  const onSubmit = (data) => {
-    const fullName = data.fullName.trim();
-    const filledSocials = socialNetworks.filter((network) => data[network]?.trim() !== "");
+  const { initialData, socials, loading } = useUserProfileData(userId, setValue);
+  const onSubmit = useUserProfileSubmit(user, userId, initialData, socials, goBack);
 
-    if (!fullName) {
-      setError("fullName", { message: "Заполните поле ФИО" });
-      return;
-    }
+  // const {
+  //   register,
+  //   handleSubmit,
+  //   watch,
+  //   setError,
+  //   clearErrors,
+  //   formState: { errors },
+  // } = useForm({
+  //   defaultValues: {
+  //     fullName: "",
+  //     tgId: "",
+  //     Instagram: "",
+  //     YouTube: "",
+  //     Likee: "",
+  //     TikTok: "",
+  //   },
+  // });
 
-    if (user.role === "admin" && !data.tgId) {
-      setError("tgId", { message: "Заполните поле Telegram ID" });
-      return;
-    }
+  // const onSubmit = (data) => {
+  //   const fullName = data.fullName.trim();
+  //   const filledSocials = socialNetworks.filter((network) => data[network]?.trim() !== "");
 
-    if (filledSocials.length === 0) {
-      setError("socials", { message: "Выберите хотя бы одну соцсеть" });
-      return;
-    }
+  //   if (!fullName) {
+  //     setError("fullName", { message: "Заполните поле ФИО" });
+  //     return;
+  //   }
 
-    const result = {
-      fullName,
-      socials: filledSocials.reduce((acc, name) => {
-        acc[name] = data[name] || "";
-        return acc;
-      }, {}),
-    };
+  //   if (user.role === "admin" && !data.tgId) {
+  //     setError("tgId", { message: "Заполните поле Telegram ID" });
+  //     return;
+  //   }
 
-    console.log("✅ Отправка данных:", result);
-  };
+  //   if (filledSocials.length === 0) {
+  //     setError("socials", { message: "Выберите хотя бы одну соцсеть" });
+  //     return;
+  //   }
+
+  //   const result = {
+  //     fullName,
+  //     socials: filledSocials.reduce((acc, name) => {
+  //       acc[name] = data[name] || "";
+  //       return acc;
+  //     }, {}),
+  //   };
+
+  //   console.log("✅ Отправка данных:", result);
+  // };
+
   return (
     <form className="edit_form" action="" onSubmit={handleSubmit(onSubmit)}>
       <div className="edit_form_container _flex_col_center">
@@ -95,6 +106,7 @@ const EditProfileForm = () => {
                 key={network}
                 label={network}
                 checked={true}
+                disabled
                 // onChange={() => handleCheckboxChange(network)}
               />
             ))}
@@ -102,6 +114,7 @@ const EditProfileForm = () => {
           {errors.socials && <span className="error_text">{errors.socials.message}</span>}
           {socialNetworks.map((network) => (
             <Input
+              key={network}
               placeholder={network}
               type="text"
               error={errors.socials}

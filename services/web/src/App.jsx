@@ -8,8 +8,8 @@ import Loader from "./components/loader/Loader";
 import { useAuthStore } from "./app/store/user/store";
 
 function App() {
-  const { isAuthenticated } = useAuthStore();
   const routeConfig = useAppRouterConfig();
+  const { isLoading } = useAuthStore();
 
   const router = useMemo(() => {
     return createBrowserRouter([
@@ -20,6 +20,8 @@ function App() {
     ]);
   }, [routeConfig]);
 
+  if (isLoading) return <Loader />;
+  
   return (
     <Suspense fallback={<Loader />}>
       <RouterProvider router={router} />

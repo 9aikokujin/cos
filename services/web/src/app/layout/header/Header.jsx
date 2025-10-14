@@ -45,7 +45,7 @@ const Header = () => {
             <div className="header_account _flex_center">
               <p className="_login">{formatNameToInitials(user)}</p>
               <Link
-                to={AppRoutes.EDITPROFILE}
+                to={AppRoutes.EDITPROFILE.replace(":id", user?.id)}
                 state={{ from: location.pathname }}
                 className="header_account_btn"
               >

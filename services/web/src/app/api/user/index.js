@@ -6,6 +6,12 @@ export default (instance) => ({
       params: { page, size: 10 },
     }).then((response) => response.data);
   },
+  getUserById(id) {
+    return instance({
+      method: "GET",
+      url: `/users/find/${id}`,
+    }).then((response) => response.data);
+  },
   searchUsers(term, page) {
     return instance({
       method: "GET",
