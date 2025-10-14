@@ -1,5 +1,5 @@
 export const createNotificationActions = (set, get) => ({
-  showNotification: (message, type = "error") => set({ notification: { message, type } }),
+  // showNotification: (message, type = "error") => set({ notification: { message, type } }),
   clearNotification: () => set({ notification: null }),
 
   showNotification: (content) => set({ notification: content, isOpen: true }),
