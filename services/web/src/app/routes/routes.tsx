@@ -30,7 +30,7 @@ export const authLoader = () => {
   const { isAuthenticated } = useAuthStore.getState();
 
   if (isAuthenticated) {
-    const defaultRoute = "/accounts";
+    const defaultRoute = "/";
 
     return redirect(defaultRoute);
   }
@@ -108,6 +108,7 @@ const userRoutes = [
       },
     },
   },
+  { path: AppRoutes.EDITPROFILE, element: <EditProfilePage /> },
   { path: AppRoutes.STATISTIC_USER, element: <StatisticPage /> },
 ];
 

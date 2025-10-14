@@ -13,7 +13,6 @@ const AppModals = () => {
   const { modal, isOpen, closeModal } = useModalStore();
   const { isOpen: filtersOpen, filters, closeFiltersModal, onApply } = useFiltersModalStore();
   const { notification, isOpen: notifOpen, closeNotification } = useNotificationStore();
-
   return (
     <>
       <ModalBottom isOpen={isOpen} onClose={closeModal} height={modal?.height}>
