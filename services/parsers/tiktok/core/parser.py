@@ -134,7 +134,7 @@ class TikTokParser:
             files = {"file": (file_name, image_bytes, "image/jpeg")}
             try:
                 resp = await client.post(
-                    f"http://127.0.0.1:8000/api/v1/videos/{video_id}/upload-image/",
+                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -175,17 +175,29 @@ class TikTokParser:
         return truncated
 
     def extract_article_tag(self, caption: str) -> str | None:
-        """Возвращает первый найденный артикул-хештег (#sv, #jw и т.д.) или None."""
+        """Возвращает строку со ВСЕМИ найденными артикулами (#sv, #jw и т.д.) через запятую или None."""
         if not caption:
             return None
+
+        allowed_tags = ["#sv", "#jw", "#qz", "#sr", "#fg"]
+        found_tags = []
+
         caption_lower = caption.lower()
-        for tag in ["#sv", "#jw", "#qz", "#sr", "#fg"]:
+        original_caption = caption  # сохраняем оригинальный регистр для точного извлечения
+
+        for tag in allowed_tags:
             if tag in caption_lower:
-                # Найти точное написание в оригинале (сохранить регистр)
+                # Ищем позицию в нижнем регистре
                 start = caption_lower.find(tag)
                 if start != -1:
-                    return caption[start:start + len(tag)]
-        return None
+                    # Берём точное написание из оригинала (на случай если кто-то написал #SV)
+                    exact_tag = original_caption[start:start + len(tag)]
+                    found_tags.append(exact_tag)
+
+        # Убираем дубли и сортируем для консистентности (опционально)
+        found_tags = sorted(set(found_tags))
+
+        return ",".join(found_tags) if found_tags else None
 
     async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
 
@@ -235,7 +247,6 @@ class TikTokParser:
                 viewport={"width": 1920, "height": 1080},
                 proxy=proxy_config
             )
-            # print(f"PROXYYYYYYYYY {proxy_config}")
             page = await context.new_page()
             from playwright_stealth import stealth_sync
             stealth_sync(page)
@@ -297,7 +308,7 @@ class TikTokParser:
                     video_info = item.get("video", {})
                     cover = video_info.get("cover") or video_info.get("dynamicCover") or video_info.get("originCover")
                     desc = item.get("desc") or ""
-                    article = self.extract_article_tag(desc)
+                    articles = self.extract_article_tag(desc)
                     video_title = self.generate_short_title(desc, 30)
                     link = f"https://www.tiktok.com/@{username}/video/{vid}"
 
@@ -305,15 +316,15 @@ class TikTokParser:
                     date_published = datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT00:00:00") if ts else None
 
                     all_videos_data.append({
-                        "type": "tiktok",
-                        "channel_id": channel_id,
                         "link": link,
+                        "type": "tiktok",
                         "name": video_title,
+                        "image": cover,
+                        "articles": articles,
+                        "channel_id": channel_id,
                         "amount_views": int(stats.get("playCount", 0)),
                         "amount_likes": int(stats.get("diggCount", 0)),
                         "amount_comments": int(stats.get("commentCount", 0)),
-                        "article": article,
-                        "image_url": cover,
                         "date_published": date_published
                     })
 
@@ -340,7 +351,7 @@ class TikTokParser:
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
                     self.logger.send("INFO", f"🔍 Проверка видео: {video_data['link']}")
-                    check_resp = await client.get(f"http://127.0.0.1:8000/api/v1/videos/?link={video_data['link']}")
+                    check_resp = await client.get(f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={video_data['link']}")
                     is_new = False
                     video_id = None
 
@@ -350,13 +361,13 @@ class TikTokParser:
                         if vids:
                             video_id = vids[0]['id']
                             await client.patch(
-                                f"http://127.0.0.1:8000/api/v1/videos/{video_id}",
+                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                 json={
                                     "amount_views": video_data["amount_views"],
                                     "amount_likes": video_data["amount_likes"],
                                     "amount_comments": video_data["amount_comments"],
                                     "date_published": video_data["date_published"],
-                                    "article": video_data["article"]
+                                    "articles": video_data["articles"],
                                 }
                             )
                         else:
@@ -365,12 +376,12 @@ class TikTokParser:
                         is_new = True
 
                     if is_new:
-                        resp = await client.post("http://127.0.0.1:8000/api/v1/videos/", json=video_data)
+                        resp = await client.post("https://cosmeya.dev-klick.cyou/api/v1/videos/", json=video_data)
                         resp.raise_for_status()
                         video_id = resp.json()["id"]
                         self.logger.send("INFO", f"✅ Создано новое видео {video_id}")
-                        if video_data.get("image_url"):
-                            image_queue.append((video_id, video_data["image_url"]))
+                        if video_data.get("image"):
+                            image_queue.append((video_id, video_data["image"]))
                 processed_count += 1
             except Exception as e:
                 self.logger.send("ERROR", f"⚠️ Ошибка при обработке {video_data.get('link')}: {e}")

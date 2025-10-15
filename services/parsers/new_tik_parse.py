@@ -40,9 +40,7 @@ class TikTokParser:
                 await page.wait_for_timeout(int(delay * 1000))
 
                 # Проверка кнопки обновления (на случай ошибки сети)
-                refresh_button = await page.query_selector('button[data-e2e="feed-refresh-btn"]') or \
-                                await page.query_selector('button:has-text("Refresh")') or \
-                                await page.query_selector('button.emuynwa3.css-z9i4la-Button-StyledButton.ehk74z00')
+                refresh_button = await page.query_selector('button[data-e2e="feed-refresh-btn"]') or await page.query_selector('button:has-text("Refresh")') or await page.query_selector('button.emuynwa3.css-z9i4la-Button-StyledButton.ehk74z00')
                 if refresh_button:
                     print("Обнаружена кнопка 'Refresh'. Кликаем для перезагрузки страницы.")
                     await refresh_button.click()

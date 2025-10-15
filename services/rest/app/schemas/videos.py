@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import List
 from typing_extensions import Optional
 from pydantic import BaseModel, field_validator
 
@@ -11,7 +12,7 @@ class VideosCreate(BaseModel):
     name: Optional[str] = None
     channel_id: int
     image: Optional[str] = None
-    article: Optional[str] = None
+    articles: Optional[List[str]] = None
     amount_views: Optional[int] = None
     amount_likes: Optional[int] = None
     amount_comments: Optional[int] = None
@@ -23,7 +24,7 @@ class VideosUpdate(BaseModel):
     link: Optional[str] = None
     name: Optional[str] = None
     image: Optional[str] = None
-    article: Optional[str] = None
+    articles: Optional[List[str]] = None
     amount_views: Optional[int] = None
     amount_likes: Optional[int] = None
     amount_comments: Optional[int] = None
@@ -35,4 +36,4 @@ class VideoFilter(BaseModel):
     type: Optional[VideoType] = None
     link: Optional[str] = None
     name: Optional[str] = None
-    article: Optional[str] = None
+    articles: Optional[List[str]] = None

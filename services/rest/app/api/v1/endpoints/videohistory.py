@@ -3,7 +3,7 @@
 from datetime import date as dt_date
 from http.client import HTTPException
 from fastapi import APIRouter, Depends, Query
-from typing import Optional
+from typing import Optional, List
 from app.services.videohistory import VideoHistoryService
 from app.schemas.videohistory import HistoryParams
 from app.models.user import User, UserRole
@@ -37,12 +37,15 @@ async def get_all_video_history(
 @router.get("/filtered_stats_art")
 async def get_filtered_history_with_article(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
+    articles: Optional[str] = Query(None, description="Можно передавать через запятую: #sv,#jw"),
     params: HistoryParams = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
     service = VideoHistoryService(db)
 
-    # Возвращаем агрегированные данные по датам
+    if articles:
+        params.articles = [a.strip() for a in articles.split(",") if a.strip()]
+
     result = await service.get_aggregated_views_by_date_art(
         user=user,
         **params.model_dump()
@@ -73,7 +76,7 @@ async def daily_video_with_article_count(
     channel_id: Optional[int] = Query(None),
     channel_type: Optional[str] = Query(None),
     user_id: Optional[int] = Query(None),
-    article: Optional[str] = Query(None),
+    articles: Optional[List[str]] = None,
     db: AsyncSession = Depends(get_db),
 ):
     service = VideoHistoryService(db)
@@ -84,7 +87,7 @@ async def daily_video_with_article_count(
         channel_id=channel_id,
         channel_type=channel_type,
         user_id=user_id,
-        article=article,
+        articles=articles,
     )
 
     return [
@@ -100,7 +103,7 @@ async def daily_video_count_all(
     channel_id: Optional[int] = Query(None),
     channel_type: Optional[str] = Query(None),
     user_id: Optional[int] = Query(None),
-    article: Optional[str] = Query(None),
+    articles: Optional[List[str]] = None,
     db: AsyncSession = Depends(get_db),
 ):
     service = VideoHistoryService(db)
@@ -111,7 +114,7 @@ async def daily_video_count_all(
         channel_id=channel_id,
         channel_type=channel_type,
         user_id=user_id,
-        article=article,
+        articles=articles,
     )
 
     return [

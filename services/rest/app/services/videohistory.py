@@ -8,7 +8,7 @@ from app.models.videos import Videos
 from app.models.user import User, UserRole
 from app.models.channel import Channel, ChannelType
 from app.models.videohistory import VideoHistory
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 
@@ -24,6 +24,7 @@ class VideoHistoryService:
         date_from: Optional[dt_date] = None,
         user_id: Optional[int] = None,
         channel_id: Optional[int] = None,
+        articles: Optional[List[str]] = None,
         channel_type: Optional[ChannelType] = None,
         date_published_to: Optional[dt_date] = None,
         date_published_from: Optional[dt_date] = None,
@@ -32,7 +33,6 @@ class VideoHistoryService:
         # Если пользователь не админ, он видит только свою историю
         if user.role != UserRole.ADMIN:
             user_id = user.id
-
         # Передаём все фильтры в репозиторий
         return await self.repo.get_filtered(
             id=id,
@@ -40,6 +40,7 @@ class VideoHistoryService:
             date_from=date_from,
             user_id=user_id,
             channel_id=channel_id,
+            articles=articles,
             channel_type=channel_type,
             date_published_to=date_published_to,
             date_published_from=date_published_from,
@@ -48,13 +49,10 @@ class VideoHistoryService:
 
     async def get_by_id(self, video_history_id: int, user: User):
         video_history = await self.repo.get_by_id(video_history_id)
-
         if not video_history:
             raise ValueError("Видео не найдено")
-
         if user.role != UserRole.ADMIN and video_history.user_id != user.id:
             raise ValueError("Недостаточно прав для доступа к видео")
-
         return video_history
 
     async def create(self, dto: VideoHistoryCreate):
@@ -72,7 +70,6 @@ class VideoHistoryService:
         # Если пользователь — не админ, добавляем фильтр по его user_id
         if user.role == UserRole.USER:
             filters["user_id"] = user.id
-
         return await self.repo.get_aggregated_by_date_art(**filters)
 
     async def get_aggregated_views_by_date_all(
@@ -83,7 +80,6 @@ class VideoHistoryService:
         # Если пользователь — не админ, добавляем фильтр по его user_id
         if user.role == UserRole.USER:
             filters["user_id"] = user.id
-
         return await self.repo.get_aggregated_by_date_all(**filters)
 
     async def get_video_stats_for_csv(
@@ -101,32 +97,25 @@ class VideoHistoryService:
             .options(
                 selectinload(Videos.history)
             )
-            .where(Videos.article.isnot(None))
+            .where(Videos.articles.isnot(None))
         )
-
         # Фильтр по пользователю
         if target_user_id is not None:
             query = query.where(Channel.user_id == target_user_id)
-
         # Фильтр по типу канала
         if channel_type is not None:
             query = query.where(Channel.type == channel_type)
-
         result = await self.repo.db.execute(query)
         videos = result.scalars().all()
-
         # Оставляем только с артиклем
-        filtered_videos = [v for v in videos if v.article]
-
+        filtered_videos = [v for v in videos if v.articles]
         stats = []
         all_dates = set()
-
         # Собираем данные и все возможные даты из истории
         for video in filtered_videos:
             daily_views = {}
             daily_likes = {}
             daily_comments = {}
-
             for record in video.history:
                 record_date = record.created_at.date()
                 daily_views[record_date] = max(
@@ -142,14 +131,12 @@ class VideoHistoryService:
                     record.amount_comments
                 )
                 all_dates.add(record_date)
-
             stats.append({
                 "link": video.link,
                 "daily_views": daily_views,
                 "daily_likes": daily_likes,
                 "daily_comments": daily_comments
             })
-
         if pub_date_from or pub_date_to:
             filtered_all_dates = set()
             for d in all_dates:
@@ -159,7 +146,6 @@ class VideoHistoryService:
                     continue
                 filtered_all_dates.add(d)
             all_dates = filtered_all_dates
-
         sorted_dates = sorted(all_dates)
         return stats, sorted_dates
 
@@ -170,9 +156,8 @@ class VideoHistoryService:
         channel_id: Optional[int] = None,
         channel_type: Optional[str] = None,
         user_id: Optional[int] = None,
-        article: Optional[str] = None,
+        articles: Optional[List[str]] = None,
     ) -> List[DailyVideoCount]:
-
         subq = (
             select(
                 func.date(VideoHistory.date_published).label("view_date"),
@@ -180,30 +165,27 @@ class VideoHistoryService:
             )
             .distinct()
             .join(Videos, VideoHistory.video_id == Videos.id)
-            .where(Videos.article.isnot(None))
+            .where(Videos.articles.isnot(None))
             .where(VideoHistory.date_published.isnot(None))
         )
-
         if date_from is not None:
             subq = subq.where(VideoHistory.date_published >= date_from)
         if date_to is not None:
             subq = subq.where(
                 VideoHistory.date_published < date_to + timedelta(days=1)
             )
-
         if channel_id is not None:
             subq = subq.where(Videos.channel_id == channel_id)
-        if article is not None:
-            subq = subq.where(Videos.article == article)
-
+        # 🔥 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: фильтр по подстроке
+        if articles:
+            or_conditions = [Videos.articles.contains(tag) for tag in articles]
+            subq = subq.where(or_(*or_conditions))
         subq = subq.join(Channel, Videos.channel_id == Channel.id)
         if user_id is not None:
             subq = subq.where(Channel.user_id == user_id)
         if channel_type is not None:
             subq = subq.where(Channel.type == channel_type)
-
         subq = subq.subquery()
-
         query = (
             select(
                 subq.c.view_date.label("date"),
@@ -212,10 +194,8 @@ class VideoHistoryService:
             .group_by(subq.c.view_date)
             .order_by(subq.c.view_date)
         )
-
         result = await self.repo.db.execute(query)
         rows = result.all()
-
         return [
             DailyVideoCount(date=row.date, video_count=row.video_count)
             for row in rows
@@ -228,9 +208,8 @@ class VideoHistoryService:
         channel_id: Optional[int] = None,
         channel_type: Optional[str] = None,
         user_id: Optional[int] = None,
-        article: Optional[str] = None,
+        articles: Optional[List[str]] = None,
     ) -> List[DailyVideoCount]:
-
         subq = (
             select(
                 func.date(VideoHistory.date_published).label("view_date"),
@@ -240,27 +219,24 @@ class VideoHistoryService:
             .join(Videos, VideoHistory.video_id == Videos.id)
             .where(VideoHistory.date_published.isnot(None))
         )
-
         if date_from is not None:
             subq = subq.where(VideoHistory.date_published >= date_from)
         if date_to is not None:
             subq = subq.where(
                 VideoHistory.date_published < date_to + timedelta(days=1)
             )
-
         if channel_id is not None:
             subq = subq.where(Videos.channel_id == channel_id)
-        if article is not None:
-            subq = subq.where(Videos.article == article)
-
+        # 🔥 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: фильтр по подстроке
+        if articles:
+            or_conditions = [Videos.articles.contains(tag) for tag in articles]
+            subq = subq.where(or_(*or_conditions))
         subq = subq.join(Channel, Videos.channel_id == Channel.id)
         if user_id is not None:
             subq = subq.where(Channel.user_id == user_id)
         if channel_type is not None:
             subq = subq.where(Channel.type == channel_type)
-
         subq = subq.subquery()
-
         query = (
             select(
                 subq.c.view_date.label("date"),
@@ -269,10 +245,8 @@ class VideoHistoryService:
             .group_by(subq.c.view_date)
             .order_by(subq.c.view_date)
         )
-
         result = await self.repo.db.execute(query)
         rows = result.all()
-
         return [
             DailyVideoCount(date=row.date, video_count=row.video_count)
             for row in rows

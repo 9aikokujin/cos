@@ -7,12 +7,9 @@ from playwright.async_api import async_playwright, TimeoutError as PlaywrightTim
 import random
 from datetime import datetime
 
-from utils.logger import TCPLogger
-
 
 class ShortsParser:
-    def __init__(self, logger: TCPLogger):
-        self.logger = logger
+    def __init__(self):
         self.current_proxy_index = 0
         self.seen_video_ids: set = set()
         self.collected_videos: List[Dict] = []
@@ -27,7 +24,7 @@ class ShortsParser:
 
     async def extract_images_from_dom(self, page, url: str):
         """Извлекает ссылки на изображения из DOM и подсчитывает общее количество видео"""
-        self.logger.send("INFO", "🔍 Извлекаем изображения из DOM...")
+        print("🔍 Извлекаем изображения из DOM...")
 
         selectors = [
             "ytm-shorts-lockup-view-model img.ytCoreImageHost",  # Мобильная
@@ -42,7 +39,7 @@ class ShortsParser:
         for selector in selectors:
             try:
                 img_elements = await page.query_selector_all(selector)
-                self.logger.send("INFO", f"Найдено {len(img_elements)} изображений по селектору: {selector}")
+                print(f"Найдено {len(img_elements)} изображений по селектору: {selector}")
 
                 for i, img_el in enumerate(img_elements[:50]):  # Берем первые 50 для надежности
                     try:
@@ -54,21 +51,21 @@ class ShortsParser:
                                 video_id = video_id_match.group(1)
                                 dom_images[video_id] = img_url
                                 total_videos += 1
-                                self.logger.send("INFO", f"📸 Видео ID: {video_id} -> {img_url[:100]}...")
+                                print(f"📸 Видео ID: {video_id} -> {img_url[:100]}...")
                     except Exception as e:
                         continue
 
                 if total_videos > 0:
                     break  # Если нашли изображения, используем этот селектор
             except Exception as e:
-                self.logger.send("ERROR", f"Ошибка при поиске по селектору {selector}: {e}")
+                print(f"Ошибка при поиске по селектору {selector}: {e}")
                 continue
 
         # Если не нашли по основным селекторам, пробуем общий поиск всех img
         if not dom_images:
             try:
                 all_imgs = await page.query_selector_all("img[src*='ytimg.com']")
-                self.logger.send("INFO", f"Общий поиск: найдено {len(all_imgs)} изображений ytimg")
+                print(f"Общий поиск: найдено {len(all_imgs)} изображений ytimg")
                 for i, img_el in enumerate(all_imgs[:30]):
                     img_url = await img_el.get_attribute("src")
                     video_id_match = re.search(r'/vi/([a-zA-Z0-9_-]{11})/', img_url)
@@ -78,10 +75,10 @@ class ShortsParser:
                             dom_images[video_id] = img_url
                             total_videos += 1
             except Exception as e:
-                self.logger.send("ERROR", f"Ошибка общего поиска изображений: {e}")
+                print(f"Ошибка общего поиска изображений: {e}")
 
         self.dom_images = dom_images
-        self.logger.send("INFO", f"✅ Из DOM извлечено {len(dom_images)} изображений, общее видео: {total_videos}")
+        print(f"✅ Из DOM извлечено {len(dom_images)} изображений, общее видео: {total_videos}")
         return total_videos
 
     async def scroll_until(self, page, url: str, selector: str, delay: float = 4.0, max_idle_rounds: int = 5):
@@ -91,7 +88,7 @@ class ShortsParser:
         max_scroll_attempts = 3
 
         for attempt in range(max_scroll_attempts):
-            self.logger.send("INFO", f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
+            print(f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
 
             while True:
                 await page.evaluate("""
@@ -113,7 +110,7 @@ class ShortsParser:
 
                 captcha = await page.query_selector("text=CAPTCHA")
                 if captcha:
-                    self.logger.send("ERROR", "Обнаружена CAPTCHA на странице")
+                    print("Обнаружена CAPTCHA на странице")
                     return 0
 
                 # ИЗВЛЕКАЕМ ИЗОБРАЖЕНИЯ ИЗ DOM ПОКА СКРОЛЛИМ
@@ -121,12 +118,12 @@ class ShortsParser:
 
                 try:
                     current_count = await page.eval_on_selector_all(selector, "els => els.length")
-                    self.logger.send("INFO", f"Текущее количество элементов по селектору '{selector}': {current_count}")
+                    print(f"Текущее количество элементов по селектору '{selector}': {current_count}")
 
                     if current_count == prev_count:
                         idle_rounds += 1
                         if idle_rounds >= max_idle_rounds:
-                            self.logger.send("INFO", f"Достигнут конец списка видео профиля {url}")
+                            print(f"Достигнут конец списка видео профиля {url}")
                             break
                     else:
                         idle_rounds = 0
@@ -138,7 +135,7 @@ class ShortsParser:
                     if is_at_bottom:
                         break
                 except PlaywrightTimeoutError:
-                    self.logger.send("ERROR", "Timeout при оценке элементов, продолжаем...")
+                    print("Timeout при оценке элементов, продолжаем...")
                     break
 
         # Финальное извлечение изображений после скролла
@@ -199,12 +196,11 @@ class ShortsParser:
                 .strip()
             )
             name = self.generate_short_title(title)
-            # article = self.extract_article_tag(title)
 
             like_renderer = overlay.get("likeButton", {}).get("likeButtonRenderer", {})
             video_id = like_renderer.get("target", {}).get("videoId")
             if not video_id:
-                self.logger.send("ERROR", "Нет video_id в reel_item_watch")
+                print("Нет video_id в reel_item_watch")
                 return None
             image_url = self.dom_images.get(video_id)
             like_label = like_renderer.get("likeCountWithLikeText", {}).get("accessibility", {}).get("accessibilityData", {}).get("label", "")
@@ -242,6 +238,7 @@ class ShortsParser:
                         desc_runs = desc_item.get("descriptionBodyText", {}).get("runs", [])
                         if desc_runs:
                             description = " ".join(run.get("text", "") for run in desc_runs)
+                            print(f"Описание: {description}")
 
                     break
             articles = self.extract_article_tag(description)
@@ -260,7 +257,7 @@ class ShortsParser:
                 "image_url": image_url
             }
         except Exception as e:
-            self.logger.send("ERROR", f"Ошибка извлечения из reel_item_watch: {e}")
+            print(f"Ошибка извлечения из reel_item_watch: {e}")
             return None
 
     async def process_reel_item_watch(self, response):
@@ -270,17 +267,17 @@ class ShortsParser:
             if video and video["video_id"] not in self.seen_video_ids:
                 self.seen_video_ids.add(video["video_id"])
                 self.collected_videos.append(video)
-                # print("\n🟢 Получено видео из reel_item_watch:")
-                # print(f"   ID: {video['video_id']}")
-                # print(f"   Название: {video['name']}")
-                # print(f"   Лайки: {video['likes']}")
-                # print(f"   Комментарии: {video['comments']}")
-                # print(f"   Просмотры: {video['amount_views']}")
-                # print(f"   Дата: {video['publish_date']}")
-                # print(f"   Ссылка: {video['link']}")
-                # print(f"   Изображение: {video['image_url']}")
+                print("\n🟢 Получено видео из reel_item_watch:")
+                print(f"   ID: {video['video_id']}")
+                print(f"   Название: {video['name']}")
+                print(f"   Лайки: {video['likes']}")
+                print(f"   Комментарии: {video['comments']}")
+                print(f"   Просмотры: {video['amount_views']}")
+                print(f"   Дата: {video['publish_date']}")
+                print(f"   Ссылка: {video['link']}")
+                print(f"   Изображение: {video['image_url']}")
         except Exception as e:
-            self.logger.send("ERROR", f"Ошибка обработки reel_item_watch: {e}")
+            print(f"Ошибка обработки reel_item_watch: {e}")
 
     async def wait_for_reel_item_watch(self, timeout: int = 10):
         """Ждём появления ответа reel_item_watch."""
@@ -291,10 +288,10 @@ class ShortsParser:
                 for r in getattr(self, "_recent_responses", [])
             )
             if found:
-                self.logger.send("INFO", "📡 Получен ответ reel_item_watch")
+                print("📡 Получен ответ reel_item_watch")
                 return True
             await asyncio.sleep(0.5)
-        self.logger.send("ERROR", "⚠️ Не дождались reel_item_watch (возможно капча, но API всё равно работает)")
+        print("⚠️ Не дождались reel_item_watch (возможно капча, но API всё равно работает)")
         return False
 
     async def handle_response(self, response):
@@ -313,7 +310,7 @@ class ShortsParser:
                 self.response_tasks.append(task)
 
         except Exception as e:
-            self.logger.send("ERROR", f"Ошибка в handle_response: {e}")
+            print(f"Ошибка в handle_response: {e}")
 
     async def download_image(self, url: str, proxy: str = None) -> Union[bytes, None]:
         """Скачивает изображение с YouTube (можно с прокси)."""
@@ -325,7 +322,7 @@ class ShortsParser:
                 resp.raise_for_status()
                 return resp.content
         except Exception as e:
-            self.logger.send("ERROR", f"❌ Ошибка загрузки изображения {url}: {e}")
+            print(f"❌ Ошибка загрузки изображения {url}: {e}")
             return None
 
     async def upload_image(self, video_id: int, image_url: str, proxy: str = None):
@@ -339,13 +336,13 @@ class ShortsParser:
             files = {"file": (file_name, image_bytes, "image/jpeg")}
             try:
                 resp = await client.post(
-                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                    f"http://127.0.0.1:8000/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
                 return resp.status_code, resp.text
             except Exception as e:
-                self.logger.send("ERROR", f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
+                print(f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
                 return None, str(e)
 
     async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
@@ -362,7 +359,7 @@ class ShortsParser:
         current_proxy_index = 0
         if not url.endswith('/shorts'):
             url = url.rstrip('/') + '/shorts'
-        self.logger.send("INFO", f"Переход на канал: {url}")
+        print(f"Переход на канал: {url}")
 
         playwright = None
         browser = None
@@ -380,7 +377,7 @@ class ShortsParser:
                     host, port = proxy_str.split(":")
                     return {"server": f"http://{host}:{port}"}
             except Exception as e:
-                self.logger.send("ERROR", f"Неверный формат прокси: {e}")
+                print(f"Неверный формат прокси: {e}")
                 return None
 
         async def create_browser_with_proxy(proxy_str, playwright):
@@ -398,7 +395,7 @@ class ShortsParser:
             return browser, context, page
 
         current_proxy = random.choice(self.proxy_list) if self.proxy_list else None
-        self.logger.send("INFO", f"Используемый прокси: {current_proxy}")
+        print(f"Используемый прокси: {current_proxy}")
 
         all_videos_data = []
 
@@ -407,7 +404,7 @@ class ShortsParser:
             browser, context, page = await create_browser_with_proxy(current_proxy, playwright)
 
             # ШАГ 1: Открываем страницу и скроллим
-            self.logger.send("INFO", "🔍 Загружаем страницу Shorts…")
+            print("🔍 Загружаем страницу Shorts…")
             await page.goto(url, wait_until="networkidle", timeout=60000)
 
             # Закрыть куки если есть
@@ -416,19 +413,19 @@ class ShortsParser:
                 if accept_btn:
                     await accept_btn.click()
                     await page.wait_for_timeout(1200)
-                    self.logger.send("INFO", "Закрыта модалка с куки")
+                    print("Закрыта модалка с куки")
             except:
                 pass
 
             selector = "ytd-rich-item-renderer, ytd-reel-item-renderer, ytm-shorts-lockup-view-model"
             total_videos_from_dom = await self.scroll_until(page, url, selector=selector, delay=4.0)
-            self.logger.send("INFO", f"📊 Из DOM найдено {total_videos_from_dom} видео/изображений")
+            print(f"📊 Из DOM найдено {total_videos_from_dom} видео/изображений")
 
             if total_videos_from_dom == 0:
-                self.logger.send("ERROR", "⚠️ Нет видео для парсинга")
+                print("⚠️ Нет видео для парсинга")
                 return []
 
-            # print("Пропускаем reload, чтобы сохранить ленту Shorts")
+            print("Пропускаем reload, чтобы сохранить ленту Shorts")
 
             # Сброс состояния парсера
             self.seen_video_ids.clear()
@@ -441,10 +438,10 @@ class ShortsParser:
             item_locator = page.locator("ytd-rich-item-renderer, ytd-reel-item-renderer")
             # проверим, что есть минимум 1 и 2 элемента
             count = await item_locator.count()
-            self.logger.send("INFO", f"Локаторов в DOM: {count}")
+            print(f"Локаторов в DOM: {count}")
 
             if count < 1:
-                self.logger.send("ERROR", "⚠️ Не найден ни один элемент ленты")
+                print("⚠️ Не найден ни один элемент ленты")
                 return []
 
             # --- ШАГ A: Открываем первое видео и собираем reel_item_watch ---
@@ -452,7 +449,7 @@ class ShortsParser:
                 await item_locator.nth(0).locator("a[href*='/shorts/']").click()
             except Exception:
                 await item_locator.nth(0).click()
-            self.logger.send("INFO", "✅ Клик по первому рилсу выполнен")
+            print("✅ Клик по первому рилсу выполнен")
             await asyncio.sleep(5)
             await asyncio.gather(*self.response_tasks, return_exceptions=True)
             self.response_tasks.clear()
@@ -469,7 +466,7 @@ class ShortsParser:
                     await item_locator.nth(1).locator("a[href*='/shorts/']").click()
                 except Exception:
                     await item_locator.nth(1).click()
-                self.logger.send("INFO", "✅ Клик по второму рилсу выполнен")
+                print("✅ Клик по второму рилсу выполнен")
                 await asyncio.sleep(5)
                 await asyncio.gather(*self.response_tasks, return_exceptions=True)
                 self.response_tasks.clear()
@@ -480,14 +477,14 @@ class ShortsParser:
                 item_locator = page.locator("ytd-rich-item-renderer, ytd-reel-item-renderer")
                 count = await item_locator.count()
             else:
-                self.logger.send("WARNING", "ℹ️ Нет второго видео в ленте")
+                print("ℹ️ Нет второго видео в ленте")
 
             # Если всего 2 видео — всё, иначе продолжаем по описанной схеме
             if total_videos_from_dom <= 2:
-                self.logger.send("INFO", "📌 Всего 1-2 видео — сбор завершён.")
+                print("📌 Всего 1-2 видео — сбор завершён.")
             else:
                 # --- ШАГ C: Открываем первое снова, чтобы "установить" контекст, затем кликаем вниз 2 раза (чтобы попасть на 3-е)
-                self.logger.send("INFO", "🔁 Открываем первое видео снова и переходим вниз до 3-го")
+                print("🔁 Открываем первое видео снова и переходим вниз до 3-го")
                 try:
                     await item_locator.nth(0).locator("a[href*='/shorts/']").click()
                 except Exception:
@@ -515,7 +512,7 @@ class ShortsParser:
                     self.response_tasks.clear()
 
                 remaining_to_collect = total_videos_from_dom - len(self.collected_videos)
-                self.logger.send("INFO", f"⏭️ Будем щёлкать вниз и собирать ещё примерно {remaining_to_collect} видео")
+                print(f"⏭️ Будем щёлкать вниз и собирать ещё примерно {remaining_to_collect} видео")
 
                 while len(self.collected_videos) < total_videos_from_dom:
                     next_btn = await page.query_selector("#navigation-button-down button")
@@ -523,7 +520,7 @@ class ShortsParser:
                         try:
                             await page.keyboard.press("ArrowDown")
                         except:
-                            self.logger.send("INFO", "⏭️ Не получилось нажать вниз, выходим")
+                            print("⏭️ Не получилось нажать вниз, выходим")
                             break
                     else:
                         try:
@@ -532,7 +529,7 @@ class ShortsParser:
                             try:
                                 await page.keyboard.press("ArrowDown")
                             except:
-                                self.logger.send("INFO", "⏭️ Не получилось нажать вниз, выходим")
+                                print("⏭️ Не получилось нажать вниз, выходим")
                                 break
 
                     # дождёмся ответа
@@ -567,10 +564,10 @@ class ShortsParser:
                 for v in self.collected_videos
             ]
 
-            self.logger.send("INFO", f"✅ Собрано {len(all_videos_data)} из {total_videos_from_dom} видео")
+            print(f"✅ Собрано {len(all_videos_data)} из {total_videos_from_dom} видео")
 
         except Exception as main_error:
-            self.logger.send("ERROR", f"Критическая ошибка: {main_error}")
+            print(f"Критическая ошибка: {main_error}")
             raise
 
         finally:
@@ -582,15 +579,15 @@ class ShortsParser:
                         else:
                             await obj.close()
                     except Exception as e:
-                        self.logger.send("ERROR", f"Ошибка закрытия {name}: {e}")
+                        print(f"Ошибка закрытия {name}: {e}")
 
         processed_count = 0
         image_queue = []
         for video_data in all_videos_data:
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
-                    self.logger.send("INFO", f"🔍 Проверка видео: {video_data['link']}")
-                    check_resp = await client.get(f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={video_data['link']}")
+                    print("INFO", f"🔍 Проверка видео: {video_data['link']}")
+                    check_resp = await client.get(f"http://127.0.0.1:8000/api/v1/videos/?link={video_data['link']}")
                     is_new = False
                     video_id = None
 
@@ -600,7 +597,7 @@ class ShortsParser:
                         if vids:
                             video_id = vids[0]['id']
                             await client.patch(
-                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
+                                f"http://127.0.0.1:8000/api/v1/videos/{video_id}",
                                 json={
                                     "link": video_data["link"],
                                     "type": "youtube",
@@ -620,17 +617,17 @@ class ShortsParser:
                         is_new = True
 
                     if is_new:
-                        resp = await client.post("https://cosmeya.dev-klick.cyou/api/v1/videos/", json=video_data)
+                        resp = await client.post("http://127.0.0.1:8000/api/v1/videos/", json=video_data)
                         resp.raise_for_status()
                         video_id = resp.json()["id"]
-                        self.logger.send("INFO", f"✅ Создано новое видео {video_id}")
+                        print("INFO", f"✅ Создано новое видео {video_id}")
                         if video_data.get("image"):
                             image_queue.append((video_id, video_data["image"]))
                 processed_count += 1
             except Exception as e:
-                self.logger.send("ERROR", f"⚠️ Ошибка при обработке {video_data.get('link')}: {e}")
+                print("ERROR", f"⚠️ Ошибка при обработке {video_data.get('link')}: {e}")
 
-        self.logger.send("INFO", f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
+        print("INFO", f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
 
         # --- Загрузка изображений ---
         idx = 0
@@ -638,15 +635,44 @@ class ShortsParser:
             proxy = proxy_list[current_proxy_index] if proxy_list else None
             current_proxy_index = (current_proxy_index + 1) % len(proxy_list) if proxy_list else 0
             batch = image_queue[idx:idx + 15]
-            self.logger.send("INFO", f"🖼️ Загружаем {len(batch)} изображений через {proxy or 'без прокси'}")
+            print("INFO", f"🖼️ Загружаем {len(batch)} изображений через {proxy or 'без прокси'}")
 
             for vid, img_url in batch:
                 try:
                     status, _ = await self.upload_image(vid, img_url, proxy=proxy)
-                    self.logger.send("INFO", f"{'✅' if status == 200 else '⚠️'} Фото для видео {vid} → статус {status}")
+                    print("INFO", f"{'✅' if status == 200 else '⚠️'} Фото для видео {vid} → статус {status}")
                 except Exception as e:
-                    self.logger.send("ERROR", f"❌ Ошибка загрузки фото {vid}: {e}")
+                    print("ERROR", f"❌ Ошибка загрузки фото {vid}: {e}")
                 await asyncio.sleep(3.0)
             idx += 15
 
-        self.logger.send("INFO", f"🎉 Парсинг завершён: {processed_count} видео обработано.")
+        print("INFO", f"🎉 Парсинг завершён: {processed_count} видео обработано.")
+
+
+async def main():
+    proxy_list = [
+        "iuZKi4BGyp:vHKtDTzA0z@45.150.35.98:24730",
+        "QgSnMzKNDg:rQR6PpWyH6@45.150.35.140:37495",
+        "nGzc2Uw9o1:IOEIP5yqHF@45.150.35.72:30523",
+        "ljpOi6p4wE:AzWMnGcwT9@45.150.35.75:56674",
+        "mpiv4PCpJG:oFct8hLGU3@109.120.131.51:52137",
+        "BnpDZPR6sd:dIciqNGo7d@45.150.35.97:51776",
+        "3fNux7Ul42:pkfkTaLi9D@109.120.131.31:59895",
+        "dnyqkeZB92:y38H1PzPef@45.150.35.28:27472",
+        "udWhRyA0GU:laqpdeslpC@45.150.35.225:22532",
+        "qMGdKOcu0w:MfeGgg0Dh9@45.150.35.205:23070",
+        "cpeFm6Dh5x:bQXTp4e1gf@45.150.35.111:22684",
+        "K6dlqo2Xbn:KJ7TE9kPO7@45.150.35.51:49586",
+        "db2JltFuja:8MItiT5T12@45.150.35.10:58894",
+        # "79zEDvbAVA:xJBsip0IQK@45.150.35.4:58129",
+        "mBQnv9UCPd:e3VkzkB9p5@45.150.35.74:55101",
+        "IDWsfoHdf1:z6d3r0tnzM@45.150.35.244:42679",
+    ]
+    parser = ShortsParser()
+    url = "https://www.youtube.com/@kotokrabs"
+    await parser.parse_channel(url, channel_id=11, user_id=1,
+                               proxy_list=proxy_list)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
