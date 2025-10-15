@@ -1,40 +1,31 @@
-import { useEffect } from "react";
-import { BrowserRouter, useLocation } from "react-router-dom";
-import { initData } from "@telegram-apps/sdk-react";
+import { Suspense, useMemo } from "react";
+import { RouterProvider, createBrowserRouter } from "react-router-dom";
 
-import AppRouter from "@/routing/AppRouter";
-import Header from "@/components/header/Header";
-import { useAuth } from "@/store/AuthStore/main";
-import Footer from "@/components/footer/Footer";
-import { LoaderProvider } from "@/ui/loader/LoaderContext";
+import { useAppRouterConfig } from "./app/routes/AppRouter";
+
+import Layout from "./app/layout/Layout";
+import Loader from "./components/loader/Loader";
+import { useAuthStore } from "./app/store/user/store";
 
 function App() {
-  const {
-    isAuthenticated,
-    actions: { authTG, setToken },
-  } = useAuth();
+  const routeConfig = useAppRouterConfig();
+  const { isLoading } = useAuthStore();
 
+  const router = useMemo(() => {
+    return createBrowserRouter([
+      {
+        element: <Layout />,
+        children: routeConfig,
+      },
+    ]);
+  }, [routeConfig]);
 
-
-  useEffect(() => {
-    authTG(initData.raw(), initData.user());
-    setToken(initData.raw());
-  }, []);
-
+  if (isLoading) return <Loader />;
+  
   return (
-    <>
-      <BrowserRouter>
-        {/* <LoaderProvider> */}
-        <div className="layout">
-          <Header />
-          <main className="main__content">
-            <AppRouter />
-          </main>
-          {isAuthenticated && <Footer />}
-        </div>
-        {/* </LoaderProvider> */}
-      </BrowserRouter>
-    </>
+    <Suspense fallback={<Loader />}>
+      <RouterProvider router={router} />
+    </Suspense>
   );
 }
 

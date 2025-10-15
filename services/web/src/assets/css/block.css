@@ -1,0 +1,100 @@
+:root {
+  --font-family: "Montserrat", sans-serif;
+
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-red: #ff6363;
+  --color-error: #ff636366;
+  --color-grey: #d7d7d7;
+  --color-grey-text: #727272;
+  --color-placeholder: #bababa;
+  --color-beige: #f4eee9;
+  --color-orange: #fec178;
+  --color-light-brown: #b69989;
+  --color-brown: #693521;
+
+  --color-grey-hover: #c5c5c5;
+  --color-beige-hover: #e8dfd7;
+  --color-orange-hover: #fdac55;
+  --color-light-brown-hover: #a58876;
+  --color-brown-hover: #5a2c1c;
+
+  /* Более контрастные hover-цвета */
+  /* --color-grey-hover: #b8b8b8;
+    --color-beige-hover: #ddd0c5;
+    --color-orange-hover: #fc9a3a;
+    --color-light-brown-hover: #947866;
+    --color-brown-hover: #4d2416; */
+}
+
+#root {
+  padding: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--color-beige);
+}
+
+.app {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.main {
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 13px;
+}
+
+.container {
+  padding: 16px 0 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.error_text {
+  color: var(--color-red);
+  font-weight: 300;
+  font-size: 12px;
+  font-size: 14px;
+  margin: 4px 0;
+  opacity: 0;
+  align-self: flex-start;
+  transform: translateY(4px);
+  animation: fadeInUp 0.25s ease forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+._detail_btn {
+  width: 105px;
+  height: 26px;
+  font-size: 14px;
+}
