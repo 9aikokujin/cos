@@ -21,7 +21,7 @@ class Videos(Base, TimestampMixin):
     type = Column(Enum(VideoType), nullable=False)
     name = Column(String, nullable=True)
     image = Column(String, nullable=True)
-    article = Column(String, nullable=True)
+    articles = Column(String, nullable=True, index=True)
 
     channel_id = Column(ForeignKey("channels.id"), nullable=False, index=True)
     channel = relationship(

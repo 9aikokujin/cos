@@ -21,7 +21,7 @@ class VideosRepository:
         id: Optional[int] = None,
         type: Optional[VideoType] = None,
         channel_id: Optional[int] = None,
-        article: Optional[str] = None,
+        articles: Optional[str] = None,
         link: Optional[str] = None,
         page: Optional[int] = None,
         size: Optional[int] = None
@@ -37,8 +37,9 @@ class VideosRepository:
             query = query.filter(Videos.id == id)
         if type is not None:
             query = query.filter(Videos.type == type)
-        if article is not None:
-            query = query.filter(Videos.article == article)
+        if articles is not None:
+            # Ищем артикул как часть строки: например, "#sv" в "#sv,#jw"
+            query = query.filter(Videos.articles.contains(articles))
         if link is not None:
             query = query.filter(Videos.link == link)
         if channel_id is not None:
@@ -125,10 +126,14 @@ class VideosRepository:
             name=dto.name,
             type=dto.type,
             link=dto.link,
-            article=dto.article,
+            articles=dto.articles,
             channel_id=dto.channel_id,
             image=dto.image,
         )
+        if dto.articles:
+            video.article = ",".join(sorted(set(dto.articles)))
+        else:
+            video.article = None
         self.db.add(video)
         await self.db.commit()
         await self.db.refresh(video)
@@ -152,8 +157,8 @@ class VideosRepository:
             video.link = dto.link
         if dto.image is not None:
             video.image = dto.image
-        if dto.article is not None:
-            video.article = dto.article
+        if dto.articles is not None:
+            video.article = ",".join(sorted(set(dto.articles))) if dto.articles else None
 
         video.updated_at = func.now()
 

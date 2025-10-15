@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import httpx
 import json
 import os
@@ -216,7 +217,42 @@ class LikeeParser:
         self.logger.send("INFO", f"📦 Всего собрано видео: {len(all_videos)}")
         return all_videos
 
-    # --- Вспомогательные функции для изображений (без изменений) ---
+    def generate_short_title(self, full_title: str, max_length: int = 30) -> str:
+        if not full_title:
+            return ""
+        if len(full_title) <= max_length:
+            return full_title
+        truncated = full_title[:max_length]
+        last_space = truncated.rfind(' ')
+        if last_space != -1:
+            return truncated[:last_space]
+        return truncated
+
+    def extract_article_tag(self, caption: str) -> str | None:
+        """Возвращает строку со ВСЕМИ найденными артикулами (#sv, #jw и т.д.) через запятую или None."""
+        if not caption:
+            return None
+
+        allowed_tags = ["#sv", "#jw", "#qz", "#sr", "#fg"]
+        found_tags = []
+
+        caption_lower = caption.lower()
+        original_caption = caption  # сохраняем оригинальный регистр для точного извлечения
+
+        for tag in allowed_tags:
+            if tag in caption_lower:
+                # Ищем позицию в нижнем регистре
+                start = caption_lower.find(tag)
+                if start != -1:
+                    # Берём точное написание из оригинала (на случай если кто-то написал #SV)
+                    exact_tag = original_caption[start:start + len(tag)]
+                    found_tags.append(exact_tag)
+
+        # Убираем дубли и сортируем для консистентности (опционально)
+        found_tags = sorted(set(found_tags))
+
+        return ",".join(found_tags) if found_tags else None
+
     async def download_image(self, url: str, proxy: str = None) -> Union[bytes, None]:
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
@@ -275,25 +311,37 @@ class LikeeParser:
             # --- Этап: отправка видео в API (без Playwright) ---
             all_videos_data = []
             for video in videos:
-                link = f"https://likee.video/v/{video['postId']}"  # ← убраны пробелы
-                name = f"Video {video['postId']}"
+                link = f"https://likee.video/v/{video['postId']}"
                 amount_views = int(video.get("playCount", 0))
                 amount_likes = int(video.get("likeCount", 0))
                 amount_comments = int(video.get("commentCount", 0))
                 image_url = video.get("coverUrl")
+                description = (video.get("postLongDesc") or video.get("msgText") or "").strip()
+                name = self.generate_short_title(description, 30)
+                articles = self.extract_article_tag(description)
+                post_time = video.get("postTime")
+                published_at = None
+                if post_time is not None:
+                    try:
+                        # Безопасное преобразование
+                        dt = datetime.fromtimestamp(int(post_time), tz=timezone.utc)
+                        published_at = dt.strftime('%Y-%m-%d')
+                    except (ValueError, OSError, TypeError, OverflowError) as e:
+                        self.logger.send("WARNING", f"Ошибка при конвертации postTime {post_time}: {e}")
 
                 all_videos_data.append({
-                    "type": "likee",
-                    "channel_id": channel_id,
                     "link": link,
+                    "type": "likee",
                     "name": name,
+                    "image": image_url,
+                    "articles": articles,
+                    "channel_id": channel_id,
                     "amount_views": amount_views,
                     "amount_likes": amount_likes,
                     "amount_comments": amount_comments,
-                    "image_url": image_url
+                    "date_published": published_at
                 })
 
-            # ... (остальной код для отправки в API и загрузки изображений — без изменений)
             processed_count = 0
             image_queue = []
 
@@ -301,7 +349,7 @@ class LikeeParser:
                 try:
                     async with httpx.AsyncClient(timeout=20.0) as client:
                         check_resp = await client.get(
-                            f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/?link={video_data['link']}"
+                            f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
                         )
                         video_id = None
                         is_new = False
@@ -312,7 +360,7 @@ class LikeeParser:
                             if videos_api:
                                 video_id = videos_api[0]['id']
                                 update_resp = await client.patch(
-                                    f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/{video_id}",
+                                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                     json={
                                         "amount_views": video_data["amount_views"],
                                         "amount_likes": video_data["amount_likes"],
@@ -327,7 +375,7 @@ class LikeeParser:
 
                         if is_new:
                             create_resp = await client.post(
-                                f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/",
+                                "https://cosmeya.dev-klick.cyou/api/v1/videos/",
                                 json=video_data
                             )
                             create_resp.raise_for_status()

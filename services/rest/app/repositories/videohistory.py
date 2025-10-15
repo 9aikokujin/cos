@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from fastapi.exceptions import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import select
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from typing import Optional, List
 from app.models.videohistory import VideoHistory
 from app.schemas.videohistory import VideoHistoryCreate, VideoAmountViews
@@ -43,7 +43,7 @@ class VideoHistoryRepository:
             query = query.where(VideoHistory.created_at >= date_from)
 
         if articles is not None and len(articles) > 0:
-            query = query.where(Videos.article.in_(articles))
+            query = query.where(or_(*[Videos.articles.contains(tag) for tag in articles]))
 
         if user_id is not None:
             query = query.where(Channel.user_id == user_id)
@@ -175,19 +175,17 @@ class VideoHistoryRepository:
         query = (
             select(
                 func.date(VideoHistory.created_at).label("view_date"),
+                Videos.articles.label("article"),
                 func.max(VideoHistory.amount_views).label("max_views"),
                 func.max(VideoHistory.amount_likes).label("max_likes"),
-                func.max(VideoHistory.amount_comments).label("max_comments")
+                func.max(VideoHistory.amount_comments).label("max_comments"),
             )
             .join(VideoHistory.video)
             .join(Videos.channel)
-            .where(
-                Videos.article.isnot(None)
-            )
-            .group_by(func.date(VideoHistory.created_at))
-            .order_by(func.date(VideoHistory.created_at))
+            .where(Videos.articles.is_not(None))
         )
 
+        # --- Фильтры ---
         if id is not None:
             query = query.where(VideoHistory.id == id)
 
@@ -195,19 +193,16 @@ class VideoHistoryRepository:
             query = query.where(VideoHistory.video_id == video_id)
 
         if date_to is not None:
-            query = query.where(
-                VideoHistory.created_at <= date_to + timedelta(days=1))
+            query = query.where(VideoHistory.created_at <= date_to + timedelta(days=1))
 
         if date_from is not None:
             query = query.where(VideoHistory.created_at >= date_from)
 
         if date_published_to is not None:
-            query = query.where(
-                VideoHistory.date_published <= date_published_to)
+            query = query.where(VideoHistory.date_published <= date_published_to)
 
         if date_published_from is not None:
-            query = query.where(
-                VideoHistory.date_published >= date_published_from)
+            query = query.where(VideoHistory.date_published >= date_published_from)
 
         if user_id is not None:
             query = query.where(Channel.user_id == user_id)
@@ -218,19 +213,27 @@ class VideoHistoryRepository:
         if channel_type is not None:
             query = query.where(Channel.type == channel_type)
 
-        if articles is not None and len(articles) > 0:
-            query = query.where(Videos.article.in_(articles))
+        if articles:
+            query = query.where(or_(*[Videos.articles.like(f"%{a}%") for a in articles]))
 
+        # --- Группировка и сортировка ---
+        query = query.group_by(func.date(VideoHistory.created_at), Videos.articles)
+        query = query.order_by(func.date(VideoHistory.created_at))
+
+        # --- Выполнение ---
         result = await self.db.execute(query)
         rows = result.all()
         print(f"Это ровсы: {rows}")
+
+        # --- Форматирование ---
         return [
-            VideoAmountViews(
-                date=row.view_date,
-                views=int(row.max_views) if row.max_views is not None else 0,
-                likes=int(row.max_likes) if row.max_likes is not None else 0,
-                comments=int(row.max_comments) if row.max_comments is not None else 0
-            )
+            {
+                "date": row.view_date,
+                "article": row.article,
+                "views": int(row.max_views or 0),
+                "likes": int(row.max_likes or 0),
+                "comments": int(row.max_comments or 0),
+            }
             for row in rows
         ]
 
@@ -291,7 +294,7 @@ class VideoHistoryRepository:
             query = query.where(Channel.type == channel_type)
 
         if articles is not None and len(articles) > 0:
-            query = query.where(Videos.article.in_(articles))
+            query = query.where(or_(*[Videos.articles.contains(tag) for tag in articles]))
 
         result = await self.db.execute(query)
         rows = result.all()
