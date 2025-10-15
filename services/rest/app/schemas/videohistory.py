@@ -32,7 +32,8 @@ class HistoryParams(BaseModel):
     channel_id: Optional[int] = None
     channel_type: Optional[str] = None
     user_id: Optional[int] = None
-    articles: Optional[List[str]] = Query(None, description="Список артикулов через запятую или несколько параметров")
+    articles: Optional[List[str]] = Query(
+        None, description="Список артикулов через запятую или несколько параметров")
     date_published_to: Optional[datetime] = None
     date_published_from: Optional[datetime] = None
 
