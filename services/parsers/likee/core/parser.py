@@ -147,7 +147,7 @@ class LikeeParser:
 
             while True:
                 self.logger.send("INFO", f"🔍 Запрашиваем до {max_per_request} видео (после postId: {last_post_id or 'начала'})...")
-                api_url = "https://api.like-video.com/likee-activity-flow-micro/videoApi/getUserVideo"  # ← убраны пробелы
+                api_url = "https://api.like-video.com/likee-activity-flow-micro/videoApi/getUserVideo"
                 payload = {
                     "uid": uid,
                     "count": max_per_request,

@@ -234,14 +234,14 @@ class ShortsParser:
                                 except:
                                     continue
                         # Извлечение описания
-                        desc_item = item.get("expandableVideoDescriptionBodyRenderer", {})
-                        desc_runs = desc_item.get("descriptionBodyText", {}).get("runs", [])
-                        if desc_runs:
-                            description = " ".join(run.get("text", "") for run in desc_runs)
-                            print(f"Описание: {description}")
+                        # desc_item = item.get("expandableVideoDescriptionBodyRenderer", {})
+                        # desc_runs = desc_item.get("descriptionBodyText", {}).get("runs", [])
+                        # if desc_runs:
+                        #     description = " ".join(run.get("text", "") for run in desc_runs)
+                        #     print(f"Описание: {description}")
 
                     break
-            articles = self.extract_article_tag(description)
+            articles = self.extract_article_tag(title)
 
             # image_url = data.get("background", {}).get("cinematicContainerRenderer", {}).get("thumbnails", [{}])[0].get("url", None)
 
@@ -384,7 +384,11 @@ class ShortsParser:
             proxy_config = await get_proxy_config(proxy_str) if proxy_str else None
             browser = await playwright.chromium.launch(
                 headless=False,
-                args=["--disable-blink-features=AutomationControlled", "--start-maximized"],
+                args=[
+                    "--headless=new",
+                    "--disable-blink-features=AutomationControlled",
+                    "--start-maximized"
+                ],
             )
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
@@ -661,7 +665,7 @@ async def main():
         "dnyqkeZB92:y38H1PzPef@45.150.35.28:27472",
         "udWhRyA0GU:laqpdeslpC@45.150.35.225:22532",
         "qMGdKOcu0w:MfeGgg0Dh9@45.150.35.205:23070",
-        "cpeFm6Dh5x:bQXTp4e1gf@45.150.35.111:22684",
+        # "cpeFm6Dh5x:bQXTp4e1gf@45.150.35.111:22684",
         "K6dlqo2Xbn:KJ7TE9kPO7@45.150.35.51:49586",
         "db2JltFuja:8MItiT5T12@45.150.35.10:58894",
         # "79zEDvbAVA:xJBsip0IQK@45.150.35.4:58129",
@@ -669,10 +673,9 @@ async def main():
         "IDWsfoHdf1:z6d3r0tnzM@45.150.35.244:42679",
     ]
     parser = ShortsParser()
-    url = "https://www.youtube.com/@kotokrabs"
-    await parser.parse_channel(url, channel_id=11, user_id=1,
+    url = "https://www.youtube.com/@nastya.beomaa"
+    await parser.parse_channel(url, channel_id=12, user_id=1,
                                proxy_list=proxy_list)
 
 if __name__ == "__main__":
     asyncio.run(main())
-

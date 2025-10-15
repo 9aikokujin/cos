@@ -63,7 +63,6 @@ class ShortsParser:
             except (ValueError, TypeError):
                 pass
 
-        # Чистое число (например: "105 331" → 105331)
         digits_only = re.sub(r"[^\d.]", "", text.replace(" ", ""))
         if digits_only:
             try:
@@ -177,7 +176,7 @@ class ShortsParser:
         browser = await p.chromium.launch(
             headless=False,
             args=[
-                # "--headless=new",
+                "--headless=new",
                 "--disable-blink-features=AutomationControlled",
                 "--start-maximized",
                 "--disable-gpu",
@@ -440,9 +439,9 @@ async def main():
         "IDWsfoHdf1:z6d3r0tnzM@45.150.35.244:42679",
     ]
     parser = ShortsParser()
-    url = "https://www.youtube.com/@kotokrabs"
+    url = "https://www.youtube.com/@nastya.beomaa"
     user_id = 1
-    await parser.parse_channel(url, channel_id=1, user_id=user_id,
+    await parser.parse_channel(url, channel_id=12, user_id=user_id,
                                proxy_list=proxy_list)
 
 
