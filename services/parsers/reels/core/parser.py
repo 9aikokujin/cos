@@ -9,6 +9,7 @@ import httpx
 from utils.logger import TCPLogger
 # собирать юрл видосов, каждый открывать (только новые юрлы) брать оттуда дата создания видео
 
+
 class InstagramParser:
     def __init__(self, logger: TCPLogger):
         self.logger = logger

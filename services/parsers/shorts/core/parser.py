@@ -237,14 +237,14 @@ class ShortsParser:
                                     break
                                 except:
                                     continue
-                        # Извлечение описания
-                        desc_item = item.get("expandableVideoDescriptionBodyRenderer", {})
-                        desc_runs = desc_item.get("descriptionBodyText", {}).get("runs", [])
-                        if desc_runs:
-                            description = " ".join(run.get("text", "") for run in desc_runs)
+                        # # Извлечение описания
+                        # desc_item = item.get("expandableVideoDescriptionBodyRenderer", {})
+                        # desc_runs = desc_item.get("descriptionBodyText", {}).get("runs", [])
+                        # if desc_runs:
+                        #     description = " ".join(run.get("text", "") for run in desc_runs)
 
                     break
-            articles = self.extract_article_tag(description)
+            articles = self.extract_article_tag(title)
 
             # image_url = data.get("background", {}).get("cinematicContainerRenderer", {}).get("thumbnails", [{}])[0].get("url", None)
 
@@ -387,7 +387,11 @@ class ShortsParser:
             proxy_config = await get_proxy_config(proxy_str) if proxy_str else None
             browser = await playwright.chromium.launch(
                 headless=False,
-                args=["--disable-blink-features=AutomationControlled", "--start-maximized"],
+                args=[
+                    "--headless=new",
+                    "--disable-blink-features=AutomationControlled",
+                    "--start-maximized"
+                ],
             )
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
