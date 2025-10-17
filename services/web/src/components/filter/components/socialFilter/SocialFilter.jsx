@@ -1,11 +1,14 @@
+import { useFilterStore } from "@/app/store/filter/store";
 import { useMultiSelectFilter } from "@/hooks/useMultiSelectFilter";
 
 import Checkbox from "@/shared/ui/checkbox/Checkbox";
 import { SOCIALS } from "@/shared/utils/socialIcon";
 
 const SocialFilter = () => {
-  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (tags) => {
-    console.log("Выбранные соцсети:", tags);
+  const setSocial = useFilterStore((s) => s.setFilterChannelType);
+
+  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (social) => {
+    setSocial(social.join(""));
   });
   return (
     <div className="social_filter _flex_col_center">

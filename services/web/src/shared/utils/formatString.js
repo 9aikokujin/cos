@@ -3,7 +3,7 @@ export function formatNumber(value) {
   return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
-export function combineNameFields(user, priority = ["fullname", "first_name", "last_name"]) {
+export function combineNameFields(user, priority = ["last_name", "first_name", "fullname"]) {
   const nameParts = priority
     .filter((field) => user[field] && user[field].trim())
     .map((field) => user[field].trim());
@@ -15,16 +15,16 @@ export function formatNameToInitials(user) {
   if (!user) return "User";
   const { fullname, first_name, last_name } = user;
 
-  if (fullname && fullname.trim()) {
-    return formatFromFullName(fullname.trim());
-  }
-
-  if (first_name && first_name.trim() && last_name && last_name.trim()) {
-    return formatFromFirstLastName(first_name.trim(), last_name.trim());
-  }
-
   if (last_name && last_name.trim()) {
-    return last_name.trim();
+    return formatFromFullName(last_name.trim());
+  }
+
+  if (first_name && first_name.trim() && fullname && fullname.trim()) {
+    return formatFromFirstLastName(first_name.trim(), fullname.trim());
+  }
+
+  if (fullname && fullname.trim()) {
+    return fullname.trim();
   }
 
   if (first_name && first_name.trim()) {

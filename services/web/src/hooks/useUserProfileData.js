@@ -26,7 +26,7 @@ export const useUserProfileData = (userId, setValue) => {
         setInitialData({ ...userRes, fullName });
 
         // Соцсети
-        const socialsData = accountsRes.users || accountsRes.socials || [];
+        const socialsData = accountsRes.channels;
         setSocials(socialsData);
 
         socialsData.forEach((acc) => {

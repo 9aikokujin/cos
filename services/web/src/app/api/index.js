@@ -2,6 +2,7 @@ import axios from "axios";
 import auth from "./auth";
 import user from "./user";
 import account from "./account";
+import video from "./video";
 
 import { useAuthStore } from "../store/user/store";
 import { useNotificationStore } from "../store/notification/store";
@@ -73,6 +74,7 @@ const API = {
   auth: auth(instance),
   user: user(instance),
   account: account(instance),
+  video: video(instance),
 };
 
 export default API;
