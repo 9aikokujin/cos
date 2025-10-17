@@ -1,10 +1,18 @@
+import { useFilterStore } from "@/app/store/filter/store";
+
 import { useMultiSelectFilter } from "@/hooks/useMultiSelectFilter";
 import { hasTags } from "@/shared/utils/filters";
 
 const TagFilter = () => {
-  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (tags) => {
-    console.log("Выбранные теги:", tags);
-  });
+  const setTags = useFilterStore((s) => s.setFilterTag);
+
+  const { selected, toggleSelect } = useMultiSelectFilter(
+    "Применить",
+    (tags) => {
+      setTags(tags.join(", "));
+    },
+    true
+  );
 
   return (
     <div className="tag_filter _flex_col_center" style={{ gap: 10 }}>

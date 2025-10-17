@@ -1,11 +1,13 @@
+import { memo } from "react";
+
 import { ButtonIcon, Button } from "@/shared/ui/button/Button";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 
-const VideoItem = () => {
+const VideoItem = memo(({ video, ref }) => {
   const { confirmAction } = useConfirmModal();
 
-  const handleDeleteConfirm = () => {
-    console.log("✅ Удаление видео");
+  const handleDeleteConfirm = async () => {
+    await API.video.deleteVideo(video.id);
     closeModal();
   };
 
@@ -17,13 +19,13 @@ const VideoItem = () => {
     });
   };
   return (
-    <div className="video_item _flex">
+    <div ref={ref} className="video_item _flex">
       <div className="video_image">
-        <img src="" alt="" />
+        <img src={`https://cosmeya.dev-klick.cyou/api/v1/uploads/videos/${video.image}`} alt="" />
       </div>
       <div className="video_info _flex_col">
-        <h3 className="_name">База под макияж с SPF 50 от Cosmeya</h3>
-        <p className="_url">https://www.youtube.com/watch?v=MYTP3456</p>
+        <h3 className="_name">{video.name}</h3>
+        <p className="_url">{video.link}</p>
         <div className="video_item_btns _flex_sb">
           <ButtonIcon onClick={handleDelete} name={"trash"} />
           <Button className={"_orange _detail_btn"}>Детально</Button>
@@ -31,6 +33,6 @@ const VideoItem = () => {
       </div>
     </div>
   );
-};
+});
 
 export default VideoItem;

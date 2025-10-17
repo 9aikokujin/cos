@@ -4,4 +4,5 @@ export const initialEntityStore = {
   hasMore: true,
   isLoading: false,
   error: null,
+  term: "",
 };

@@ -3,9 +3,9 @@ import { socialNetworks } from "@/shared/utils/utils";
 import { useNotificationStore } from "../app/store/notification/store";
 
 export const useUserProfileSubmit = (user, userId, initialData, socials, goBack) => {
+  // const { showNotification } = useNotificationStore();
   return async (data) => {
     const updates = [];
-    const { showNotification } = useNotificationStore();
 
     // --- Проверка изменений ФИО и Telegram ID ---
     const fullNameChanged = data.fullName.trim() !== initialData.fullName.trim();
@@ -50,7 +50,7 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack)
 
     if (updates.length > 0) {
       await Promise.all(updates);
-      showNotification("Профиль обновлен");
+      // showNotification("Профиль обновлен");
     } else {
       console.log("Нет изменений");
     }

@@ -1,51 +1,55 @@
-import { useEffect, useState } from "react";
+import { useAccountStore } from "@/app/store/entity/store";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useFilterStore } from "@/app/store/filter/store";
+
+import API from "@/app/api";
+import { getSocialIcon } from "@/shared/utils/socialIcon";
 
 import SearchInput from "@/components/searchInput/SearchInput";
-import { useFiltersModalStore } from "@/app/store/filterModal/store";
-import { useMultiSelectFilter } from "../../../../hooks/useMultiSelectFilter";
+import { useMultiSelectFilter } from "@/hooks/useMultiSelectFilter";
 
-const mockiAccount = [
-  { name: "Захарова Алефтина Олеговна", id: "1" },
-  { name: "Захарова Алефтина Олеговна", id: "2" },
-  { name: "Захарова Алефтина Олеговна", id: "3" },
-  { name: "Петров Иван Сергеевич", id: "4" },
-  { name: "Соколова Анна Владимировна", id: "5" },
-  { name: "Захарова Алефтина Олеговна", id: "6" },
-  { name: "Петров Иван Сергеевич", id: "7" },
-  { name: "Захарова Алефтина Олеговна", id: "8" },
-  { name: "Соколова Анна Владимировна", id: "9" },
-  { name: "Захарова Алефтина Олеговна", id: "10" },
-  { name: "Петров Иван Сергеевич", id: "11" },
-  { name: "Соколова Анна Владимировна", id: "12" },
-  { name: "Петров Иван Сергеевич", id: "13" },
-  { name: "Захарова Алефтина Олеговна", id: "14" },
-];
+const fetchAccounts = async (page, term) => {
+  if (!term) {
+    const response = await API.account.getAccounts({ page });
+    return response;
+  } else {
+    const response = await API.account.getAccounts({ page, name_channel: term });
+    return response;
+  }
+};
 
 const AccountFilter = () => {
-  const [searchValue, setSearchValue] = useState("");
-  const filteredAccounts = mockiAccount.filter((acc) =>
-    acc.name.toLowerCase().includes(searchValue.toLowerCase())
+  const setAccountId = useFilterStore((s) => s.setFilterChannelId);
+
+  const { items, isLoading, lastItemRef } = useInfiniteScroll(
+    useAccountStore,
+    fetchAccounts,
+    "channels"
   );
-  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (tags) => {
-    console.log("Выбранные соцсети:", tags);
+  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (account) => {
+    setAccountId(account.join(""));
   });
   return (
     <div className="account_filter _flex_col_center">
       <h2>Аккаунты</h2>
       <div className="account_search">
-        <SearchInput placeholder="Поиск" alwaysExpanded onSearch={setSearchValue} width={"100%"} />
+        <SearchInput store={useAccountStore} placeholder="Поиск" alwaysExpanded width={"100%"} />
       </div>
       <ul className="account_list _flex_col_center">
-        {filteredAccounts.map((account) => (
+        {items.map((account, i) => (
           <li
             key={account.id}
+            ref={account.id === items.length - 1 ? lastItemRef : null}
             className={`filter_item _flex_center ${selected.includes(account.id) ? "_active" : ""}`}
             onClick={() => toggleSelect(account.id)}
           >
-            <p className="_name">{account.name}</p>
+            <div className="account_social_pic " style={{ marginRight: 10 }}>
+              <img src={getSocialIcon(account?.type)} alt="insta" />
+            </div>
+            <p className="_name">{account.name_channel}</p>
           </li>
         ))}
-        {filteredAccounts.length === 0 && <p className="empty_result">Ничего не найдено</p>}
+        {items.length === 0 && <p className="empty_result">Ничего не найдено</p>}
       </ul>
     </div>
   );

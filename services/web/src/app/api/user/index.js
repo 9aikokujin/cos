@@ -26,6 +26,13 @@ export default (instance) => ({
       data: { tg_id: id },
     }).then((response) => response.data);
   },
+  updateUser(id, data) {
+    return instance({
+      method: "PATCH",
+      url: `/users/${id}`,
+      data,
+    }).then((response) => response.data);
+  },
   deleteUser(id) {
     return instance({
       method: "DELETE",

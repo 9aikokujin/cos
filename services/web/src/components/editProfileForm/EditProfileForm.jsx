@@ -16,7 +16,6 @@ import "./EditProfileForm.css";
 const EditProfileForm = () => {
   const { user } = useAuthStore();
   const { id: userId } = useParams();
-  console.log("🚀 userId", useParams());
   const goBack = useBack();
 
   const { register, handleSubmit, setValue, clearErrors, formState: { errors } } = useForm();
