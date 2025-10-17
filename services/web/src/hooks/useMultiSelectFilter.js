@@ -1,7 +1,44 @@
+// import { useState, useEffect, useRef } from "react";
+// import { useFiltersModalStore } from "@/app/store/filterModal/store";
+
+// export const useMultiSelectFilter = (applyLabel = "Применить", onApply) => {
+//   const setFooter = useFiltersModalStore((s) => s.setFooter);
+//   const close = useFiltersModalStore((s) => s.close);
+
+//   const [selected, setSelected] = useState([]);
+//   const selectedRef = useRef(selected);
+
+//   useEffect(() => {
+//     selectedRef.current = selected;
+//   }, [selected]);
+
+//   const toggleSelect = (id) => {
+//     setSelected((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+//   };
+
+//   const handleApply = () => {
+//     const current = selectedRef.current;
+//     if (onApply) onApply(current);
+//     console.log("✅ Выбранные элементы:", current);
+//     close();
+//   };
+
+//   useEffect(() => {
+//     setFooter({
+//       text: applyLabel,
+//       visible: true,
+//       onClick: handleApply,
+//     });
+//   }, []);
+
+//   return { selected, toggleSelect };
+// };
+
+
 import { useState, useEffect, useRef } from "react";
 import { useFiltersModalStore } from "@/app/store/filterModal/store";
 
-export const useMultiSelectFilter = (applyLabel = "Применить", onApply) => {
+export const useMultiSelectFilter = (applyLabel = "Применить", onApply, multiple = false) => {
   const setFooter = useFiltersModalStore((s) => s.setFooter);
   const close = useFiltersModalStore((s) => s.close);
 
@@ -13,7 +50,15 @@ export const useMultiSelectFilter = (applyLabel = "Применить", onApply)
   }, [selected]);
 
   const toggleSelect = (id) => {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+    setSelected((prev) => {
+      if (multiple) {
+        // мультивыбор
+        return prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id];
+      } else {
+        // одиночный выбор
+        return prev.includes(id) ? [] : [id];
+      }
+    });
   };
 
   const handleApply = () => {
@@ -31,5 +76,5 @@ export const useMultiSelectFilter = (applyLabel = "Применить", onApply)
     });
   }, []);
 
-  return { selected, toggleSelect };
+  return { selected, toggleSelect, setSelected };
 };

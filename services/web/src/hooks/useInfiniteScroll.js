@@ -4,6 +4,7 @@ export const useInfiniteScroll = (store, fetchFn, entity, deps = []) => {
   const {
     items,
     page,
+    term,
     hasMore,
     isLoading,
     setItems,
@@ -19,27 +20,33 @@ export const useInfiniteScroll = (store, fetchFn, entity, deps = []) => {
 
   const fetchItems = useCallback(async () => {
     if (isLoading || !hasMore) return;
+
     setLoading(true);
     setError(null);
 
     try {
-      const result = await fetchFn(page);
-      const data = result?.[entity] || result;
+      const result = await fetchFn(page, term);
+
+      const data = (entity ? result?.[entity] : result) ?? [];
 
       if (page === 1) setItems(data);
       else appendItems(data);
 
-      setHasMore(data.length > 0);
+      setHasMore(data.length >= 10);
     } catch (err) {
       setError(err);
     } finally {
       setLoading(false);
     }
-  }, [page, ...deps]);
+  }, [page, term, hasMore]);
 
   useEffect(() => {
     fetchItems();
-  }, [page, ...deps]);
+  }, [fetchItems, term]);
+
+  useEffect(() => {
+    reset();
+  }, [term, ...deps]);
 
   const lastItemRef = useCallback(
     (node) => {
