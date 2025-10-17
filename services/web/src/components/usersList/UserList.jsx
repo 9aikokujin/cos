@@ -7,17 +7,18 @@ import UserItem from "./components/UserItem";
 
 import "./UserList.css";
 
-const fetchUsers = async (page) => {
-  const response = await API.user.getUsers(page);
-  return response;
+const fetchUsers = async (page, term) => {
+  if (!term) {
+    const response = await API.user.getUsers(page);
+    return response;
+  } else {
+    const response = await API.user.searchUsers(term, page);
+    return response;
+  }
 };
 
 const UserList = () => {
-  const { items, isLoading, hasMore, lastItemRef } = useInfiniteScroll(
-    useUsersStore,
-    fetchUsers,
-    "users"
-  );
+  const { items, isLoading, lastItemRef } = useInfiniteScroll(useUsersStore, fetchUsers, "users");
   return (
     <div className="_flex_col_center" style={{ gap: 20, overflow: "auto", paddingBottom: 20 }}>
       {items.map((item, i) => (

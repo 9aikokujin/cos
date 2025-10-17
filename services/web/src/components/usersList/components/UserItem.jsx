@@ -39,7 +39,7 @@ const UserItem = memo(({ user, ref }) => {
       </div>
       <div className="user_item_bottom _flex_sb">
         <div className="_flex" style={{ gap: 7 }}>
-          <Link to={AppRoutes.EDITPROFILE} state={{ from: location.pathname }}>
+          <Link to={AppRoutes.EDITPROFILE.replace(":id", user?.id)} state={{ from: location.pathname }}>
             <ButtonIcon name={"edit"} />
           </Link>
           <ButtonIcon onClick={handleDelete} name={"trash"} />

@@ -1,4 +1,5 @@
 export const createEntityActions = (set, get) => ({
+  setTerm: (term) => set({ term }),
   setItems: (items) => set({ items }),
   appendItems: (newItems) => set((state) => ({ items: [...state.items, ...newItems] })),
   setLoading: (isLoading) => set({ isLoading }),
