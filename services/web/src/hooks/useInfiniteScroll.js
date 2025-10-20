@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import { useFilterStore } from "@/app/store/filter/store";
 
 export const useInfiniteScroll = (store, fetchFn, entity, deps = []) => {
   const {
@@ -16,6 +17,8 @@ export const useInfiniteScroll = (store, fetchFn, entity, deps = []) => {
     reset,
   } = store();
 
+  const filter = useFilterStore((state) => state.filter);
+
   const observerRef = useRef(null);
 
   const fetchItems = useCallback(async () => {
@@ -25,7 +28,7 @@ export const useInfiniteScroll = (store, fetchFn, entity, deps = []) => {
     setError(null);
 
     try {
-      const result = await fetchFn(page, term);
+      const result = await fetchFn(page, term, filter);
 
       const data = (entity ? result?.[entity] : result) ?? [];
 
@@ -38,15 +41,15 @@ export const useInfiniteScroll = (store, fetchFn, entity, deps = []) => {
     } finally {
       setLoading(false);
     }
-  }, [page, term, hasMore]);
+  }, [page, term, filter, hasMore]);
 
   useEffect(() => {
     fetchItems();
-  }, [fetchItems, term]);
+  }, [fetchItems, term, filter]);
 
   useEffect(() => {
     reset();
-  }, [term, ...deps]);
+  }, [term, filter, ...deps]);
 
   const lastItemRef = useCallback(
     (node) => {

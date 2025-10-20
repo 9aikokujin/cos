@@ -1,9 +1,10 @@
+import { useMemo, useState, useEffect } from "react";
 import dayjs from "dayjs";
 import isBetween from "dayjs/plugin/isBetween";
-import { useMemo, useState, useEffect } from "react";
 
 import { ComponentIcon } from "@/shared/ui/icon/ComponentIcon";
 import { useFiltersModalStore } from "@/app/store/filterModal/store";
+import { useFilterStore } from "@/app/store/filter/store";
 
 import {
   daysOfTheWeek,
@@ -20,6 +21,8 @@ dayjs.extend(isBetween);
 
 export const DatePicker = ({ mode = "range", initialValue }) => {
   const { setFooter, close } = useFiltersModalStore();
+  const setDateFrom = useFilterStore((state) => state.setFilterDateFrom);
+  const setDateTo = useFilterStore((state) => state.setFilterDateTo);
 
   const today = dayjs();
   const [panelYear, setPanelYear] = useState(today.year());
@@ -73,7 +76,8 @@ export const DatePicker = ({ mode = "range", initialValue }) => {
       visible: true,
       onClick: () => {
         if (selectedRange.start && selectedRange.end) {
-          console.log("✅ Диапазон выбран:", selectedRange);
+          setDateFrom(selectedRange.start.format("YYYY-MM-DD"));
+          setDateTo(selectedRange.end.format("YYYY-MM-DD"));
           close();
         }
       },
@@ -101,12 +105,9 @@ export const DatePicker = ({ mode = "range", initialValue }) => {
       >
         {/* Заголовки дней недели */}
         {daysOfTheWeek.map((day, index) => {
-          const isWeekend = index === 5 || index === 6; // Сб, Вс
+          const isWeekend = index === 5 || index === 6;
           return (
-            <div
-              key={day}
-              className={`calendar__header ${isWeekend ? "_week_end" : ""}`}
-            >
+            <div key={day} className={`calendar__header ${isWeekend ? "_week_end" : ""}`}>
               {day}
             </div>
           );

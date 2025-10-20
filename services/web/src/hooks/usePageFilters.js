@@ -4,9 +4,9 @@ import { AppRoutes } from "../app/routes/routes";
 import { filters } from "../shared/utils/filters";
 
 const pageFiltersByPath = {
-  [AppRoutes.VIDEOS]: ["date", "accounts", "social"],
-  [AppRoutes.USER]: ["date"],
-  [AppRoutes.ACCOUNTS]: ["date", "social"],
+  [AppRoutes.VIDEOS]: ["users", "social"],
+  [AppRoutes.USER]: [],
+  [AppRoutes.ACCOUNTS]: ["social"],
   [AppRoutes.STATISTIC]: ["date", "users", "accounts", "social", "tags"],
 };
 
@@ -16,9 +16,7 @@ export const usePageFilters = () => {
   const location = useLocation();
   const path = location.pathname;
 
-  const matchedPath = Object.keys(pageFiltersByPath).find((key) =>
-    path.startsWith(key)
-  );
+  const matchedPath = Object.keys(pageFiltersByPath).find((key) => path.startsWith(key));
 
   const filterIds = matchedPath ? pageFiltersByPath[matchedPath] : [];
 
