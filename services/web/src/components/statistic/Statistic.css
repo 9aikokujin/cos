@@ -1,0 +1,127 @@
+.statistic_container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  row-gap: 9px;
+  column-gap: 30px;
+  max-width: 500px;
+  margin: 0 auto;
+  margin-bottom: 30px;
+  width: 100%;
+}
+
+.statistic_block {
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  height: 89px;
+  border-radius: 8px;
+  background-color: var(--color-white);
+  box-shadow: 0px 2px 14px 0px #0000001a;
+  color: var(--color-black);
+}
+
+.statistic_block ._title {
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 120%;
+  text-align: center;
+}
+
+.statistic_block ._value {
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 120%;
+  text-align: center;
+}
+
+.diagram__container {
+  width: 100%;
+  max-width: 750px;
+  height: 200px;
+  margin: 0 auto;
+  padding: 20px 20px 30px;
+  margin-bottom: 30px;
+  background-color: var(--color-white);
+  border-radius: 8px;
+  box-shadow: 0px 2px 14px 0px #0000001a;
+}
+
+.report_container {
+  margin-bottom: 20px;
+}
+
+.report_download_btn {
+  width: 191px;
+  height: 42px;
+}
+
+.statistic__video_table {
+  width: 100%;
+  max-width: 750px;
+  overflow: hidden;
+  box-shadow: 0px 2px 14px 0px #0000001a;
+  border-radius: 20px;
+  background-color: var(--color-white);
+  padding: 20px;
+  margin: 0 auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 800px;
+  border-spacing: 0 15px;
+}
+
+.table_container {
+  width: 100%;
+  cursor: grab;
+  max-height: 400px;
+  overflow: auto;
+  position: relative;
+  -webkit-overflow-scrolling: touch;
+}
+.table_container:active {
+  cursor: grabbing;
+}
+
+.table thead {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: white;
+}
+
+thead th {
+  height: 30px;
+  font-weight: 400;
+  font-size: 14px;
+  line-height: 100%;
+  text-align: left;
+  vertical-align: middle;
+  color: #727272;
+  position: sticky;
+  top: 0;
+  z-index: 101;
+}
+
+tbody td span {
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 100%;
+  color: #382f31;
+}
+
+.table th:nth-child(1),
+.table td:nth-child(1) {
+  width: 277px;
+}
+
+.table th:nth-child(2),
+.table td:nth-child(2) {
+  width: 230px;
+}
+
+.table th:nth-child(3),
+.table td:nth-child(3) {
+  width: 95px;
+}
