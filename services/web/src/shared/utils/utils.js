@@ -14,4 +14,9 @@ export const footerAdminLinks = [
   { path: AppRoutes.STATISTIC, icon: "statistic", matchSubpaths: true },
 ];
 
-
+export function sumFields(array, fields) {
+  return fields.reduce((result, field) => {
+    result[field] = array.reduce((sum, item) => sum + (item[field] || 0), 0);
+    return result;
+  }, {});
+}

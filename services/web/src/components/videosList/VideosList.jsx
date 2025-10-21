@@ -15,7 +15,7 @@ const fetchVideos = async (page, term, filter) => {
   }
 
   if (filter?.channel_type) {
-    params.type = filter.channel_type;
+    params.type = filter.channel_type.toLowerCase();
   }
 
   if (filter?.user_id) {

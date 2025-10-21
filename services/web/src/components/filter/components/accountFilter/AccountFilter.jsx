@@ -8,14 +8,18 @@ import { getSocialIcon } from "@/shared/utils/socialIcon";
 import SearchInput from "@/components/searchInput/SearchInput";
 import { useMultiSelectFilter } from "@/hooks/useMultiSelectFilter";
 
-const fetchAccounts = async (page, term) => {
-  if (!term) {
-    const response = await API.account.getAccounts({ page });
-    return response;
-  } else {
-    const response = await API.account.getAccounts({ page, name_channel: term });
-    return response;
+const fetchAccounts = async (page, term, filter) => {
+  const params = { page };
+
+  if (term) {
+    params.name_channel = term;
   }
+
+  if (filter?.channel_type) {
+    params.type = filter.channel_type.toLowerCase();
+  }
+  const response = await API.account.getAccounts(params);
+  return response;
 };
 
 const AccountFilter = () => {
