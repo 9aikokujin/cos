@@ -179,7 +179,7 @@
 }
 
 .account_list {
-  max-height: 350px;
+  max-height: 225px;
   overflow-y: auto;
   width: 100%;
   padding: 10px 20px;

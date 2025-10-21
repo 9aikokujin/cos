@@ -8,7 +8,6 @@ import AppModals from "@/components/typeModal/AppModal";
 
 const Layout = () => {
   const location = useLocation();
-  console.log("🚀 location", location);
   const hideFooter = location.pathname === AppRoutes.AUTH;
   return (
     <div className="app">

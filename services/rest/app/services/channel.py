@@ -9,10 +9,7 @@ from app.models.channel import ChannelType
 from app.models.account import Account
 from app.models.proxy import Proxy
 from app.utils.rabbitmq_producer import rabbit_producer
-from app.utils.scheduler import scheduler, process_recurring_task
-
-from app.models.task import Task, TaskSourceTypes, TaskTypes
-from apscheduler.triggers.interval import IntervalTrigger
+from app.utils.scheduler import schedule_channel_task
 
 from fastapi import HTTPException
 
@@ -68,18 +65,31 @@ class ChannelService:
 
         proxies_from_db = await self.repo.db.execute(select(Proxy))
         proxies = proxies_from_db.scalars().all()
+        likee_proxies = [p.proxy_str for p in proxies if p.for_likee is True]
         proxies_for_send = [p.proxy_str for p in proxies]
 
         accounts_from_db = await self.repo.db.execute(select(Account))
         accounts = accounts_from_db.scalars().all()
         accounts_for_send = []
+        for account in accounts:
+            accounts_for_send.append(account.account_str)
 
         type_channel = ChannelType.get_by_value(dto.type.value)
         if type_channel == ChannelType.LIKEE:
-            pass
+            rabbit_producer.send_task(
+                f"parsing_{dto.type.value}",
+                {
+                    "type": "channel",
+                    "user_id": user.id,
+                    "url": new_channel.link,
+                    "channel_id": new_channel.id,
+                    "accounts": accounts_for_send,
+                    "proxy_list": likee_proxies
+                }
+            )
 
-        for account in accounts:
-            accounts_for_send.append(account.account_str)
+            schedule_channel_task(new_channel.id, start_from_next_day=True)
+            return new_channel
 
         rabbit_producer.send_task(
             f"parsing_{dto.type.value}",
@@ -93,15 +103,7 @@ class ChannelService:
             }
         )
 
-        job_id = f"task_{new_channel.id}"
-        scheduler.add_job(
-            process_recurring_task,
-            "interval",
-            hours=24,
-            args=[new_channel.id, "channel"],
-            id=job_id,
-            max_instances=1,
-        )
+        schedule_channel_task(new_channel.id, start_from_next_day=True)
 
         return new_channel
 
@@ -140,15 +142,7 @@ class ChannelService:
             }
         )
 
-        job_id = f"task_{new_channel.id}"
-        scheduler.add_job(
-            process_recurring_task,
-            "interval",
-            hours=24,
-            args=[new_channel.id, "channel"],
-            id=job_id,
-            max_instances=1,
-        )
+        schedule_channel_task(new_channel.id, start_from_next_day=True)
 
         return new_channel
 
