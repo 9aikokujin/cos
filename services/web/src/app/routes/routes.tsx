@@ -80,7 +80,7 @@ const adminRoutes = [
     element: <VideosPage />,
     handle: {
       header: {
-        showAddButton: true,
+        showAddButton: false,
         showAccount: true,
         modal: {
           title: "Добавить видео",

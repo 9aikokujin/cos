@@ -7,18 +7,31 @@ import VideoItem from "./components/VideoItem";
 
 import "./VideosList.css";
 
-const fetchVideos = async (page, term) => {
-  if (!term) {
-    const response = await API.video.getVideos({ page });
-    return response;
-  } else {
-    const response = await API.video.getVideos({ page, link: term });
-    return response;
+const fetchVideos = async (page, term, filter) => {
+  const params = { page };
+
+  if (term) {
+    params.link = term;
   }
+
+  if (filter?.channel_type) {
+    params.type = filter.channel_type;
+  }
+
+  if (filter?.user_id) {
+    params.user_id = filter.user_id;
+  }
+
+  const response = await API.video.getVideos(params);
+  return response;
 };
 
 const VideosList = () => {
-  const { items, isLoading, lastItemRef } = useInfiniteScroll(useVideosStore, fetchVideos, "videos");
+  const { items, isLoading, lastItemRef } = useInfiniteScroll(
+    useVideosStore,
+    fetchVideos,
+    "videos"
+  );
   return (
     <div className="_flex_col_center" style={{ gap: 20, overflow: "auto", paddingBottom: 20 }}>
       {items.map((item, i) => (

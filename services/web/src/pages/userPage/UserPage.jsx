@@ -9,8 +9,8 @@ const UserPage = () => {
   useResetFiltersOnLeave()
   return (
     <div className="container">
-      <div className="_flex_sb" style={{ gap: 11, marginBottom: 12 }}>
-        <Filter />
+      <div className="_flex_end" style={{ gap: 11, marginBottom: 12 }}>
+        {/* <Filter /> */}
         <SearchInput store={useUsersStore} />
       </div>
       <UserList />
