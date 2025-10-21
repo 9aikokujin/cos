@@ -8,7 +8,7 @@ const SocialFilter = () => {
   const setSocial = useFilterStore((s) => s.setFilterChannelType);
 
   const { selected, toggleSelect } = useMultiSelectFilter("Применить", (social) => {
-    setSocial(social.join(""));
+    setSocial(social.join("").toUpperCase());
   });
   return (
     <div className="social_filter _flex_col_center">
