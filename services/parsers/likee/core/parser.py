@@ -322,8 +322,22 @@ class LikeeParser:
         try:
             playwright = await async_playwright().start()
 
-            proxy_list = proxy_list or []
+            if proxy_list is None:
+                proxy_list = []
+            elif not isinstance(proxy_list, list):
+                self.logger.send(
+                    "WARNING",
+                    f"Получен proxy_list некорректного типа ({type(proxy_list)}): {proxy_list}. "
+                    "Преобразую в список.",
+                )
+                proxy_list = [proxy_list]
+
+            proxy_list = [p for p in proxy_list if p]
             proxies_cycle = proxy_list if proxy_list else [None]
+            self.logger.send(
+                "INFO",
+                f"🔁 Подготовлено прокси для перебора: {proxies_cycle}",
+            )
 
             uid = None
             videos: List[Dict] = []
