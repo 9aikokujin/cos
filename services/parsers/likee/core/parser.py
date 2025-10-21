@@ -44,10 +44,21 @@ class LikeeParser:
         max_retries: int = 3,
         proxy_override: Optional[str] = None,
     ) -> Optional[str]:
+        try:
+            retries = int(max_retries)
+            if retries < 1:
+                retries = 1
+        except (TypeError, ValueError):
+            self.logger.send(
+                "WARNING",
+                f"Получен некорректный max_retries={max_retries}, использую 3",
+            )
+            retries = 3
+
         profile_url = f"https://likee.video/p/{short_id}"
         self.logger.send("INFO", f"➡️ Открываем профиль: {profile_url}")
 
-        for attempt in range(1, max_retries + 1):
+        for attempt in range(1, retries + 1):
             proxy = proxy_override or (random.choice(proxy_list) if proxy_list else None)
             proxy_config = await self.get_proxy_config(proxy) if proxy else None
 
