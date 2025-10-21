@@ -1,55 +1,111 @@
 name: CI/CD
+
 on:
   push:
-    branches:
-      - master
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     name: Server Deployment
-    runs-on: ubuntu-latest
+    runs-on: img-ubuntu-22.04
+    # Если нет метки образа у раннера, используй:
+    # runs-on: self-hosted
+
+    # "Переход" в каталог infra — все run-скрипты выполняются из этой папки
+    defaults:
+      run:
+        working-directory: infra
+
     env:
-      COS_POSTGRES_USER: ${{ secrets.COS_POSTGRES_USER }}
-      COS_POSTGRES_PASSWORD: ${{ secrets.COS_POSTGRES_PASSWORD }}
-      COS_POSTGRES_DB: ${{ secrets.COS_POSTGRES_DB }}
-      COS_POSTGRES_PORT: ${{ secrets.COS_POSTGRES_PORT }}
-      COS_POSTGRES_CONTAINER: ${{ secrets.COS_POSTGRES_CONTAINER }}
-      COS_RABBITMQ_USER: ${{ secrets.COS_RABBITMQ_USER }}
-      COS_RABBITMQ_PASSWORD: ${{ secrets.COS_RABBITMQ_PASSWORD }}
-      COS_RABBITMQ_PORT: ${{ secrets.COS_RABBITMQ_PORT }}
-      COS_RABBITMQ_MANAGEMENT_PORT: ${{ secrets.COS_RABBITMQ_MANAGEMENT_PORT }}
-      COS_RABBITMQ_CONTAINER: ${{ secrets.COS_RABBITMQ_CONTAINER }}
-      COS_RABBITMQ_HOST: ${{ secrets.COS_RABBITMQ_HOST }}
-      COS_CLICKHOUSE_PORT_HTTP: ${{ secrets.COS_CLICKHOUSE_PORT_HTTP }}
-      COS_CLICKHOUSE_PORT_NATIVE: ${{ secrets.COS_CLICKHOUSE_PORT_NATIVE }}
-      COS_CLICKHOUSE_CONTAINER: ${{ secrets.COS_CLICKHOUSE_CONTAINER }}
-      COS_ELASTICSEARCH_PORT: ${{ secrets.COS_ELASTICSEARCH_PORT }}
-      COS_ELASTICSEARCH_CONTAINER: ${{ secrets.COS_ELASTICSEARCH_CONTAINER }}
+      # Postgres
+      SN_POSTGRES_USER: ${{ secrets.SN_POSTGRES_USER }}
+      SN_POSTGRES_PASSWORD: ${{ secrets.SN_POSTGRES_PASSWORD }}
+      SN_POSTGRES_DB: ${{ secrets.SN_POSTGRES_DB }}
+      SN_POSTGRES_PORT: ${{ secrets.SN_POSTGRES_PORT }}
+      SN_POSTGRES_CONTAINER: ${{ secrets.SN_POSTGRES_CONTAINER }}
+
+      # RabbitMQ
+      SN_RABBITMQ_USER: ${{ secrets.SN_RABBITMQ_USER }}
+      SN_RABBITMQ_PASSWORD: ${{ secrets.SN_RABBITMQ_PASSWORD }}
+      SN_RABBITMQ_PORT: ${{ secrets.SN_RABBITMQ_PORT }}
+      SN_RABBITMQ_MANAGEMENT_PORT: ${{ secrets.SN_RABBITMQ_MANAGEMENT_PORT }}
+      SN_RABBITMQ_CONTAINER: ${{ secrets.SN_RABBITMQ_CONTAINER }}
+      SN_RABBITMQ_HOST: ${{ secrets.SN_RABBITMQ_HOST }}
+
+      # ClickHouse
+      SN_CLICKHOUSE_PORT_HTTP: ${{ secrets.SN_CLICKHOUSE_PORT_HTTP }}
+      SN_CLICKHOUSE_PORT_NATIVE: ${{ secrets.SN_CLICKHOUSE_PORT_NATIVE }}
+      SN_CLICKHOUSE_CONTAINER: ${{ secrets.SN_CLICKHOUSE_CONTAINER }}
+
+      # Elastic / Kibana / Logstash
+      SN_ELASTICSEARCH_PORT: ${{ secrets.SN_ELASTICSEARCH_PORT }}
+      SN_ELASTICSEARCH_CONTAINER: ${{ secrets.SN_ELASTICSEARCH_CONTAINER }}
       ELASTIC_PASSWORD: ${{ secrets.ELASTIC_PASSWORD }}
-      COS_KIBANA_PORT: ${{ secrets.COS_KIBANA_PORT }}
-      COS_KIBANA_CONTAINER: ${{ secrets.COS_KIBANA_CONTAINER }}
+      SN_KIBANA_PORT: ${{ secrets.SN_KIBANA_PORT }}
+      SN_KIBANA_CONTAINER: ${{ secrets.SN_KIBANA_CONTAINER }}
       KIBANA_PASSWORD: ${{ secrets.KIBANA_PASSWORD }}
-      COS_LOGSTASH_PORT: ${{ secrets.COS_LOGSTASH_PORT }}
-      COS_LOGSTASH_CONTAINER: ${{ secrets.COS_LOGSTASH_CONTAINER }}
-      COS_LOGSTASH_HOST: ${{ secrets.COS_LOGSTASH_HOST }}
+      SN_LOGSTASH_PORT: ${{ secrets.SN_LOGSTASH_PORT }}
+      SN_LOGSTASH_CONTAINER: ${{ secrets.SN_LOGSTASH_CONTAINER }}
+      SN_LOGSTASH_HOST: ${{ secrets.SN_LOGSTASH_HOST }}
+
+      # App / misc
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      COS_REST_API_CONTAINER: ${{ secrets.COS_REST_API_CONTAINER }}
+      SN_REST_API_CONTAINER: ${{ secrets.SN_REST_API_CONTAINER }}
       TELEGRAM_ADMIN_ID: ${{ secrets.TELEGRAM_ADMIN_ID }}
 
     steps:
-      - name: Set up Docker Compose
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker-compose
-
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Navigate to infra/production
-        run: cd infra/production
-
-      - name: Run Docker Compose
+      - name: Show Docker versions
         run: |
-          cd infra/production
-          docker-compose down || true
-          docker-compose up -d --build
+          docker --version || true
+          docker compose version || true
+
+      - name: Pick compose file (infra or infra/production)
+        id: pick
+        run: |
+          set -euo pipefail
+          if [ -f "docker-compose.yml" ]; then
+            echo "file=docker-compose.yml" >> "$GITHUB_OUTPUT"
+          elif [ -f "production/docker-compose.yml" ]; then
+            echo "file=production/docker-compose.yml" >> "$GITHUB_OUTPUT"
+          else
+            echo "❌ Не найден docker-compose.yml ни в infra/, ни в infra/production/"
+            ls -la
+            exit 1
+          fi
+          echo "✅ Используем compose файл: $(cat "$GITHUB_OUTPUT" | sed -n 's/^file=//p')"
+
+      - name: Docker Compose down
+        run: |
+          docker compose -f "${{ steps.pick.outputs.file }}" down || true
+
+      - name: Docker Compose up (build)
+        run: |
+          docker compose -f "${{ steps.pick.outputs.file }}" pull || true
+          docker compose -f "${{ steps.pick.outputs.file }}" up -d --build --remove-orphans
+
+      # Диагностика при падении
+      - name: Debug on failure
+        if: failure()
+        run: |
+          echo "--- docker ps ---"
+          docker ps -a || true
+          echo "--- compose ls ---"
+          docker compose -f "${{ steps.pick.outputs.file }}" ls || true
+          echo "--- compose logs (last 200 lines per service) ---"
+          # Печатаем последние строки логов каждого сервиса, если нужно – увеличь tail
+          services=$(docker compose -f "${{ steps.pick.outputs.file }}" config --services || true)
+          for s in $services; do
+            echo "### $s"
+            docker compose -f "${{ steps.pick.outputs.file }}" logs --no-color --tail=200 "$s" || true
+          done
