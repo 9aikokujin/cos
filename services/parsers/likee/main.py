@@ -10,7 +10,7 @@ from utils.rabbit_client import RabbitMQParserClient
 if __name__ == "__main__":
     async def main():
         try:
-            print("Starting Shorts parser...", flush=True)
+            print("Starting Likee parser...", flush=True)
             await asyncio.sleep(60)
             parser = LikeeParser(TCPLogger("likee_parser"))
             client = RabbitMQParserClient(

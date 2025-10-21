@@ -8,15 +8,16 @@ from typing import Union, Optional
 from playwright.async_api import async_playwright
 
 try:
-    from playwright_stealth.async_api import stealth_async  # Playwright Stealth >= 2.0
+    from playwright_stealth.async_api import stealth_async as apply_stealth  # Playwright Stealth >= 2.0
 except ImportError:
     try:
-        from playwright_stealth import stealth_async  # Playwright Stealth 1.1+
-    except ImportError:  # fallback for older versions
-        from playwright_stealth import stealth_sync as _stealth_sync
+        from playwright_stealth import stealth_async as apply_stealth  # Playwright Stealth 1.1+
+    except ImportError:
+        from playwright_stealth import Stealth  # Very old versions expose only the class API
 
-        async def stealth_async(page):
-            _stealth_sync(page)
+        async def apply_stealth(page):
+            stealth = Stealth()
+            await stealth.apply_stealth_async(page)
 
 from utils.logger import TCPLogger
 
@@ -262,7 +263,7 @@ class TikTokParser:
                 proxy=proxy_config
             )
             page = await context.new_page()
-            await stealth_async(page)
+            await apply_stealth(page)
 
             self.logger.send("INFO",  f"🌐 Открываем профиль: {url} (username: {username})")
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
