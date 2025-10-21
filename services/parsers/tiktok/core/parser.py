@@ -6,7 +6,17 @@ import httpx
 import random
 from typing import Union, Optional
 from playwright.async_api import async_playwright
-from playwright_stealth.async_api import stealth_async
+
+try:
+    from playwright_stealth.async_api import stealth_async  # Playwright Stealth >= 2.0
+except ImportError:
+    try:
+        from playwright_stealth import stealth_async  # Playwright Stealth 1.1+
+    except ImportError:  # fallback for older versions
+        from playwright_stealth import stealth_sync as _stealth_sync
+
+        async def stealth_async(page):
+            _stealth_sync(page)
 
 from utils.logger import TCPLogger
 
