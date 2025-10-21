@@ -15,7 +15,7 @@ if __name__ == "__main__":
             parser = LikeeParser(TCPLogger("likee_parser"))
             client = RabbitMQParserClient(
                 amqp_url=config.RABBITMQ_URL,
-                queue_name="parsing_likeem",
+                queue_name="parsing_likee",
                 logger=TCPLogger("likee_parser"),
                 parser=parser
             )
