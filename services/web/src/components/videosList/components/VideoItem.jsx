@@ -21,7 +21,8 @@ const VideoItem = memo(({ video, ref }) => {
   return (
     <div ref={ref} className="video_item _flex">
       <div className="video_image">
-        <img src={`https://cosmeya.dev-klick.cyou/api/v1/uploads/videos/${video.image}`} alt="" />
+        {/* image === null в случае отсутствия изображения */}
+        <img src={`https://cosmeya.dev-klick.cyou/api/v1/${video?.image}`} alt="" />
       </div>
       <div className="video_info _flex_col">
         <h3 className="_name">{video.name}</h3>

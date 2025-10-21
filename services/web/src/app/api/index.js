@@ -3,6 +3,7 @@ import auth from "./auth";
 import user from "./user";
 import account from "./account";
 import video from "./video";
+import statistic from "./statistic";
 
 import { useAuthStore } from "../store/user/store";
 import { useNotificationStore } from "../store/notification/store";
@@ -75,6 +76,7 @@ const API = {
   user: user(instance),
   account: account(instance),
   video: video(instance),
+  statistic: statistic(instance),
 };
 
 export default API;
