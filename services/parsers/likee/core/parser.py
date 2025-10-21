@@ -424,6 +424,7 @@ class LikeeParser:
                 try:
                     await playwright.stop()
                 except Exception as e:
-                    self.logger.send("WARNING", f"Ошибка при остановке Playwright: {e}")
+                    self.logger.send(
+                        "WARNING", f"Ошибка при остановке Playwright: {e}")
                 else:
                     self.logger.send("INFO", "✅ Playwright успешно остановлен")
