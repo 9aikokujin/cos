@@ -7,15 +7,15 @@ import random
 import re
 from typing import List, Dict, Optional, Union
 from playwright.async_api import async_playwright
-from utils.logger import TCPLogger
+# from utils.logger import TCPLogger
 
 
 class LikeeParser:
     def __init__(
             self,
-            logger: TCPLogger
+            # logger: TCPLogger
     ):
-        self.logger = logger
+        # self.logger = logger
         self.current_proxy_index = 0
 
     async def get_proxy_config(self, proxy_str: str) -> Optional[dict]:
@@ -33,7 +33,7 @@ class LikeeParser:
                 host, port = proxy_str.split(":")
                 return {"server": f"http://{host}:{port}"}
         except Exception as e:
-            self.logger.send("INFO", f"Неверный формат прокси '{proxy_str}': {str(e)}")
+            print(f"Неверный формат прокси '{proxy_str}': {str(e)}")
             return None
 
     async def get_uid_from_profile_page(
@@ -45,7 +45,7 @@ class LikeeParser:
         proxy_override: Optional[str] = None,
     ) -> Optional[str]:
         profile_url = f"https://likee.video/p/{short_id}"
-        self.logger.send("INFO", f"➡️ Открываем профиль: {profile_url}")
+        print(f"➡️ Открываем профиль: {profile_url}")
 
         for attempt in range(1, max_retries + 1):
             proxy = proxy_override or (random.choice(proxy_list) if proxy_list else None)
@@ -53,7 +53,7 @@ class LikeeParser:
 
             browser = context = page = None
             try:
-                self.logger.send("INFO", f"Запускаем браузер, прокси={proxy_config or 'без прокси'} (попытка {attempt}/{max_retries})",)
+                print(f"Запускаем браузер, прокси={proxy_config or 'без прокси'} (попытка {attempt}/{max_retries})",)
                 browser = await playwright.chromium.launch(
                     headless=True,
                     args=[
@@ -76,7 +76,7 @@ class LikeeParser:
                 def on_request(req):
                     nonlocal video_request, payload_data
                     if "getUserVideo" in req.url and req.method == "POST":
-                        self.logger.send("INFO", f"[HOOK] Пойман запрос → {req.url}")
+                        print(f"[HOOK] Пойман запрос → {req.url}")
                         video_request = req.url
                         payload_data = req.post_data
 
@@ -86,11 +86,11 @@ class LikeeParser:
                 await asyncio.sleep(5)
 
                 if not video_request:
-                    self.logger.send("INFO", "⚠️ Не поймали запрос getUserVideo")
+                    print("⚠️ Не поймали запрос getUserVideo")
                     continue
 
                 # Повторяем запрос вручную
-                self.logger.send("INFO", f"Дублируем запрос вручную: {video_request}")
+                print(f"Дублируем запрос вручную: {video_request}")
                 resp = await page.request.post(
                     video_request,
                     data=payload_data,
@@ -105,19 +105,19 @@ class LikeeParser:
                 try:
                     data = json.loads(text_data)
                 except Exception as je:
-                    self.logger.send("INFO", f"JSON parse error: {je}")
+                    print(f"JSON parse error: {je}")
                     data = {}
 
                 if data.get("code") == 0 and data.get("data", {}).get("videoList"):
                     uid = data["data"]["videoList"][0].get("posterUid")
                     if uid:
-                        self.logger.send("INFO", f"✅ Найден posterUid: {uid}")
+                        print(f"✅ Найден posterUid: {uid}")
                         return str(uid)
 
-                self.logger.send("INFO", "⚠️ UID не найден")
+                print("⚠️ UID не найден")
 
             except Exception as e:
-                self.logger.send("INFO", f"Попытка {attempt} не удалась: {e}")
+                print(f"Попытка {attempt} не удалась: {e}")
                 if attempt == max_retries:
                     return None
                 await asyncio.sleep(5)
@@ -155,7 +155,7 @@ class LikeeParser:
 
         proxy = proxy_override or (random.choice(proxy_list) if proxy_list else None)
         proxy_config = await self.get_proxy_config(proxy) if proxy else None
-        self.logger.send("INFO", f"Используем прокси для сбора видео: {proxy_config or 'без прокси'}",)
+        print(f"Используем прокси для сбора видео: {proxy_config or 'без прокси'}",)
 
         browser = context = page = None
         try:
@@ -167,7 +167,7 @@ class LikeeParser:
             page = await context.new_page()
 
             while True:
-                self.logger.send("INFO", f"🔍 Запрашиваем до {max_per_request} видео (после postId: {last_post_id or 'начала'})...")
+                print(f"🔍 Запрашиваем до {max_per_request} видео (после postId: {last_post_id or 'начала'})...")
                 api_url = "https://api.like-video.com/likee-activity-flow-micro/videoApi/getUserVideo"
                 payload = {
                     "uid": uid,
@@ -184,19 +184,19 @@ class LikeeParser:
 
                 try:
                     resp = await page.request.post(api_url, data=json.dumps(payload), headers=headers)
-                    self.logger.send("INFO", f"HTTP статус: {resp.status}")
+                    print(f"HTTP статус: {resp.status}")
                     text_data = await resp.text()
 
                     if resp.status == 200:
                         try:
                             data = json.loads(text_data)
                         except Exception as je:
-                            self.logger.send("INFO", f"JSON parse error: {je}")
+                            print(f"JSON parse error: {je}")
                             data = {}
 
                         if data.get("code") == 0:
                             videos = data["data"].get("videoList", [])
-                            self.logger.send("INFO", f"→ Получено {len(videos)} видео")
+                            print(f"→ Получено {len(videos)} видео")
                             if not videos:
                                 break
                             all_videos.extend(videos)
@@ -206,16 +206,16 @@ class LikeeParser:
                             if not last_post_id:
                                 break
                         else:
-                            self.logger.send("INFO", f"→ API ошибка: code={data.get('code')}")
+                            print(f"→ API ошибка: code={data.get('code')}")
                             break
                     else:
-                        self.logger.send("INFO", f"→ HTTP ошибка: {resp.status}")
+                        print(f"→ HTTP ошибка: {resp.status}")
                         break
 
                     await asyncio.sleep(10)
 
                 except Exception as e:
-                    self.logger.send("INFO", f"→ Ошибка при запросе видео: {e}")
+                    print(f"→ Ошибка при запросе видео: {e}")
                     break
 
         finally:
@@ -235,7 +235,7 @@ class LikeeParser:
                 except:
                     pass
 
-        self.logger.send("INFO", f"📦 Всего собрано видео: {len(all_videos)}")
+        print(f"📦 Всего собрано видео: {len(all_videos)}")
         return all_videos
 
     def generate_short_title(self, full_title: str, max_length: int = 30) -> str:
@@ -279,16 +279,16 @@ class LikeeParser:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
-                self.logger.send("INFO", f"Успешно загружено изображение: {url}")
+                print(f"Успешно загружено изображение: {url}")
                 return resp.content
         except Exception as e:
-            self.logger.send("INFO", f"❌ Ошибка загрузки {url}: {e}")
+            print(f"❌ Ошибка загрузки {url}: {e}")
             return None
 
     async def upload_image(self, video_id: int, image_url: str, proxy: str = None):
         image_bytes = await self.download_image(image_url, proxy=proxy)
         if not image_bytes:
-            self.logger.send("INFO", f"Не удалось скачать изображение для видео {video_id}")
+            print(f"Не удалось скачать изображение для видео {video_id}")
             return None, "Download failed"
 
         file_name = image_url.split("/")[-1].split("?")[0]
@@ -300,10 +300,10 @@ class LikeeParser:
                     files=files,
                 )
                 resp.raise_for_status()
-                self.logger.send("INFO", f"✅ Фото для видео {video_id} загружено")
+                print(f"✅ Фото для видео {video_id} загружено")
                 return resp.status_code, resp.text
             except Exception as e:
-                self.logger.send("INFO", f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
+                print(f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
                 return None, str(e)
 
     # --- Основной метод с централизованным управлением Playwright ---
@@ -314,7 +314,7 @@ class LikeeParser:
             raise ValueError(f"Неверный формат URL: {profile_url}")
 
         short_id = match.group(1)
-        self.logger.send("INFO", f"🔍 Извлечен short_id: {short_id}")
+        print(f"🔍 Извлечен short_id: {short_id}")
 
         # Объявляем ресурсы Playwright
         playwright = None
@@ -329,8 +329,7 @@ class LikeeParser:
             videos: List[Dict] = []
 
             for attempt, current_proxy in enumerate(proxies_cycle, start=1):
-                self.logger.send(
-                    "INFO",
+                print(
                     f"🧪 Попытка {attempt}/{len(proxies_cycle)} с прокси "
                     f"{current_proxy or 'без прокси'}",
                 )
@@ -342,11 +341,15 @@ class LikeeParser:
                     proxy_override=current_proxy,
                 )
                 if not uid:
-                    self.logger.send("INFO", "Не удалось получить uid, переключаемся на следующий прокси",)
+                    print(
+                        "Не удалось получить uid, переключаемся на следующий прокси",
+                    )
                     await asyncio.sleep(3)
                     continue
 
-                self.logger.send("INFO", f"🔑 Получен uid: {uid}. Собираем максимум видео (попытка {attempt})",)
+                print(
+                    f"🔑 Получен uid: {uid}. Собираем максимум видео (попытка {attempt})",
+                )
                 videos = await self.get_all_videos_by_uid(
                     uid,
                     proxy_list,
@@ -356,14 +359,18 @@ class LikeeParser:
                 if videos:
                     break
 
-                self.logger.send("INFO", "Видео не получены на этом прокси, пробуем следующий...",)
+                print(
+                    "Видео не получены на этом прокси, пробуем следующий...",
+                )
                 await asyncio.sleep(3)
 
             if not uid:
                 raise RuntimeError("Не удалось получить uid ни с одного прокси.")
 
             if not videos:
-                self.logger.send("INFO", "Завершили перебор прокси, видео не собраны. Продолжаем без данных.",)
+                print(
+                    "Завершили перебор прокси, видео не собраны. Продолжаем без данных.",
+                )
 
             # --- Этап: отправка видео в API (без Playwright) ---
             all_videos_data = []
@@ -384,7 +391,7 @@ class LikeeParser:
                         dt = datetime.fromtimestamp(int(post_time), tz=timezone.utc)
                         published_at = dt.strftime('%Y-%m-%d')
                     except (ValueError, OSError, TypeError, OverflowError) as e:
-                        self.logger.send("INFO", f"Ошибка при конвертации postTime {post_time}: {e}")
+                        print(f"Ошибка при конвертации postTime {post_time}: {e}")
 
                 all_videos_data.append({
                     "link": link,
@@ -441,7 +448,7 @@ class LikeeParser:
                                 image_queue.append((video_id, video_data["image_url"]))
                     processed_count += 1
                 except Exception as e:
-                    self.logger.send("INFO", f"Ошибка при обработке {video_data.get('link')}: {e}")
+                    print(f"Ошибка при обработке {video_data.get('link')}: {e}")
                     continue
 
             # Загрузка изображений
@@ -454,26 +461,26 @@ class LikeeParser:
                     self.current_proxy_index = (self.current_proxy_index + 1) % len(proxy_list)
 
                 batch = image_queue[idx: idx + 15]
-                self.logger.send("INFO", f"🌐 Прокси {proxy}: качаем {len(batch)} фото")
+                print(f"🌐 Прокси {proxy}: качаем {len(batch)} фото")
 
                 for video_id, image_url in batch:
                     try:
                         status, resp_text = await self.upload_image(video_id, image_url, proxy=proxy)
                         if status == 200:
-                            self.logger.send("INFO", f"✅ Фото для видео {video_id} загружено")
+                            print(f"✅ Фото для видео {video_id} загружено")
                         else:
-                            self.logger.send("INFO", f"⚠️ Фото для видео {video_id} ошибка {status}")
+                            print(f"⚠️ Фото для видео {video_id} ошибка {status}")
                     except Exception as e:
-                        self.logger.send("INFO", f"❌ Ошибка загрузки фото для {video_id}: {e}")
+                        print(f"❌ Ошибка загрузки фото для {video_id}: {e}")
                     await asyncio.sleep(5.0)
 
                 idx += 15
 
                 if idx < len(image_queue) and self.current_proxy_index == 0 and proxy_list:
-                    self.logger.send("INFO", "⏳ Все прокси использованы, ждём 1 минуту...")
+                    print("⏳ Все прокси использованы, ждём 1 минуту...")
                     await asyncio.sleep(60)
 
-            self.logger.send("INFO", f"✅ Успешно обработано {processed_count} видео")
+            print(f"✅ Успешно обработано {processed_count} видео")
 
         finally:
             # Централизованное закрытие Playwright
@@ -481,29 +488,29 @@ class LikeeParser:
                 try:
                     await playwright.stop()
                 except Exception as e:
-                    self.logger.send("INFO", f"Ошибка при остановке Playwright: {e}")
+                    print(f"Ошибка при остановке Playwright: {e}")
                 else:
-                    self.logger.send("INFO", "✅ Playwright успешно остановлен")
+                    print("✅ Playwright успешно остановлен")
 
 
-# async def main():
-#     proxy_list = [
-#         "gYCnZWZrgi:iexdZdvSeN@193.168.224.25:50524",
-#         "ndtvwtXQh7:Acg5amEuK7@103.82.103.34:48319",
-#         "ZVaGoMrHmt:fLA2FnapWs@109.120.147.248:55710",
-#         "YWpuNCTEcf:9J5UHLn2ha@45.132.252.137:20472",
-#         "ThI4AlnYc8:cC6IiARsnD@109.120.147.221:60860",
-#         "weTPSmpjHB:OPBSIuub2t@193.168.224.125:31635",
-#         "frvEXoGF2v:nIbEnIuD26@45.132.252.60:43121",
-#         "7dtzp90Dsr:DaDxgASS3d@45.132.252.89:24550",
-#         "gzQZLQNslU:7wYp8R5UU9@103.82.103.150:51428",
-#         "qI6mCjoRDV:aArrfm6cGH@109.120.147.208:32907",
-#     ]
-#     parser = LikeeParser()
-#     url = "https://l.likee.video/p/IVOeZT"
-#     user_id = 1
-#     await parser.parse_channel(url, channel_id=4,
-#                                proxy_list=proxy_list, user_id=user_id)
+async def main():
+    proxy_list = [
+        "gYCnZWZrgi:iexdZdvSeN@193.168.224.25:50524",
+        "ndtvwtXQh7:Acg5amEuK7@103.82.103.34:48319",
+        "ZVaGoMrHmt:fLA2FnapWs@109.120.147.248:55710",
+        "YWpuNCTEcf:9J5UHLn2ha@45.132.252.137:20472",
+        "ThI4AlnYc8:cC6IiARsnD@109.120.147.221:60860",
+        "weTPSmpjHB:OPBSIuub2t@193.168.224.125:31635",
+        "frvEXoGF2v:nIbEnIuD26@45.132.252.60:43121",
+        "7dtzp90Dsr:DaDxgASS3d@45.132.252.89:24550",
+        "gzQZLQNslU:7wYp8R5UU9@103.82.103.150:51428",
+        "qI6mCjoRDV:aArrfm6cGH@109.120.147.208:32907",
+    ]
+    parser = LikeeParser()
+    url = "https://l.likee.video/p/IVOeZT"
+    user_id = 1
+    await parser.parse_channel(url, channel_id=4,
+                               proxy_list=proxy_list, user_id=user_id)
 
-# if __name__ == "__main__":
-#     asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

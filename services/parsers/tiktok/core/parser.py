@@ -6,6 +6,7 @@ import httpx
 import random
 from typing import Union, Optional
 from playwright.async_api import async_playwright
+from playwright_stealth.async_api import stealth_async
 
 from utils.logger import TCPLogger
 
@@ -251,8 +252,7 @@ class TikTokParser:
                 proxy=proxy_config
             )
             page = await context.new_page()
-            from playwright_stealth import stealth_sync
-            stealth_sync(page)
+            await stealth_async(page)
 
             self.logger.send("INFO",  f"🌐 Открываем профиль: {url} (username: {username})")
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
