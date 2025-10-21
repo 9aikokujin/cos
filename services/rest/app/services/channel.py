@@ -122,6 +122,7 @@ class ChannelService:
 
         proxies_from_db = await self.repo.db.execute(select(Proxy))
         proxies = proxies_from_db.scalars().all()
+        likee_proxies = [p.proxy_str for p in proxies if p.for_likee is True]
         proxies_for_send = [p.proxy_str for p in proxies]
 
         accounts_from_db = await self.repo.db.execute(select(Account))
@@ -129,6 +130,8 @@ class ChannelService:
         accounts_for_send = []
         for account in accounts:
             accounts_for_send.append(account.account_str)
+
+        proxy_payload = likee_proxies if dto.type == ChannelType.LIKEE else proxies_for_send
 
         rabbit_producer.send_task(
             f"parsing_{dto.type.value}",
@@ -138,7 +141,7 @@ class ChannelService:
                 "url": new_channel.link,
                 "channel_id": new_channel.id,
                 "accounts": accounts_for_send,
-                "proxy_list": proxies_for_send
+                "proxy_list": proxy_payload
             }
         )
 

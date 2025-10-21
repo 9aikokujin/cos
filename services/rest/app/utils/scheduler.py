@@ -108,7 +108,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.core.db import SessionLocal
-from app.models.channel import Channel
+from app.models.channel import Channel, ChannelType
 from app.models.account import Account
 from app.models.proxy import Proxy
 from sqlalchemy import select
@@ -250,6 +250,13 @@ async def process_recurring_task(task_id: int, type: str, position: Optional[int
             accounts = (await db.execute(select(Account).where(Account.is_active.is_(True)))).scalars().all()
             proxies = (await db.execute(select(Proxy))).scalars().all()
 
+            if channel.type == ChannelType.LIKEE:
+                proxy_payload = [p.proxy_str for p in proxies if p.for_likee]
+                if not proxy_payload:
+                    print(f"⚠️ Для канала {channel.id} нет прокси с флагом for_likee")
+            else:
+                proxy_payload = [p.proxy_str for p in proxies]
+
             rabbit_producer.send_task(
                 f"parsing_{channel.type.value.lower()}",
                 {
@@ -258,7 +265,7 @@ async def process_recurring_task(task_id: int, type: str, position: Optional[int
                     "url": channel.link,
                     "channel_id": channel.id,
                     "accounts": [a.account_str for a in accounts],
-                    "proxy_list": [p.proxy_str for p in proxies],
+                    "proxy_list": proxy_payload,
                 }
             )
             print(

@@ -34,18 +34,26 @@ class LikeeParser:
             return None
 
     async def get_uid_from_profile_page(
-        self, short_id: str, proxy_list: List[str], playwright, max_retries: int = 3
+        self,
+        short_id: str,
+        proxy_list: List[str],
+        playwright,
+        max_retries: int = 3,
+        proxy_override: Optional[str] = None,
     ) -> Optional[str]:
-        profile_url = f"https://likee.video/p/{short_id}"  # ← убраны пробелы
+        profile_url = f"https://likee.video/p/{short_id}"
         self.logger.send("INFO", f"➡️ Открываем профиль: {profile_url}")
 
         for attempt in range(1, max_retries + 1):
-            proxy = random.choice(proxy_list) if proxy_list else None
+            proxy = proxy_override or (random.choice(proxy_list) if proxy_list else None)
             proxy_config = await self.get_proxy_config(proxy) if proxy else None
 
             browser = context = page = None
             try:
-                self.logger.send("INFO", f"Запускаем браузер, прокси={proxy_config}")
+                self.logger.send(
+                    "INFO",
+                    f"Запускаем браузер, прокси={proxy_config or 'без прокси'} (попытка {attempt}/{max_retries})",
+                )
                 browser = await playwright.chromium.launch(headless=True)  # headless=True в продакшене
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
@@ -126,15 +134,22 @@ class LikeeParser:
         return None
 
     async def get_all_videos_by_uid(
-        self, uid: str, proxy_list: List[str], playwright
+        self,
+        uid: str,
+        proxy_list: List[str],
+        playwright,
+        proxy_override: Optional[str] = None,
     ) -> List[Dict]:
         all_videos = []
         last_post_id = ""
         max_per_request = 100
 
-        proxy = random.choice(proxy_list) if proxy_list else None
+        proxy = proxy_override or (random.choice(proxy_list) if proxy_list else None)
         proxy_config = await self.get_proxy_config(proxy) if proxy else None
-        self.logger.send("INFO", f"Используем прокси для сбора видео: {proxy_config}")
+        self.logger.send(
+            "INFO",
+            f"Используем прокси для сбора видео: {proxy_config or 'без прокси'}",
+        )
 
         browser = context = page = None
         try:
@@ -301,12 +316,60 @@ class LikeeParser:
         try:
             playwright = await async_playwright().start()
 
-            uid = await self.get_uid_from_profile_page(short_id, proxy_list, playwright, max_retries)
-            if not uid:
-                raise RuntimeError("Не удалось получить uid.")
+            proxy_list = proxy_list or []
+            proxies_cycle = proxy_list if proxy_list else [None]
 
-            self.logger.send("INFO", f"🔑 Получен uid: {uid}. Собираем максимум видео...")
-            videos = await self.get_all_videos_by_uid(uid, proxy_list, playwright)
+            uid = None
+            videos: List[Dict] = []
+
+            for attempt, current_proxy in enumerate(proxies_cycle, start=1):
+                self.logger.send(
+                    "INFO",
+                    f"🧪 Попытка {attempt}/{len(proxies_cycle)} с прокси "
+                    f"{current_proxy or 'без прокси'}",
+                )
+                uid = await self.get_uid_from_profile_page(
+                    short_id,
+                    proxy_list,
+                    playwright,
+                    max_retries,
+                    proxy_override=current_proxy,
+                )
+                if not uid:
+                    self.logger.send(
+                        "WARNING",
+                        "Не удалось получить uid, переключаемся на следующий прокси",
+                    )
+                    await asyncio.sleep(3)
+                    continue
+
+                self.logger.send(
+                    "INFO",
+                    f"🔑 Получен uid: {uid}. Собираем максимум видео (попытка {attempt})",
+                )
+                videos = await self.get_all_videos_by_uid(
+                    uid,
+                    proxy_list,
+                    playwright,
+                    proxy_override=current_proxy,
+                )
+                if videos:
+                    break
+
+                self.logger.send(
+                    "WARNING",
+                    "Видео не получены на этом прокси, пробуем следующий...",
+                )
+                await asyncio.sleep(3)
+
+            if not uid:
+                raise RuntimeError("Не удалось получить uid ни с одного прокси.")
+
+            if not videos:
+                self.logger.send(
+                    "WARNING",
+                    "Завершили перебор прокси, видео не собраны. Продолжаем без данных.",
+                )
 
             # --- Этап: отправка видео в API (без Playwright) ---
             all_videos_data = []
@@ -424,6 +487,7 @@ class LikeeParser:
                 try:
                     await playwright.stop()
                 except Exception as e:
-                    self.logger.send("WARNING", f"Ошибка при остановке Playwright: {e}")
+                    self.logger.send(
+                        "WARNING", f"Ошибка при остановке Playwright: {e}")
                 else:
                     self.logger.send("INFO", "✅ Playwright успешно остановлен")
