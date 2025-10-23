@@ -1,7 +1,9 @@
 import { memo } from "react";
 
-import { ButtonIcon, Button } from "@/shared/ui/button/Button";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+
+import { ButtonIcon, Button } from "@/shared/ui/button/Button";
+import ImageWithFallback from "@/shared/ui/imageWithFallback/ImageWithFallback";
 
 const VideoItem = memo(({ video, ref }) => {
   const { confirmAction } = useConfirmModal();
@@ -18,11 +20,13 @@ const VideoItem = memo(({ video, ref }) => {
       onConfirm: handleDeleteConfirm,
     });
   };
+
   return (
     <div ref={ref} className="video_item _flex">
       <div className="video_image">
         {/* image === null в случае отсутствия изображения */}
-        <img src={`https://cosmeya.dev-klick.cyou/api/v1/${video?.image}`} alt="" />
+        {/* <img src={`https://cosmeya.dev-klick.cyou/api/v1/${video?.image}`} alt="" /> */}
+        <ImageWithFallback src={video?.image} alt={video?.name} className="" />
       </div>
       <div className="video_info _flex_col">
         <h3 className="_name">{video.name}</h3>

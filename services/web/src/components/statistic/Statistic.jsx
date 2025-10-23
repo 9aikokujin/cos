@@ -15,6 +15,7 @@ const Statistic = () => {
   const { filter, withTags, isLoading, tag } = useFilterStore();
   const [statistic, setStatistic] = useState([]);
   const [publushedVideo, setPublishedVideo] = useState([]);
+  const [selectedMetrics, setSelectedMetrics] = useState([]);
 
   useEffect(() => {
     const clean = (obj) =>
@@ -44,18 +45,42 @@ const Statistic = () => {
     };
     getStatistic();
   }, [filter, withTags]);
+
+  const toggleMetric = (metric) => {
+    setSelectedMetrics((prev) =>
+      prev.includes(metric) ? prev.filter((m) => m !== metric) : [...prev, metric]
+    );
+  };
+
   return (
     <>
       <div className="statistic_container">
-        <StatisticBlock title="Просмотры" value={sumFields(statistic, ["views"]).views} />
+        <StatisticBlock
+          title="Просмотры"
+          value={sumFields(statistic, ["views"]).views}
+          onClick={() => toggleMetric("views")}
+          active={selectedMetrics.includes("views")}
+        />
         <StatisticBlock
           title="Публикации"
           value={sumFields(publushedVideo, ["video_count"]).video_count}
+          onClick={() => toggleMetric("video_count")}
+          active={selectedMetrics.includes("video_count")}
         />
-        <StatisticBlock title="Комментарии" value={sumFields(statistic, ["comments"]).comments} />
-        <StatisticBlock title="Лайки" value={sumFields(statistic, ["likes"]).likes} />
+        <StatisticBlock
+          title="Комментарии"
+          value={sumFields(statistic, ["comments"]).comments}
+          onClick={() => toggleMetric("comments")}
+          active={selectedMetrics.includes("comments")}
+        />
+        <StatisticBlock
+          title="Лайки"
+          value={sumFields(statistic, ["likes"]).likes}
+          onClick={() => toggleMetric("likes")}
+          active={selectedMetrics.includes("likes")}
+        />
       </div>
-      <Diagram />
+      <Diagram data={{ statistic, publushedVideo }} selectedMetrics={selectedMetrics} />
       <ReportBlock />
       {isLoading && <Loader />}
     </>

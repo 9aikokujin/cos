@@ -32,8 +32,9 @@
 .video_info ._url {
   font-weight: 400;
   font-size: 12px;
-  line-height: 100%;
+  line-height: 130%;
   color: var(--color-grey-text);
+  word-break: break-all;
 }
 
 .video_item_btns {
