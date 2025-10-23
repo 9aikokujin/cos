@@ -793,7 +793,7 @@ class TikTokParser:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 files = {"file": (file_name, img, "image/jpeg")}
                 resp = await client.post(
-                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                    f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -806,7 +806,7 @@ class TikTokParser:
             link = video_data.get("link", "UNKNOWN_LINK")
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
-                    check = await client.get(f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={link}")
+                    check = await client.get(f"https://sn.dev-klick.cyou/api/v1/videos/?link={link}")
                     video_id = None
                     is_new = False
 
@@ -821,10 +821,10 @@ class TikTokParser:
                                 "amount_comments": video_data.get("amount_comments", 0),
                                 "date_published": video_data.get("date_published"),
                                 "articles": video_data.get("articles"),
-                                # "description": video_data.get("description"),
+                                "description": video_data.get("description"),
                             }
                             upd = await client.patch(
-                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
+                                f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}",
                                 json=update_payload,
                             )
                             upd.raise_for_status()
@@ -840,7 +840,7 @@ class TikTokParser:
                             for key, value in video_data.items()
                             if key != "video_id" and value is not None
                         }
-                        create = await client.post("https://cosmeya.dev-klick.cyou/api/v1/videos/", json=create_payload)
+                        create = await client.post("https://sn.dev-klick.cyou/api/v1/videos/", json=create_payload)
                         create.raise_for_status()
                         video_id = create.json()["id"]
                         if video_data.get("image_url"):
