@@ -6,7 +6,6 @@ import { sumFields } from "@/shared/utils/utils";
 
 import Loader from "@/components/loader/Loader";
 import Diagram from "./components/Diagram";
-import ReportBlock from "./components/ReportBlock";
 import StatisticBlock from "./components/StatisticBlock";
 
 import "./Statistic.css";
@@ -81,7 +80,6 @@ const Statistic = () => {
         />
       </div>
       <Diagram data={{ statistic, publushedVideo }} selectedMetrics={selectedMetrics} />
-      <ReportBlock />
       {isLoading && <Loader />}
     </>
   );

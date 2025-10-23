@@ -7,11 +7,12 @@ export const useConfirmModal = () => {
   const { openModal, closeModal } = useModalStore();
 
   const confirmAction = useCallback(
-    ({ title, description, onConfirm }) => {
+    ({ title, description, onConfirm, btnTitle }) => {
       openModal(
         <ConfurmDeleteModal
           title={title}
           description={description}
+          btnTitle={btnTitle}
           onConfirm={() => {
             onConfirm?.();
             closeModal();

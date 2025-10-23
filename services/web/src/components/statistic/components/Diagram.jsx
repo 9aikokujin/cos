@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,92 +12,53 @@ import {
 
 import { Line } from "react-chartjs-2";
 
+import { useChartData } from "@/hooks/useChartData";
+import { options } from "@/shared/utils/chartsSettings";
+import Checkbox from "@/shared/ui/checkbox/Checkbox";
+import { AGGREGATION_OPTIONS } from "@/shared/utils/chartsSettings";
+
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
-
-const COLORS = {
-  views: "rgb(75, 192, 192)",
-  likes: "rgb(255, 99, 132)",
-  comments: "rgb(255, 206, 86)",
-  video_count: "rgb(153, 102, 255)",
-};
-
-const LABELS = {
-  views: "Просмотры",
-  likes: "Лайки",
-  comments: "Комментарии",
-  video_count: "Публикации",
-};
 
 const Diagram = ({ data, selectedMetrics }) => {
   const { statistic, publushedVideo } = data;
 
-  const labels =
-    statistic.length > 0
-      ? statistic.map((item) =>
-          new Date(item.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })
-        )
-      : [];
+  const [aggregation, setAggregation] = useState("day");
 
-  const datasets = selectedMetrics.map((metric) => {
-    let values;
-
-    if (metric === "video_count") {
-      values = publushedVideo.map((item) => item.video_count ?? 0);
-    } else {
-      values = statistic.map((item) => item[metric] ?? 0);
-    }
-
-    return {
-      label: LABELS[metric] || metric,
-      data: values,
-      borderColor: COLORS[metric],
-      borderWidth: 1.5,
-      tension: 0.3,
-      pointBackgroundColor: "#fff",
-      pointBorderColor: COLORS[metric],
-      pointRadius: 3,
-    };
-  });
+  const { labels, datasets } = useChartData(
+    statistic,
+    publushedVideo,
+    selectedMetrics,
+    aggregation
+  );
 
   const chartData = { labels, datasets };
 
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: true,
-        position: "bottom",
-        align: "start",
-        labels: {
-          pointStyle: "circle", 
-          boxWidth: 10,        
-          boxHeight: 9, 
-          padding: 20,
-          usePointStyle: true,
-          font: { size: 13 },
-        },
-      },
-      tooltip: {
-        mode: "index",
-        intersect: false,
-      },
-    },
-    layout: {
-      padding: { bottom: 20 },
-    },
+  const handleAggregationChange = (value) => {
+    setAggregation(value);
   };
 
   return (
-    <div className="diagram__container">
-      {selectedMetrics.length > 0 ? (
-        <Line data={chartData} options={options} />
-      ) : (
-        <p style={{ textAlign: "center", padding: "2rem" }}>
-          Выберите метрики, чтобы отобразить графики 📊
-        </p>
-      )}
-    </div>
+    <>
+      <div className="aggregation_container _flex">
+        {AGGREGATION_OPTIONS.map((option) => (
+          <Checkbox
+            key={option.value}
+            label={option.label}
+            checked={aggregation === option.value}
+            onChange={() => handleAggregationChange(option.value)}
+          />
+        ))}
+      </div>
+      <div className="diagram__container">
+        {selectedMetrics.length > 0 ? (
+          <Line data={chartData} options={options} />
+        ) : (
+          <p className="_flex_center" style={{ textAlign: "center", padding: "2rem", height: "100%" }}>
+            Выберите метрики, чтобы отобразить графики 📊
+          </p>
+        )}
+      </div>
+    </>
   );
 };
 

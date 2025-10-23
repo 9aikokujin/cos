@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import API from "@/app/api";
+import { AppRoutes } from "@/app/routes/routes";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import ToggleSwitch from "@/shared/ui/toggleSwitch/ToggleSwitch";
@@ -10,6 +12,7 @@ import { getSocialIcon } from "@/shared/utils/socialIcon";
 
 const AccountItem = ({ channel, ref }) => {
   const [isOn, setIsOn] = useState(false);
+  const navigate = useNavigate();
 
   const { confirmAction } = useConfirmModal();
 
@@ -22,8 +25,13 @@ const AccountItem = ({ channel, ref }) => {
     confirmAction({
       title: "Удаление аккаунта",
       description: "Вы уверены, что хотите удалить аккаунт?",
+      btnTitle: "Удалить",
       onConfirm: handleDeleteConfirm,
     });
+  };
+
+  const handleNavigate = (filterKey, value) => {
+    navigate(AppRoutes.STATISTIC, { state: { filterKey, value } });
   };
 
   return (
@@ -39,7 +47,12 @@ const AccountItem = ({ channel, ref }) => {
       </div>
       <div className="account_item_bottom _flex_sb">
         <ButtonIcon onClick={handleDelete} name={"trash"} />
-        <Button className={"_orange _detail_btn"}>Детально</Button>
+        <Button
+          onClick={() => handleNavigate("setFilterChannelId", channel?.id)}
+          className={"_orange _detail_btn"}
+        >
+          Детально
+        </Button>
       </div>
     </div>
   );
