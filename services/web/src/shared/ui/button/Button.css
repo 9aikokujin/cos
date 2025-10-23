@@ -45,6 +45,18 @@
   background-color: var(--color-grey-hover);
 }
 
+.button._white {
+  color: var(--color-black);
+  border-radius: 6px;
+  background-color: var(--color-white);
+}
+
+.button._white:hover,
+.button._white._active {
+  border-radius: 6px;
+  background-color: var(--color-light-brown);
+}
+
 .button_icon {
   width: 26px;
   height: 26px;

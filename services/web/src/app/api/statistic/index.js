@@ -81,4 +81,38 @@ export default (instance) => ({
       params: cleanParams,
     }).then((response) => response.data);
   },
+  getVideoHistory(params) {
+    const allowedKeys = [
+      "id",
+      "date_to",
+      "date_from",
+      "video_id",
+      "channel_id",
+      "channel_type",
+      "user_id",
+    ];
+    const cleanParams = Object.fromEntries(
+      Object.entries(params).filter(
+        ([key, v]) => allowedKeys.includes(key) && v !== "" && v !== null && v !== undefined
+      )
+    );
+    return instance({
+      method: "GET",
+      url: "/videohistory/",
+      params: cleanParams,
+    }).then((response) => response.data);
+  },
+  downloadReport(params) {
+    const allowedKeys = ["date_to", "date_from", "channel_type", "user_id"];
+    const cleanParams = Object.fromEntries(
+      Object.entries(params).filter(
+        ([key, v]) => allowedKeys.includes(key) && v !== "" && v !== null && v !== undefined
+      )
+    );
+    return instance({
+      method: "GET",
+      url: "/videohistory/download_stats_csv",
+      params: cleanParams,
+    }).then((response) => response.data);
+  },
 });

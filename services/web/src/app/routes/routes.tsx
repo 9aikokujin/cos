@@ -122,10 +122,10 @@ export const getRoutesByRole = (role: "admin" | "user", userId?: string, isAuth:
     return [...baseRoutes, ...adminRoutes];
   }
 
-  const userSpecificRoutes = userRoutes.map((route) => ({
-    ...route,
-    path: route.path?.replace(":id", userId || ""),
-  }));
+  // const userSpecificRoutes = userRoutes.map((route) => ({
+  //   ...route,
+  //   path: route.path?.replace(":id", userId || ""),
+  // }));
 
-  return [...baseRoutes, ...userSpecificRoutes];
+  return [...baseRoutes, ...userRoutes];
 };
