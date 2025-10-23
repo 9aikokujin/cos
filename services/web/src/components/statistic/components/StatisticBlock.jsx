@@ -1,6 +1,6 @@
-const StatisticBlock = ({ title, value }) => {
+const StatisticBlock = ({ title, value, onClick, active }) => {
   return (
-    <div className="statistic_block _flex_col">
+    <div onClick={onClick} className={`statistic_block _flex_col ${active ? "_active" : ""}`}>
       <h3 className="_title">{title}</h3>
       <p className="_value">{value}</p>
     </div>

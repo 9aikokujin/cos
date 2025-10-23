@@ -17,7 +17,7 @@ export const useInfiniteScroll = (store, fetchFn, entity, deps = []) => {
     reset,
   } = store();
 
-  const filter = useFilterStore((state) => state.filter);
+  const { filter } = useFilterStore();
 
   const observerRef = useRef(null);
 

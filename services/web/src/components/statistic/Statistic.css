@@ -18,6 +18,13 @@
   background-color: var(--color-white);
   box-shadow: 0px 2px 14px 0px #0000001a;
   color: var(--color-black);
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.statistic_block._active {
+  background-color: var(--color-orange);
+  color: var(--color-white);
 }
 
 .statistic_block ._title {
