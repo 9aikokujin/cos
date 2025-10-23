@@ -1,7 +1,7 @@
 export const createFilterActions = (set, get) => ({
   setFilter: (filter) => set({ filter: { ...get().filter, ...filter } }),
 
-  setFilterTag: (tag) => set({ filter: { ...get().filter, tag } }),
+  setFilterTag: (tag) => set({ tag }),
 
   setFilterId: (id) => set({ filter: { ...get().filter, id } }),
 

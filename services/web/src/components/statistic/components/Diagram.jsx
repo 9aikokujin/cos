@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,42 +12,53 @@ import {
 
 import { Line } from "react-chartjs-2";
 
+import { useChartData } from "@/hooks/useChartData";
+import { options } from "@/shared/utils/chartsSettings";
+import Checkbox from "@/shared/ui/checkbox/Checkbox";
+import { AGGREGATION_OPTIONS } from "@/shared/utils/chartsSettings";
+
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-const date = ["14 Oct", "15 Oct", "16 Oct", "17 Oct", "18 Oct", "19 Oct", "20 Oct"];
+const Diagram = ({ data, selectedMetrics }) => {
+  const { statistic, publushedVideo } = data;
 
-const views = [120, 180, 90, 220, 160, 250, 300];
+  const [aggregation, setAggregation] = useState("day");
 
-const Diagram = () => {
-  const data = {
-    labels: date,
-    datasets: [
-      {
-        label: "",
-        data: views,
-        borderColor: "rgb(75, 192, 192)",
-        borderWidth: 0.35,
-        tension: 0.1,
-        pointBackgroundColor: "#fff",
-        pointBorderColor: "rgb(75, 192, 192)",
-        pointHoverBackgroundColor: "rgb(75, 192, 192)",
-        pointHoverBorderColor: "#fff",
-        pointBorderWidth: 1,
-        pointRadius: 3,
-      },
-    ],
+  const { labels, datasets } = useChartData(
+    statistic,
+    publushedVideo,
+    selectedMetrics,
+    aggregation
+  );
+
+  const chartData = { labels, datasets };
+
+  const handleAggregationChange = (value) => {
+    setAggregation(value);
   };
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-    },
-  };
+
   return (
-    <div className="diagram__container">
-      <Line key={JSON.stringify(data)} data={data} options={options} />
-    </div>
+    <>
+      <div className="aggregation_container _flex">
+        {AGGREGATION_OPTIONS.map((option) => (
+          <Checkbox
+            key={option.value}
+            label={option.label}
+            checked={aggregation === option.value}
+            onChange={() => handleAggregationChange(option.value)}
+          />
+        ))}
+      </div>
+      <div className="diagram__container">
+        {selectedMetrics.length > 0 ? (
+          <Line data={chartData} options={options} />
+        ) : (
+          <p className="_flex_center" style={{ textAlign: "center", padding: "2rem", height: "100%" }}>
+            Выберите метрики, чтобы отобразить графики 📊
+          </p>
+        )}
+      </div>
+    </>
   );
 };
 

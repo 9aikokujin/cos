@@ -1,6 +1,5 @@
 export const initialFilterState = {
   filter: {
-    tag: "",
     id: "",
     user_id: "",
     date_published_to: "",
@@ -11,6 +10,7 @@ export const initialFilterState = {
     date_from: "",
     date_to: "",
   },
+  tag: "",
   withTags: false,
   isLoading: false,
 };

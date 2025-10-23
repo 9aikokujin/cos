@@ -16,7 +16,7 @@ const fetchAccounts = async (page, term, filter) => {
   }
 
   if (filter?.channel_type) {
-    params.type = filter.channel_type;
+    params.type = filter.channel_type.toLowerCase();
   }
 
   const response = await API.account.getAccounts(params);

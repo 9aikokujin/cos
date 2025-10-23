@@ -1,8 +1,9 @@
-import { memo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { memo } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { AppRoutes } from "@/app/routes/routes";
 import API from "@/app/api";
+import { useFilterStore } from "@/app/store/filter/store";
 
 import ToggleSwitch from "@/shared/ui/toggleSwitch/ToggleSwitch";
 import { combineNameFields } from "@/shared/utils/formatString";
@@ -11,6 +12,8 @@ import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 const UserItem = memo(({ user, ref }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+
   const { confirmAction } = useConfirmModal();
 
   const handleToggleIsBlocked = async () => {
@@ -27,8 +30,13 @@ const UserItem = memo(({ user, ref }) => {
     confirmAction({
       title: "Удаление пользователя",
       description: "Вы уверены, что хотите удалить пользователя?",
+      btnTitle: "Удалить",
       onConfirm: handleDeleteConfirm,
     });
+  };
+
+  const handleNavigate = (filterKey, value) => {
+    navigate(AppRoutes.STATISTIC, { state: { filterKey, value } });
   };
 
   return (
@@ -39,12 +47,20 @@ const UserItem = memo(({ user, ref }) => {
       </div>
       <div className="user_item_bottom _flex_sb">
         <div className="_flex" style={{ gap: 7 }}>
-          <Link to={AppRoutes.EDITPROFILE.replace(":id", user?.id)} state={{ from: location.pathname }}>
+          <Link
+            to={AppRoutes.EDITPROFILE.replace(":id", user?.id)}
+            state={{ from: location.pathname }}
+          >
             <ButtonIcon name={"edit"} />
           </Link>
           <ButtonIcon onClick={handleDelete} name={"trash"} />
         </div>
-        <Button className={"_orange _detail_btn"}>Детально</Button>
+        <Button
+          onClick={() => handleNavigate("setFilterUserId", user?.id)}
+          className={"_orange _detail_btn"}
+        >
+          Детально
+        </Button>
       </div>
     </div>
   );
