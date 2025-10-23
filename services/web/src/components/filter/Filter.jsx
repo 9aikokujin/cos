@@ -11,7 +11,6 @@ const Filter = () => {
 
   const openFilters = () => {
     open(filters, (values) => {
-      console.log("✅ Применены фильтры:", values);
     });
   };
   return (
