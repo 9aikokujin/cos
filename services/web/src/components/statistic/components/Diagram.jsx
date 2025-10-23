@@ -13,39 +13,89 @@ import { Line } from "react-chartjs-2";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-const date = ["14 Oct", "15 Oct", "16 Oct", "17 Oct", "18 Oct", "19 Oct", "20 Oct"];
+const COLORS = {
+  views: "rgb(75, 192, 192)",
+  likes: "rgb(255, 99, 132)",
+  comments: "rgb(255, 206, 86)",
+  video_count: "rgb(153, 102, 255)",
+};
 
-const views = [120, 180, 90, 220, 160, 250, 300];
+const LABELS = {
+  views: "Просмотры",
+  likes: "Лайки",
+  comments: "Комментарии",
+  video_count: "Публикации",
+};
 
-const Diagram = () => {
-  const data = {
-    labels: date,
-    datasets: [
-      {
-        label: "",
-        data: views,
-        borderColor: "rgb(75, 192, 192)",
-        borderWidth: 0.35,
-        tension: 0.1,
-        pointBackgroundColor: "#fff",
-        pointBorderColor: "rgb(75, 192, 192)",
-        pointHoverBackgroundColor: "rgb(75, 192, 192)",
-        pointHoverBorderColor: "#fff",
-        pointBorderWidth: 1,
-        pointRadius: 3,
-      },
-    ],
-  };
+const Diagram = ({ data, selectedMetrics }) => {
+  const { statistic, publushedVideo } = data;
+
+  const labels =
+    statistic.length > 0
+      ? statistic.map((item) =>
+          new Date(item.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "short" })
+        )
+      : [];
+
+  const datasets = selectedMetrics.map((metric) => {
+    let values;
+
+    if (metric === "video_count") {
+      values = publushedVideo.map((item) => item.video_count ?? 0);
+    } else {
+      values = statistic.map((item) => item[metric] ?? 0);
+    }
+
+    return {
+      label: LABELS[metric] || metric,
+      data: values,
+      borderColor: COLORS[metric],
+      borderWidth: 1.5,
+      tension: 0.3,
+      pointBackgroundColor: "#fff",
+      pointBorderColor: COLORS[metric],
+      pointRadius: 3,
+    };
+  });
+
+  const chartData = { labels, datasets };
+
   const options = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { display: false },
+      legend: {
+        display: true,
+        position: "bottom",
+        align: "start",
+        labels: {
+          pointStyle: "circle", 
+          boxWidth: 10,        
+          boxHeight: 9, 
+          padding: 20,
+          usePointStyle: true,
+          font: { size: 13 },
+        },
+      },
+      tooltip: {
+        mode: "index",
+        intersect: false,
+      },
+    },
+    layout: {
+      padding: { bottom: 20 },
     },
   };
+
   return (
     <div className="diagram__container">
-      <Line key={JSON.stringify(data)} data={data} options={options} />
+      {selectedMetrics.length > 0 ? (
+        <Line data={chartData} options={options} />
+      ) : (
+        <p style={{ textAlign: "center", padding: "2rem" }}>
+          Выберите метрики, чтобы отобразить графики 📊
+        </p>
+      )}
     </div>
   );
 };
