@@ -10,6 +10,7 @@ from app.utils.logger import TCPLogger
 from app.utils.rabbitmq_producer import rabbit_producer
 from app.utils import logger
 from app.utils.scheduler import restore_scheduled_tasks, scheduler
+from app.models.channel import ChannelType
 
 
 @asynccontextmanager
@@ -40,6 +41,9 @@ async def lifespan(app: FastAPI):
     try:
         rabbit_producer.connect()
         rabbit_producer.declare_queue("parsing", durable=True)
+        for channel_type in ChannelType:
+            queue_name = f"parsing_{channel_type.value}"
+            rabbit_producer.declare_queue(queue_name, durable=True)
         print("✅ RabbitMQ: соединение установлено и очередь объявлена")
     except Exception as e:
         print(f"❌ Не удалось подключиться к RabbitMQ: {e}")
