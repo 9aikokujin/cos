@@ -30,19 +30,8 @@ class VideosService:
         page: Optional[int] = None,
         size: Optional[int] = None
     ):
-        user = None
-        if user_id is not None:
-            result = await self.repo.db.execute(
-                select(User).where(User.id == user_id)
-            )
-            user = result.scalar_one_or_none()
-
-        effective_user_id = None if (
-            user and user.role == UserRole.ADMIN
-            ) else (user.id if user else None)
-
         return await self.repo.get_all_filtered_paginated(
-            user_id=effective_user_id,
+            user_id=user_id,
             id=id,
             type=type,
             link=link,
