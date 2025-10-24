@@ -19,6 +19,14 @@ async def restore_scheduled_tasks():
 
     now = datetime.now(timezone.utc)
 
+    tasks = sorted(
+        tasks,
+        key=lambda task: (
+            task.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            task.id,
+        ),
+    )
+
     for idx, task in enumerate(tasks):
         job_id = f"task_{task.id}"
         if scheduler.get_job(job_id):
