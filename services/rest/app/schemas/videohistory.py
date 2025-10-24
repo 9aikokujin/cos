@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing_extensions import Optional, List
 from fastapi import Query
 from datetime import datetime
@@ -32,6 +32,10 @@ class HistoryParams(BaseModel):
     channel_id: Optional[int] = None
     channel_type: Optional[str] = None
     user_id: Optional[int] = None
+    user_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Список ID пользователей через запятую или несколькими параметрами",
+    )
     articles: Optional[List[str]] = Query(
         None, description="Список артикулов через запятую или несколько параметров")
     date_published_to: Optional[datetime] = None
@@ -44,6 +48,7 @@ class VideoAmountViews(BaseModel):
     likes: Optional[int] = None
     comments: Optional[int] = None
     date_published: Optional[datetime] = None
+    video_name: Optional[str] = None
 
 
 class DailyVideoCount(BaseModel):

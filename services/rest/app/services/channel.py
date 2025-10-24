@@ -9,8 +9,7 @@ from app.models.channel import ChannelType
 from app.models.account import Account
 from app.models.proxy import Proxy
 from app.utils.rabbitmq_producer import rabbit_producer
-from app.utils.scheduler import schedule_channel_task
-
+from app.utils.scheduler import scheduler, process_recurring_task
 from fastapi import HTTPException
 
 
@@ -88,7 +87,15 @@ class ChannelService:
                 }
             )
 
-            schedule_channel_task(new_channel.id, start_from_next_day=True)
+            job_id = f"task_{new_channel.id}"
+            scheduler.add_job(
+                process_recurring_task,
+                "interval",
+                hours=24,
+                args=[new_channel.id, "channel"],
+                id=job_id,
+                max_instances=1,
+            )
             return new_channel
 
         rabbit_producer.send_task(
@@ -103,7 +110,15 @@ class ChannelService:
             }
         )
 
-        schedule_channel_task(new_channel.id, start_from_next_day=True)
+        job_id = f"task_{new_channel.id}"
+        scheduler.add_job(
+            process_recurring_task,
+            "interval",
+            hours=24,
+            args=[new_channel.id, "channel"],
+            id=job_id,
+            max_instances=1,
+        )
 
         return new_channel
 
@@ -145,7 +160,15 @@ class ChannelService:
             }
         )
 
-        schedule_channel_task(new_channel.id, start_from_next_day=True)
+        job_id = f"task_{new_channel.id}"
+        scheduler.add_job(
+            process_recurring_task,
+            "interval",
+            hours=24,
+            args=[new_channel.id, "channel"],
+            id=job_id,
+            max_instances=1,
+        )
 
         return new_channel
 

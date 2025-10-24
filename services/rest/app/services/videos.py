@@ -26,6 +26,7 @@ class VideosService:
         id: Optional[int] = None,
         type: Optional[VideoType] = None,
         link: Optional[str] = None,
+        name: Optional[str] = None,
         page: Optional[int] = None,
         size: Optional[int] = None
     ):
@@ -45,6 +46,7 @@ class VideosService:
             id=id,
             type=type,
             link=link,
+            name=name,
             page=page,
             size=size
         )
@@ -91,8 +93,8 @@ class VideosService:
             "history": history
         }
 
-    async def get_by_article(self, article: str, user: User):
-        video = await self.repo.get_by_article(article, user)
+    async def get_by_article(self, articles: str, user: User):
+        video = await self.repo.get_by_article(articles, user)
         if not video:
             raise ValueError("Видео не найдено по артиклю")
         return video
@@ -122,7 +124,7 @@ class VideosService:
                 type=dto.type,
                 name=dto.name,
                 image=dto.image,
-                article=dto.article,
+                articles=dto.articles,
                 # date_published=dto.date_published,
                 # amount_views=dto.amount_views,
                 # amount_likes=dto.amount_likes,

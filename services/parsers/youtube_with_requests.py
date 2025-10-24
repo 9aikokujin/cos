@@ -2,26 +2,30 @@ import re
 import asyncio
 # import time
 import json
+from datetime import datetime
 from typing import Optional, Dict, List, Union, Any
 import httpx
 import requests
 # from pathlib import Path
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 import random
-# from datetime import datetime
 
 from bs4 import BeautifulSoup
 
 
-from utils.logger import TCPLogger
+ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
+# API_BASE_URL = "https://cosmeya.dev-klick.cyou/api/v1/videos"
+API_BASE_URL = "http://127.0.0.1:8000/api/v1/videos"
+
+# from utils.logger import TCPLogger
 
 
 class ShortsParser:
     def __init__(
             self,
-            logger: TCPLogger
+            # logger: TCPLogger
     ):
-        self.logger = logger
+        # self.logger = logger
         self.current_proxy_index = 0
         self.seen_video_ids: set = set()
         self.collected_videos: List[Dict] = []
@@ -108,13 +112,13 @@ class ShortsParser:
                 if parsed:
                     return parsed
         except Exception as e:
-            self.logger.send("INFO",  f"Не удалось получить количество видео из шапки: {e}")
+            print(f"Не удалось получить количество видео из шапки: {e}")
 
         return None
 
     async def extract_images_from_dom(self, page, url: str):
         """Проходимся по карточкам, сохраняем ссылки и превью для шортов."""
-        self.logger.send("INFO",  "🔍 Извлекаем данные о шортах из DOM…")
+        print("🔍 Извлекаем данные о шортах из DOM…")
 
         item_selectors = [
             "ytm-shorts-lockup-view-model",   # мобильная
@@ -131,7 +135,7 @@ class ShortsParser:
             try:
                 items = await page.query_selector_all(selector)
                 total_cards_seen += len(items)
-                self.logger.send("INFO",  f"Карточек по '{selector}': {len(items)}")
+                print(f"Карточек по '{selector}': {len(items)}")
 
                 for el in items:
                     try:
@@ -175,11 +179,10 @@ class ShortsParser:
                         continue
 
             except Exception as e:
-                self.logger.send("INFO",  f"Ошибка при обходе '{selector}': {e}")
+                print(f"Ошибка при обходе '{selector}': {e}")
                 continue
 
-        self.logger.send(
-            "INFO",
+        print(
             f"✅ Извлечено: +{added_links} ссылок, +{added_images} превью; всего уникальных видео: "
             f"{len(self.dom_order)}; карточек просмотрено: {total_cards_seen}"
         )
@@ -193,7 +196,7 @@ class ShortsParser:
         max_scroll_attempts = 6
 
         for attempt in range(max_scroll_attempts):
-            self.logger.send("INFO",  f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
+            print(f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
 
             if attempt > 0:
                 try:
@@ -231,29 +234,29 @@ class ShortsParser:
 
                 captcha = await page.query_selector("text=CAPTCHA")
                 if captcha:
-                    self.logger.send("INFO",  "Обнаружена CAPTCHA на странице")
+                    print("Обнаружена CAPTCHA на странице")
                     return len(self.dom_order)
 
                 await self.extract_images_from_dom(page, url)
 
                 current_total = len(self.dom_order)
                 target_info = target_count if target_count else "?"
-                self.logger.send("INFO",  f"🔢 Собрано {current_total} уникальных видео (цель: {target_info})")
+                print(f"🔢 Собрано {current_total} уникальных видео (цель: {target_info})")
 
                 if target_count and current_total >= target_count:
-                    self.logger.send("INFO",  "🎯 Достигнуто требуемое количество видео из шапки.")
+                    print("🎯 Достигнуто требуемое количество видео из шапки.")
                     return current_total
 
                 try:
                     current_count = await page.eval_on_selector_all(selector, "els => els.length")
-                    self.logger.send("INFO",  f"Текущее количество элементов по селектору '{selector}': {current_count}")
+                    print(f"Текущее количество элементов по селектору '{selector}': {current_count}")
                 except PlaywrightTimeoutError:
-                    self.logger.send("INFO",  "Timeout при оценке элементов, продолжаем...")
+                    print("Timeout при оценке элементов, продолжаем...")
 
                 if current_total == prev_count and not height_increased:
                     idle_rounds += 1
                     if idle_rounds >= max_idle_rounds:
-                        self.logger.send("INFO",  f"Достигнут конец списка видео профиля {url}")
+                        print(f"Достигнут конец списка видео профиля {url}")
                         return current_total
                 else:
                     idle_rounds = 0
@@ -349,7 +352,7 @@ class ShortsParser:
             try:
                 return json.loads(fragment)
             except json.JSONDecodeError as e:
-                self.logger.send("INFO",  f"Не удалось распарсить JSON по маркеру '{marker}': {e}")
+                print(f"Не удалось распарсить JSON по маркеру '{marker}': {e}")
         return None
 
     def parse_video_page(self, html: str) -> Dict[str, Optional[Dict[str, Any]]]:
@@ -391,6 +394,60 @@ class ShortsParser:
             initial_data = self._load_json_segment(html, initial_markers)
 
         return {"player": player_data, "initial": initial_data}
+
+    def _normalize_article(self, tag: str) -> Optional[str]:
+        if not tag:
+            return None
+        if not tag.startswith("#"):
+            tag = "#" + tag
+        lower_tag = tag.lower()
+        for prefix in ARTICLE_PREFIXES:
+            if lower_tag.startswith(prefix):
+                return tag
+        return None
+
+    def _extract_text(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            simple = value.get("simpleText") or value.get("text")
+            if isinstance(simple, str):
+                return simple
+            runs = value.get("runs")
+            if isinstance(runs, list):
+                parts = [
+                    run.get("text", "")
+                    for run in runs
+                    if isinstance(run, dict) and isinstance(run.get("text"), str)
+                ]
+                if parts:
+                    return "".join(parts)
+        return ""
+
+    def extract_articles(self, description: str, text_extra: Optional[List[dict]]) -> Optional[str]:
+        found: set[str] = set()
+
+        if description:
+            for match in re.findall(r"#[\w-]+", description):
+                normalized = self._normalize_article(match)
+                if normalized:
+                    found.add(normalized)
+
+        if isinstance(text_extra, list):
+            for block in text_extra:
+                if not isinstance(block, dict):
+                    continue
+                name = block.get("hashtagName")
+                if isinstance(name, str):
+                    normalized = self._normalize_article(name)
+                    if normalized:
+                        found.add(normalized)
+
+        if not found:
+            return None
+
+        # сохраняем порядок для детерминированности
+        return ", ".join(sorted(found, key=lambda x: x.lower()))
 
     def extract_views_from_initial_data(self, data: Any) -> Optional[int]:
         """Извлекаем количество просмотров из различных структур ytInitialData."""
@@ -480,6 +537,38 @@ class ShortsParser:
 
         return None
 
+    def extract_comment_count(self, data: Any) -> Optional[int]:
+        """Извлекаем количество комментариев из engagementPanels."""
+        if not isinstance(data, dict):
+            return None
+
+        panels = data.get("engagementPanels")
+        if not isinstance(panels, list):
+            return None
+
+        for panel in panels:
+            if not isinstance(panel, dict):
+                continue
+            renderer = panel.get("engagementPanelSectionListRenderer")
+            if not isinstance(renderer, dict):
+                continue
+            header = renderer.get("header")
+            if not isinstance(header, dict):
+                continue
+            title_renderer = header.get("engagementPanelTitleHeaderRenderer")
+            if not isinstance(title_renderer, dict):
+                continue
+            title_text = self._extract_text(title_renderer.get("title")).lower()
+            if "comment" not in title_text and "коммент" not in title_text:
+                continue
+            contextual = title_renderer.get("contextualInfo")
+            count_text = self._extract_text(contextual)
+            parsed = self.parse_views(count_text)
+            if parsed:
+                return parsed
+
+        return None
+
     async def fetch_video_metadata(self, video_id: str, video_url: str, proxy: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Запрашиваем страницу шорта и достаём метаданные (название, просмотры, описание)."""
         formatted_proxy = self.prepare_proxy(proxy)
@@ -503,7 +592,7 @@ class ShortsParser:
         try:
             html = await asyncio.to_thread(_fetch_html)
         except Exception as e:
-            self.logger.send("INFO",  f"❌ Не удалось получить страницу {video_url} через {formatted_proxy or 'без прокси'}: {e}")
+            print(f"❌ Не удалось получить страницу {video_url} через {formatted_proxy or 'без прокси'}: {e}")
             return None
 
         # if self.saved_html_count < 2:
@@ -513,16 +602,16 @@ class ShortsParser:
         #     debug_path = debug_dir / f"{self.saved_html_count + 1}_{safe_video_id}.html"
         #     try:
         #         debug_path.write_text(html)
-        #         self.logger.send("INFO",  f"💾 Сохранён HTML ответа {debug_path}")
+        #         print(f"💾 Сохранён HTML ответа {debug_path}")
         #     except Exception as save_err:
-        #         self.logger.send("INFO",  f"⚠️ Не удалось сохранить HTML {debug_path}: {save_err}")
+        #         print(f"⚠️ Не удалось сохранить HTML {debug_path}: {save_err}")
         #     finally:
         #         self.saved_html_count += 1
 
         parsed = self.parse_video_page(html)
         player_data = parsed.get("player") or {}
         if not player_data:
-            self.logger.send("INFO",  f"⚠️ Не найден ytInitialPlayerResponse для {video_url}")
+            print(f"⚠️ Не найден ytInitialPlayerResponse для {video_url}")
             return None
 
         video_details = player_data.get("videoDetails", {}) or {}
@@ -533,19 +622,8 @@ class ShortsParser:
         if not isinstance(microformat, dict):
             microformat = {}
 
-        def _extract_text(value: Any) -> str:
-            if isinstance(value, str):
-                return value
-            if isinstance(value, dict):
-                if "simpleText" in value and value["simpleText"]:
-                    return value["simpleText"]
-                runs = value.get("runs")
-                if isinstance(runs, list):
-                    return "".join(run.get("text", "") for run in runs if isinstance(run, dict))
-            return ""
-
         title_candidate = video_details.get("title") or microformat.get("title")
-        title = _extract_text(title_candidate)
+        title = self._extract_text(title_candidate)
 
         view_count_raw = video_details.get("viewCount")
         views = 0
@@ -555,7 +633,7 @@ class ShortsParser:
             views = self.parse_views(view_count_raw)
 
         if not views:
-            view_count_text = _extract_text(microformat.get("viewCount"))
+            view_count_text = self._extract_text(microformat.get("viewCount"))
             if view_count_text:
                 views = self.parse_views(view_count_text)
 
@@ -574,17 +652,55 @@ class ShortsParser:
                 if extracted:
                     views = extracted
 
+        description = self._extract_text(microformat.get("description")) or ""
+        if not description:
+            short_description = video_details.get("shortDescription")
+            if isinstance(short_description, str):
+                description = short_description
+        description = description.strip()
+
+        like_raw = microformat.get("likeCount")
+        likes = 0
+        if isinstance(like_raw, str):
+            likes = self.parse_views(like_raw) or 0
+        elif like_raw is not None:
+            likes = self.parse_views(self._extract_text(like_raw)) or 0
+
+        comments = self.extract_comment_count(initial_data) or 0
+
+        publish_candidate = microformat.get("uploadDate") or microformat.get("publishDate")
+        date_published = None
+        if isinstance(publish_candidate, str):
+            iso_candidate = publish_candidate.strip()
+            if iso_candidate:
+                if iso_candidate.endswith("Z"):
+                    iso_candidate = iso_candidate[:-1] + "+00:00"
+                try:
+                    date_published = datetime.fromisoformat(iso_candidate).date().isoformat()
+                except ValueError:
+                    if len(iso_candidate) >= 10:
+                        date_published = iso_candidate[:10]
+
+        articles = self.extract_articles(description, None) if description else None
+
         return {
             "video_id": video_id,
             "link": video_url,
             "title": title,
             "views": views,
+            "description": description,
+            "likes": likes,
+            "comments": comments,
+            "articles": articles,
+            "date_published": date_published,
         }
 
     async def fetch_videos_with_proxies(self, video_ids: List[str], delay: float = 5.0) -> List[Dict[str, Any]]:
         """Запрашиваем страницы шортов пакетами, по одному URL на прокси."""
         if not video_ids:
             return []
+
+        # video_ids = video_ids[:20]  # тестовый пример первые 20 видосов
 
         proxies = self.proxy_list if self.proxy_list else [None]
         total_proxies = len(proxies) if proxies else 1
@@ -601,7 +717,7 @@ class ShortsParser:
             for idx, video_id in enumerate(batch_ids):
                 video_url = self.dom_video_links.get(video_id)
                 if not video_url:
-                    self.logger.send("INFO",  f"⚠️ Для видео {video_id} не найдена ссылка в DOM, пропускаем.")
+                    print(f"⚠️ Для видео {video_id} не найдена ссылка в DOM, пропускаем.")
                     continue
                 start_proxy_idx = idx % (total_proxies or 1)
                 task_video_ids.append(video_id)
@@ -613,14 +729,14 @@ class ShortsParser:
                 batch_results = await asyncio.gather(*tasks, return_exceptions=True)
                 for video_id, result in zip(task_video_ids, batch_results):
                     if isinstance(result, Exception):
-                        self.logger.send("INFO",  f"❌ Ошибка при обработке {video_id}: {result}")
+                        print(f"❌ Ошибка при обработке {video_id}: {result}")
                         continue
                     if result:
                         results.append(result)
 
             index += batch_size
             if index < total:
-                self.logger.send("INFO",  f"⏳ Ждём {delay} секунд перед следующей пачкой запросов ({index}/{total})")
+                print(f"⏳ Ждём {delay} секунд перед следующей пачкой запросов ({index}/{total})")
                 await asyncio.sleep(delay)
 
         return results
@@ -640,15 +756,14 @@ class ShortsParser:
         for attempt in range(total_proxies):
             proxy = proxies[(start_index + attempt) % total_proxies]
             if attempt > 0:
-                self.logger.send(
-                    "INFO",
+                print(
                     f"🔁 Повторная попытка для {video_url} через {proxy or 'без прокси'} (попытка {attempt + 1})"
                 )
             result = await self.fetch_video_metadata(video_id, video_url, proxy)
             if result:
                 return result
 
-        self.logger.send("INFO",  f"⚠️ Все прокси исчерпаны для {video_url}, видео пропущено.")
+        print(f"⚠️ Все прокси исчерпаны для {video_url}, видео пропущено.")
         return None
 
     async def download_image(self, url: str, proxy: str = None) -> Union[bytes, None]:
@@ -664,7 +779,7 @@ class ShortsParser:
         try:
             return await asyncio.to_thread(_download)
         except Exception as e:
-            self.logger.send("INFO",  f"❌ Ошибка загрузки изображения {url}: {e}")
+            print(f"❌ Ошибка загрузки изображения {url}: {e}")
             return None
 
     async def upload_image(self, video_id: int, image_url: str, proxy: str = None):
@@ -678,7 +793,7 @@ class ShortsParser:
 
         def _upload():
             response = requests.post(
-                f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                f"{API_BASE_URL}/{video_id}/upload-image/",
                 files=files,
                 timeout=30.0,
             )
@@ -692,7 +807,7 @@ class ShortsParser:
         try:
             status_code, payload = await asyncio.to_thread(_upload)
         except Exception as e:
-            self.logger.send("INFO",  f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
+            print(f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
             return None, str(e)
 
         image_path = None
@@ -717,7 +832,7 @@ class ShortsParser:
 
         if not url.endswith('/shorts'):
             url = url.rstrip('/') + '/shorts'
-        self.logger.send("INFO",  f"Переход на канал: {url}")
+        print(f"Переход на канал: {url}")
 
         async def get_proxy_config(proxy_str):
             try:
@@ -730,7 +845,7 @@ class ShortsParser:
                     host, port = proxy_str.split(":")
                     return {"server": f"http://{host}:{port}"}
             except Exception as e:
-                self.logger.send("INFO",  f"Неверный формат прокси: {e}")
+                print(f"Неверный формат прокси: {e}")
                 return None
 
         async def create_browser_with_proxy(proxy_str, playwright):
@@ -772,8 +887,7 @@ class ShortsParser:
 
         for attempt_idx in range(max_proxy_attempts):
             current_proxy = proxy_candidates[attempt_idx % len(proxy_candidates)] if proxy_candidates else None
-            self.logger.send(
-                "INFO",
+            print(
                 f"🔁 Попытка {attempt_idx + 1}/{max_proxy_attempts} "
                 f"с прокси {current_proxy or 'без прокси'}"
             )
@@ -788,7 +902,7 @@ class ShortsParser:
                 playwright = await async_playwright().start()
                 browser, context, page = await create_browser_with_proxy(current_proxy, playwright)
 
-                self.logger.send("INFO",  "🔍 Загружаем страницу Shorts…")
+                print("🔍 Загружаем страницу Shorts…")
                 await page.goto(url, wait_until="networkidle", timeout=60000)
 
                 cookie_selectors = [
@@ -804,16 +918,16 @@ class ShortsParser:
                         if btn:
                             await btn.click()
                             await page.wait_for_timeout(1200)
-                            self.logger.send("INFO",  "Закрыта модалка с куки")
+                            print("Закрыта модалка с куки")
                             break
                     except Exception:
                         continue
 
                 header_videos_count = await self.get_videos_count_from_header(page)
                 if header_videos_count:
-                    self.logger.send("INFO",  f"🎯 Количество видео из шапки: {header_videos_count}")
+                    print(f"🎯 Количество видео из шапки: {header_videos_count}")
                 else:
-                    self.logger.send("INFO",  "ℹ️ Не удалось определить количество видео из шапки, опираемся на DOM.")
+                    print("ℹ️ Не удалось определить количество видео из шапки, опираемся на DOM.")
 
                 selector = "ytd-rich-item-renderer, ytd-reel-item-renderer, ytm-shorts-lockup-view-model, ytd-grid-video-renderer"
                 total_videos_from_dom = await self.scroll_until(
@@ -823,10 +937,10 @@ class ShortsParser:
                     target_count=header_videos_count,
                     delay=3.0
                 )
-                self.logger.send("INFO",  f"📊 Всего уникальных видео в DOM: {len(self.dom_order)} (scroll_until вернул {total_videos_from_dom})")
+                print(f"📊 Всего уникальных видео в DOM: {len(self.dom_order)} (scroll_until вернул {total_videos_from_dom})")
 
             except Exception as main_error:
-                self.logger.send("INFO",  f"Критическая ошибка при работе с Playwright: {main_error}")
+                print(f"Критическая ошибка при работе с Playwright: {main_error}")
             finally:
                 for obj, name in [(page, "page"), (context, "context"), (browser, "browser"), (playwright, "playwright")]:
                     if obj:
@@ -836,7 +950,7 @@ class ShortsParser:
                             else:
                                 await obj.close()
                         except Exception as e:
-                            self.logger.send("INFO",  f"Ошибка закрытия {name}: {e}")
+                            print(f"Ошибка закрытия {name}: {e}")
 
             total_collected = len(self.dom_order)
             if total_collected > best_total:
@@ -850,7 +964,7 @@ class ShortsParser:
                 best_total = total_collected
 
             if total_collected == 0:
-                self.logger.send("INFO",  "⚠️ Не удалось собрать ни одного видео в этой попытке, пробуем другой прокси.")
+                print("⚠️ Не удалось собрать ни одного видео в этой попытке, пробуем другой прокси.")
                 await asyncio.sleep(1.5)
                 continue
 
@@ -859,8 +973,7 @@ class ShortsParser:
                 and total_collected < header_videos_count
                 and attempt_idx + 1 < max_proxy_attempts
             ):
-                self.logger.send(
-                    "INFO",
+                print(
                     f"⚠️ Собрано только {total_collected} из {header_videos_count} видео. "
                     "Пробуем обновить страницу с другим прокси."
                 )
@@ -870,7 +983,7 @@ class ShortsParser:
             break
         else:
             if best_state and best_state["dom_order"]:
-                self.logger.send("INFO",  "ℹ️ Используем данные лучшей из предыдущих попыток.")
+                print("ℹ️ Используем данные лучшей из предыдущих попыток.")
                 self.dom_images = best_state["dom_images"]
                 self.dom_video_links = best_state["dom_video_links"]
                 self.dom_order = best_state["dom_order"]
@@ -878,24 +991,23 @@ class ShortsParser:
                 total_videos_from_dom = best_state["total_from_dom"]
                 total_collected = len(self.dom_order)
             else:
-                self.logger.send("INFO",  "⚠️ Не удалось собрать ни одного видео из DOM после всех попыток.")
+                print("⚠️ Не удалось собрать ни одного видео из DOM после всех попыток.")
                 return []
         total_collected = len(self.dom_order)
         if total_collected == 0:
-            self.logger.send("INFO",  "⚠️ Не удалось собрать ни одного видео из DOM.")
+            print("⚠️ Не удалось собрать ни одного видео из DOM.")
             return []
 
         videos_limit = header_videos_count if header_videos_count else total_collected
         videos_limit = min(videos_limit, total_collected)
         videos_to_process = self.dom_order[:videos_limit]
-        self.logger.send(
-            "INFO",
+        print(
             f"🎯 Подготовлено к обработке {len(videos_to_process)} видео "
             f"(шапка: {header_videos_count or '—'}, собрано: {total_collected})"
         )
 
         metadata_list = await self.fetch_videos_with_proxies(videos_to_process)
-        self.logger.send("INFO",  f"📦 Получены метаданные для {len(metadata_list)} видео")
+        print(f"📦 Получены метаданные для {len(metadata_list)} видео")
 
         for meta in metadata_list:
             video_id = meta.get("video_id")
@@ -907,14 +1019,18 @@ class ShortsParser:
                     "link": meta.get("link"),
                     "type": "youtube",
                     "name": meta.get("title") or "",
-                    "image": image_url,
+                    "image_url": image_url,
                     "channel_id": channel_id,
+                    # "description": meta.get("description") or "",
                     "amount_views": meta.get("views") or 0,
+                    "amount_likes": meta.get("likes") or 0,
+                    "amount_comments": meta.get("comments") or 0,
+                    "articles": meta.get("articles"),
+                    "date_published": meta.get("date_published"),
                 }
             )
 
-        self.logger.send(
-            "INFO",
+        print(
             f"✅ Собрано {len(all_videos_data)} из {videos_limit} видео "
             f"(DOM найдено: {total_collected})"
         )
@@ -924,8 +1040,8 @@ class ShortsParser:
         for video_data in all_videos_data:
             try:
                 async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-                    # self.logger.send("INFO",  f"🔍 Проверка видео: {video_data['link']}")
-                    check_resp = await client.get(f"https://sn.dev-klick.cyou/api/v1/videos/?link={video_data['link']}")
+                    # print(f"🔍 Проверка видео: {video_data['link']}")
+                    check_resp = await client.get(f"{API_BASE_URL}/?link={video_data['link']}")
                     is_new = False
                     video_id = None
 
@@ -936,23 +1052,24 @@ class ShortsParser:
                             existing_video = vids[0]
                             video_id = existing_video['id']
                             update_payload = {
-                                "amount_views": video_data["amount_views"],
+                                "amount_views": video_data.get("amount_views", 0),
+                                "amount_likes": video_data.get("amount_likes", 0),
+                                "amount_comments": video_data.get("amount_comments", 0),
+                                "articles": video_data.get("articles"),
+                                # "description": video_data.get("description"),
+                                "date_published": video_data.get("date_published"),
                             }
+                            update_payload = {k: v for k, v in update_payload.items() if v is not None}
                             await client.patch(
-                                f"https://sn.dev-klick.cyou/api/v1/videos/{video_id}/",
+                                f"{API_BASE_URL}/{video_id}",
                                 json=update_payload
                             )
 
                             existing_image = existing_video.get("image")
-                            image_missing = not existing_image
-                            image_needs_update = False
-                            if isinstance(existing_image, str):
-                                normalized_existing = existing_image.strip()
-                                if normalized_existing.startswith(("http://", "https://")):
-                                    image_needs_update = True
-                            if (image_missing or image_needs_update) and video_data.get("image"):
+                            image_missing = not (isinstance(existing_image, str) and existing_image.strip())
+                            if image_missing and video_data.get("image_url"):
                                 if video_id not in queued_video_ids:
-                                    image_queue.append((video_id, video_data["image"]))
+                                    image_queue.append((video_id, video_data["image_url"]))
                                     queued_video_ids.add(video_id)
                         else:
                             is_new = True
@@ -960,18 +1077,26 @@ class ShortsParser:
                         is_new = True
 
                     if is_new:
-                        resp = await client.post("https://sn.dev-klick.cyou/api/v1/videos/", json=video_data)
+                        create_payload = {
+                            key: value
+                            for key, value in video_data.items()
+                            if value is not None
+                        }
+                        resp = await client.post(f"{API_BASE_URL}/", json=create_payload)
                         resp.raise_for_status()
-                        video_id = resp.json()["id"]
-                        # self.logger.send("INFO",  f"✅ Создано новое видео {video_id}")
-                        if video_data.get("image") and video_id not in queued_video_ids:
-                            image_queue.append((video_id, video_data["image"]))
+                        created_video = resp.json()
+                        video_id = created_video["id"]
+                        # print(f"✅ Создано новое видео {video_id}")
+                        created_image = created_video.get("image")
+                        image_missing = not (isinstance(created_image, str) and created_image.strip())
+                        if image_missing and video_data.get("image_url") and video_id not in queued_video_ids:
+                            image_queue.append((video_id, video_data["image_url"]))
                             queued_video_ids.add(video_id)
                 processed_count += 1
             except Exception as e:
-                self.logger.send("INFO",  f"⚠️ Ошибка при обработке {video_data.get('link')}: {e}")
+                print(f"⚠️ Ошибка при обработке {video_data.get('link')}: {e}")
 
-        self.logger.send("INFO",  f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
+        print(f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
 
         # --- Загрузка изображений ---
         idx = 0
@@ -979,55 +1104,32 @@ class ShortsParser:
             proxy = proxy_list[current_proxy_index] if proxy_list else None
             current_proxy_index = (current_proxy_index + 1) % len(proxy_list) if proxy_list else 0
             batch = image_queue[idx:idx + 15]
-            self.logger.send("INFO",  f"🖼️ Загружаем {len(batch)} изображений через {proxy or 'без прокси'}")
+            print(f"🖼️ Загружаем {len(batch)} изображений через {proxy or 'без прокси'}")
 
             for vid, img_url in batch:
                 try:
                     status, _ = await self.upload_image(vid, img_url, proxy=proxy)
-                    self.logger.send("INFO",  f"{'✅' if status == 200 else '⚠️'} Фото для видео {vid} → статус {status}")
+                    print(f"{'✅' if status == 200 else '⚠️'} Фото для видео {vid} → статус {status}")
                 except Exception as e:
-                    self.logger.send("INFO",  f"❌ Ошибка загрузки фото {vid}: {e}")
+                    print(f"❌ Ошибка загрузки фото {vid}: {e}")
                 await asyncio.sleep(5.0)
             idx += 15
 
-        self.logger.send("INFO",  f"🎉 Парсинг завершён: {processed_count} видео обработано.")
+        print(f"🎉 Парсинг завершён: {processed_count} видео обработано.")
 
 
 # ----------------------- Пример запуска -----------------------
 
-# async def main():
-#     proxy_list = [
-#         "g3dmsMyYST:B9BegRNRzi@45.150.35.224:28898",
-#         "Weh1oXn82b:dUYiJZ5w7T@45.150.35.129:31801",
-#         "gnmPrWSMJ4:tbHyXTwWdx@45.150.35.114:54943",
-#         # "15ObFJmCP5:a0rog6kGgT@45.150.35.113:24242",
-#         "Z7mGFwrT6N:5wLFFO5v3S@109.120.131.5:34707",
-#         "HCtCUxQYnj:GM9pjQ8J8T@109.120.131.229:39202",
-#         # "dBY505zGKK:8gqxiwpjvg@45.150.35.44:40281",
-#         "zhH47betn3:J8eC3qaOrs@109.120.131.175:38411",
-#         "KX32alVE51:ZVD0CsjFhJ@109.120.131.27:47449",
-#         "KTdw9aNBl7:MI45E5jVnB@45.150.35.233:57281",
-#         "7bZbeHwcNI:fFs1cUXfbN@109.120.131.219:29286",
-#         "F1Y0BvrqNo:HKPbfMGtJw@45.150.35.31:41247",
-#         "WfkB8GfYts:vXdJAVXCSI@45.150.35.133:35460",
-#         "yr3Xib8LYo:FzS9t4PGro@45.150.35.3:50283",
-#         "exOL0CR6TN:oj0BGarhAk@45.150.35.143:32354",
-#         "CbZ35SQIZb:OO4ddjBRiK@45.150.35.99:28985",
-#         "JRGI3q6Zo9:LJpcFpCgU2@45.150.35.30:32381",
-#         "NTPvsl77eN:wagp6GmWNk@109.120.131.41:55509",
-#         "SBqj98lU9c:ktxTU1ZOid@45.150.35.138:55350",
-#         "3El7Uvg1TY:1DZVyrdMPs@45.150.35.231:51842",
-#         "dBqOOqGczg:d2xKkdc3Re@45.150.35.156:38617",
-#         "fz91O4ury3:ZBCW6s8d7E@45.150.35.132:47712",
-#         "RLFUp7vicq:X1TTYhQYWs@45.150.35.34:40674",
-#         "3dQxPpHkj4:o12oWKn5Lg@45.150.35.201:42897",
-#         "iRArjOVFVr:0vXB48RsTf@45.150.35.200:42312",
-#     ]
-#     parser = ShortsParser()
-#     url = "https://www.youtube.com/@nastya.beomaa"
-#     user_id = 1
-#     await parser.parse_channel(url, channel_id=5, user_id=user_id, proxy_list=proxy_list)
+async def main():
+    proxy_list = [
+        "2p9UY4YAxP:O9Mru1m26m@109.120.131.161:34945",
+        "LgSCXw:UCNpHx@138.219.120.153:9466",
+    ]
+    parser = ShortsParser()
+    url = "https://www.youtube.com/@nastya.beomaa"
+    user_id = 1
+    await parser.parse_channel(url, channel_id=3, user_id=user_id, proxy_list=proxy_list)
 
 
-# if __name__ == "__main__":
-#     asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
