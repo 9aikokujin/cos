@@ -18,3 +18,7 @@ class AccountCreate(BaseModel):
 class AccountUpdate(BaseModel):
     account_str: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class AccountBulkCreateRequest(BaseModel):
+    raw_data: str

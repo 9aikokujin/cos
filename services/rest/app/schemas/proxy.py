@@ -19,3 +19,12 @@ class ProxyCreate(BaseModel):
 class ProxyUpdate(BaseModel):
     proxy_str: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class ProxyBulkCreateRequest(BaseModel):
+    raw_data: str
+    for_likee: bool = False
+
+
+class ProxyBulkDeleteResponse(BaseModel):
+    deleted: int

@@ -302,7 +302,7 @@ class LikeeParser:
             self.logger.send("INFO", f"Не удалось скачать изображение для видео {video_id}")
             return None, "Download failed"
 
-        file_name = image_url.split("/")[-1].split("?")[0]
+        file_name = image_url.split("/")[-1].split("?")[0] or "cover.jpg"
         async with httpx.AsyncClient(timeout=30.0) as client:
             files = {"file": (file_name, image_bytes, "image/jpeg")}
             try:
@@ -311,8 +311,19 @@ class LikeeParser:
                     files=files,
                 )
                 resp.raise_for_status()
+                try:
+                    payload = resp.json()
+                except ValueError:
+                    payload = {}
+
+                image_path = None
+                if isinstance(payload, dict):
+                    image_path = payload.get("image")
+                    if image_path and not image_path.startswith(("http://", "https://", "/")):
+                        image_path = f"/{image_path}"
+
                 self.logger.send("INFO", f"✅ Фото для видео {video_id} загружено")
-                return resp.status_code, resp.text
+                return resp.status_code, image_path or payload or resp.text
             except Exception as e:
                 self.logger.send("INFO", f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
                 return None, str(e)
@@ -415,7 +426,7 @@ class LikeeParser:
                     "link": link,
                     "type": "likee",
                     "name": name,
-                    "image": image_url,
+                    "image_url": image_url,
                     "articles": articles,
                     "channel_id": channel_id,
                     "amount_views": amount_views,

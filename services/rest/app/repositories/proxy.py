@@ -1,8 +1,9 @@
 from fastapi.exceptions import HTTPException
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import select
 from app.models.proxy import Proxy
-from app.schemas.proxy import ProxyUpdate
+from app.schemas.proxy import ProxyCreate, ProxyUpdate
 
 
 class ProxyRepository:
@@ -41,6 +42,14 @@ class ProxyRepository:
         await self.db.refresh(db_proxy)
         return db_proxy
 
+    async def create_many(self, proxies: list[ProxyCreate]) -> list[Proxy]:
+        db_proxies = [Proxy(**proxy.model_dump()) for proxy in proxies]
+        self.db.add_all(db_proxies)
+        await self.db.commit()
+        for proxy in db_proxies:
+            await self.db.refresh(proxy)
+        return db_proxies
+
     async def delete(self, proxy_id: int):
         proxy = await self.get_by_id(proxy_id)
 
@@ -50,3 +59,8 @@ class ProxyRepository:
         await self.db.delete(proxy)
         await self.db.commit()
         return proxy
+
+    async def delete_all(self) -> int:
+        result = await self.db.execute(delete(Proxy))
+        await self.db.commit()
+        return result.rowcount or 0

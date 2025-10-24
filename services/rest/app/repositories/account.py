@@ -45,6 +45,14 @@ class AccountRepository:
         await self.db.refresh(db_account)
         return db_account
 
+    async def create_many(self, accounts: list[AccountCreate]) -> list[Account]:
+        db_accounts = [Account(**account.model_dump()) for account in accounts]
+        self.db.add_all(db_accounts)
+        await self.db.commit()
+        for account in db_accounts:
+            await self.db.refresh(account)
+        return db_accounts
+
     async def delete(self, account_id: int):
         account = await self.get_by_id(account_id)
 
