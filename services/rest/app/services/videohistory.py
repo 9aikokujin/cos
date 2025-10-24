@@ -16,6 +16,33 @@ class VideoHistoryService:
     def __init__(self, db: AsyncSession):
         self.repo = VideoHistoryRepository(db)
 
+    @staticmethod
+    def _normalize_user_ids(user_ids: Optional[List[int]]) -> Optional[List[int]]:
+        if not user_ids:
+            return None
+        # Убираем None и дубликаты, сохраняя порядок
+        normalized = []
+        for item in user_ids:
+            if item is None or item in normalized:
+                continue
+            normalized.append(item)
+        return normalized or None
+
+    def _resolve_user_ids(
+        self,
+        user: User,
+        user_id: Optional[int],
+        user_ids: Optional[List[int]],
+    ) -> Optional[List[int]]:
+        if user.role != UserRole.ADMIN:
+            return [user.id]
+        normalized = self._normalize_user_ids(user_ids)
+        if normalized:
+            return normalized
+        if user_id is not None:
+            return [user_id]
+        return None
+
     async def get_all_filtered(
         self,
         user: User,
@@ -23,6 +50,7 @@ class VideoHistoryService:
         date_to: Optional[dt_date] = None,
         date_from: Optional[dt_date] = None,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         channel_id: Optional[int] = None,
         articles: Optional[List[str]] = None,
         channel_type: Optional[ChannelType] = None,
@@ -30,15 +58,12 @@ class VideoHistoryService:
         date_published_from: Optional[dt_date] = None,
         video_id: Optional[int] = None,
     ):
-        # Если пользователь не админ, он видит только свою историю
-        if user.role != UserRole.ADMIN:
-            user_id = user.id
-        # Передаём все фильтры в репозиторий
-        return await self.repo.get_filtered(
+        effective_user_ids = self._resolve_user_ids(user, user_id, user_ids)
+        records = await self.repo.get_filtered(
             id=id,
             date_to=date_to,
             date_from=date_from,
-            user_id=user_id,
+            user_ids=effective_user_ids,
             channel_id=channel_id,
             articles=articles,
             channel_type=channel_type,
@@ -46,6 +71,24 @@ class VideoHistoryService:
             date_published_from=date_published_from,
             video_id=video_id,
         )
+        formatted = []
+        for item in records:
+            video = getattr(item, "video", None)
+            payload = {
+                "id": item.id,
+                "video_id": item.video_id,
+                "amount_views": item.amount_views,
+                "amount_likes": item.amount_likes,
+                "amount_comments": item.amount_comments,
+                "date_published": item.date_published.isoformat() if item.date_published else None,
+                "created_at": item.created_at.isoformat() if getattr(item, "created_at", None) else None,
+                "updated_at": item.updated_at.isoformat() if getattr(item, "updated_at", None) else None,
+                "video_name": getattr(video, "name", None),
+                "video_link": getattr(video, "link", None) if video else None,
+                "video_articles": getattr(video, "articles", None) if video else None,
+            }
+            formatted.append(payload)
+        return formatted
 
     async def get_by_id(self, video_history_id: int, user: User):
         video_history = await self.repo.get_by_id(video_history_id)
@@ -67,9 +110,13 @@ class VideoHistoryService:
         user: User,
         **filters
     ):
-        # Если пользователь — не админ, добавляем фильтр по его user_id
-        if user.role == UserRole.USER:
-            filters["user_id"] = user.id
+        filters = dict(filters)
+        filters["user_ids"] = self._resolve_user_ids(
+            user,
+            filters.get("user_id"),
+            filters.get("user_ids"),
+        )
+        filters.pop("user_id", None)
         return await self.repo.get_aggregated_by_date_art(**filters)
 
     async def get_aggregated_views_by_date_all(
@@ -77,9 +124,13 @@ class VideoHistoryService:
         user: User,
         **filters
     ):
-        # Если пользователь — не админ, добавляем фильтр по его user_id
-        if user.role == UserRole.USER:
-            filters["user_id"] = user.id
+        filters = dict(filters)
+        filters["user_ids"] = self._resolve_user_ids(
+            user,
+            filters.get("user_id"),
+            filters.get("user_ids"),
+        )
+        filters.pop("user_id", None)
         return await self.repo.get_aggregated_by_date_all(**filters)
 
     async def get_video_stats_for_csv(
@@ -87,6 +138,7 @@ class VideoHistoryService:
         user: User,
         channel_type: Optional[ChannelType] = None,
         target_user_id: Optional[int] = None,
+        target_user_ids: Optional[List[int]] = None,
         pub_date_from: Optional[dt_date] = None,
         pub_date_to: Optional[dt_date] = None,
     ):
@@ -100,8 +152,13 @@ class VideoHistoryService:
             .where(Videos.articles.isnot(None))
         )
         # Фильтр по пользователю
-        if target_user_id is not None:
-            query = query.where(Channel.user_id == target_user_id)
+        effective_user_ids = self._resolve_user_ids(
+            user,
+            target_user_id,
+            target_user_ids,
+        )
+        if effective_user_ids:
+            query = query.where(Channel.user_id.in_(effective_user_ids))
         # Фильтр по типу канала
         if channel_type is not None:
             query = query.where(Channel.type == channel_type)
@@ -132,6 +189,7 @@ class VideoHistoryService:
                 )
                 all_dates.add(record_date)
             stats.append({
+                "video_name": video.name,
                 "link": video.link,
                 "daily_views": daily_views,
                 "daily_likes": daily_likes,
@@ -156,6 +214,7 @@ class VideoHistoryService:
         channel_id: Optional[int] = None,
         channel_type: Optional[str] = None,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ) -> List[DailyVideoCount]:
         subq = (
@@ -181,8 +240,11 @@ class VideoHistoryService:
             or_conditions = [Videos.articles.contains(tag) for tag in articles]
             subq = subq.where(or_(*or_conditions))
         subq = subq.join(Channel, Videos.channel_id == Channel.id)
-        if user_id is not None:
-            subq = subq.where(Channel.user_id == user_id)
+        effective_user_ids = self._normalize_user_ids(user_ids)
+        if effective_user_ids is None and user_id is not None:
+            effective_user_ids = [user_id]
+        if effective_user_ids:
+            subq = subq.where(Channel.user_id.in_(effective_user_ids))
         if channel_type is not None:
             subq = subq.where(Channel.type == channel_type)
         subq = subq.subquery()
@@ -208,6 +270,7 @@ class VideoHistoryService:
         channel_id: Optional[int] = None,
         channel_type: Optional[str] = None,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ) -> List[DailyVideoCount]:
         subq = (
@@ -232,8 +295,11 @@ class VideoHistoryService:
             or_conditions = [Videos.articles.contains(tag) for tag in articles]
             subq = subq.where(or_(*or_conditions))
         subq = subq.join(Channel, Videos.channel_id == Channel.id)
-        if user_id is not None:
-            subq = subq.where(Channel.user_id == user_id)
+        effective_user_ids = self._normalize_user_ids(user_ids)
+        if effective_user_ids is None and user_id is not None:
+            effective_user_ids = [user_id]
+        if effective_user_ids:
+            subq = subq.where(Channel.user_id.in_(effective_user_ids))
         if channel_type is not None:
             subq = subq.where(Channel.type == channel_type)
         subq = subq.subquery()

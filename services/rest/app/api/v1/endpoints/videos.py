@@ -26,6 +26,7 @@ async def get_videos(
     id: Optional[int] = Query(None),
     type: Optional[VideoType] = Query(None),
     link: Optional[str] = Query(None),
+    name: Optional[str] = Query(None),
     page: Optional[int] = Query(None, ge=1),
     size: Optional[int] = Query(None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -38,6 +39,7 @@ async def get_videos(
         id=id,
         type=type,
         link=link,
+        name=name,
         page=page,
         size=size
     )

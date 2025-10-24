@@ -534,7 +534,7 @@ class InstagramParser:
 
         async def save_video_and_image(channel_id: int, reel_code: str, reel_url: str,
                                        play_count: int, like_count: int, comment_count: int,
-                                       image_url: str, article: str):
+                                       image_url: str, articles: str):
             video_data = {
                 "type": "instagram",
                 "channel_id": channel_id,
@@ -544,7 +544,7 @@ class InstagramParser:
                 "amount_likes": like_count,
                 "amount_comments": comment_count,
                 "image_url": image_url,
-                "article": article
+                "articles": articles
             }
             try:
                 async with httpx.AsyncClient() as client:
@@ -638,7 +638,8 @@ class InstagramParser:
                 image_url = (
                     media.get("image_versions2", {}).get("candidates", [{}])[0].get("url")
                 )
-                await save_video_and_image(channel_id, reel_code, reel_url, play_count, like_count, comment_count, image_url, article)
+                articles = self.extract_article_tag(media.get("caption", ""))
+                await save_video_and_image(channel_id, reel_code, reel_url, play_count, like_count, comment_count, image_url, articles)
 
             media_edges = (
                 json_resp.get("user", {}).get("edge_owner_to_timeline_media", {}).get("edges", [])

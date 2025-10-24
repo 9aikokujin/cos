@@ -23,6 +23,7 @@ class VideosRepository:
         channel_id: Optional[int] = None,
         articles: Optional[str] = None,
         link: Optional[str] = None,
+        name: Optional[str] = None,
         page: Optional[int] = None,
         size: Optional[int] = None
     ) -> dict:
@@ -41,7 +42,9 @@ class VideosRepository:
             # Ищем артикул как часть строки: например, "#sv" в "#sv,#jw"
             query = query.filter(Videos.articles.contains(articles))
         if link is not None:
-            query = query.filter(Videos.link == link)
+            query = query.filter(Videos.link.ilike(f"%{link}%"))
+        if name is not None:
+            query = query.filter(Videos.name.ilike(f"%{name}%"))
         if channel_id is not None:
             query = query.filter(Videos.channel_id == channel_id)
 
@@ -84,11 +87,11 @@ class VideosRepository:
         except NoResultFound:
             return None
 
-    async def get_by_article(self, article: str, user: Optional[User] = None) -> Optional[Videos]:
+    async def get_by_article(self, articles: str, user: Optional[User] = None) -> Optional[Videos]:
         """
         Получить видео по артиклю.
         """
-        query = select(Videos).where(Videos.article == article)
+        query = select(Videos).where(Videos.articles == articles)
         result = await self.db.execute(query)
         try:
             return result.scalar_one()
@@ -131,9 +134,9 @@ class VideosRepository:
             image=dto.image,
         )
         if dto.articles:
-            video.article = ",".join(sorted(set(dto.articles)))
+            video.articles = ",".join(sorted(set(dto.articles)))
         else:
-            video.article = None
+            video.articles = None
         self.db.add(video)
         await self.db.commit()
         await self.db.refresh(video)
@@ -158,7 +161,7 @@ class VideosRepository:
         if dto.image is not None:
             video.image = dto.image
         if dto.articles is not None:
-            video.article = ",".join(sorted(set(dto.articles))) if dto.articles else None
+            video.articles = ",".join(sorted(set(dto.articles))) if dto.articles else None
 
         video.updated_at = func.now()
 
