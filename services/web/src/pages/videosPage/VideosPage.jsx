@@ -16,9 +16,12 @@ const VideosPage = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!id) return;
-    setUsertId(id);
-    setIsLoading(false);
+    if (!id) {
+      setIsLoading(false);
+    } else {
+      setUsertId(id);
+      setIsLoading(false);
+    }
   }, [id, pathname]);
 
   useResetFiltersOnLeave();
