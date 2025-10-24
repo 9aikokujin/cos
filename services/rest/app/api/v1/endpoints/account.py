@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 
 
-from app.schemas.account import AccountCreate, AccountRead, AccountUpdate
+from app.schemas.account import (AccountBulkCreateRequest, AccountCreate,
+                                 AccountRead, AccountUpdate)
 from app.services.account import AccountService
 
 router = APIRouter()
@@ -38,6 +39,18 @@ async def create_account(
     service = AccountService(db)
     try:
         return await service.create_account(account_create)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/bulk", response_model=list[AccountRead])
+async def bulk_create_accounts(
+    payload: AccountBulkCreateRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    service = AccountService(db)
+    try:
+        return await service.bulk_create_accounts(payload)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
