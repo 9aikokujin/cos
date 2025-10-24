@@ -5,7 +5,7 @@ export const createFilterActions = (set, get) => ({
 
   setFilterId: (id) => set({ filter: { ...get().filter, id } }),
 
-  setFilterUserId: (user_id) => set({ filter: { ...get().filter, user_id } }),
+  setFilterUserId: (user_ids) => set({ filter: { ...get().filter, user_ids } }),
 
   setFilterDatePublishedTo: (date_published_to) =>
     set({ filter: { ...get().filter, date_published_to } }),
@@ -31,7 +31,7 @@ export const createFilterActions = (set, get) => ({
       filter: {
         articles: "",
         id: "",
-        user_id: "",
+        user_ids: "",
         date_published_to: "",
         date_published_from: "",
         channel_type: "",

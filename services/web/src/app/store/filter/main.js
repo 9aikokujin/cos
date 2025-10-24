@@ -1,7 +1,7 @@
 export const initialFilterState = {
   filter: {
     id: "",
-    user_id: "",
+    user_ids: "",
     date_published_to: "",
     date_published_from: "",
     channel_type: "",
