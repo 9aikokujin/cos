@@ -1,9 +1,10 @@
 export default (instance) => ({
-  createAccount(data) {
+  createAccount(data, userId) {
     return instance({
       method: "POST",
-      url: "/channels",
+      url: "/channels/",
       data,
+      params: { user_id: userId },
     });
   },
   editAccount(id, data) {
@@ -18,7 +19,7 @@ export default (instance) => ({
       method: "GET",
       url: "/channels/all",
       params: { user_id, id, type, link, name_channel, page, size: size },
-    }).then((response) => response.data);;
+    }).then((response) => response.data);
   },
   deleteAccount(id) {
     return instance({

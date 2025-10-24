@@ -33,7 +33,7 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack)
         if (!fieldValue && existing.link) {
           updates.push(API.account.deleteAccount(existing.id)); // удаление
         } else if (fieldValue && fieldValue !== existing.link) {
-          updates.push(API.account.updateAccount(existing.id, { link: fieldValue })); // обновление
+          updates.push(API.account.editAccount(existing.id, { link: fieldValue })); // обновление
         }
       } else if (fieldValue) {
         updates.push(
@@ -43,7 +43,8 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack)
             start_views: 0,
             start_likes: 0,
             start_comments: 0,
-          })
+            
+          },userId )
         ); // создание
       }
     }

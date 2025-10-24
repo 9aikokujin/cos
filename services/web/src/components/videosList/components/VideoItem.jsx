@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { AppRoutes } from "@/app/routes/routes";
+import { useVideosStore } from "@/app/store/entity/store";
 
 import { ButtonIcon, Button } from "@/shared/ui/button/Button";
 import ImageWithFallback from "@/shared/ui/imageWithFallback/ImageWithFallback";
@@ -10,10 +11,11 @@ import ImageWithFallback from "@/shared/ui/imageWithFallback/ImageWithFallback";
 const VideoItem = memo(({ video, ref }) => {
   const { confirmAction } = useConfirmModal();
   const navigate = useNavigate();
+  const { removeItem } = useVideosStore();
 
   const handleDeleteConfirm = async () => {
     await API.video.deleteVideo(video.id);
-    closeModal();
+    removeItem(video.id);
   };
 
   const handleDelete = () => {
