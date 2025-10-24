@@ -11,7 +11,8 @@ const fetchVideos = async (page, term, filter) => {
   const params = { page };
 
   if (term) {
-    params.link = term;
+    // params.link = term;
+    params.name = term;
   }
 
   if (filter?.channel_type) {

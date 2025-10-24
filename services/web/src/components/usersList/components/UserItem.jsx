@@ -3,27 +3,33 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { AppRoutes } from "@/app/routes/routes";
 import API from "@/app/api";
-import { useFilterStore } from "@/app/store/filter/store";
+import { useUsersStore } from "@/app/store/entity/store";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import ToggleSwitch from "@/shared/ui/toggleSwitch/ToggleSwitch";
 import { combineNameFields } from "@/shared/utils/formatString";
 import { ButtonIcon, Button } from "@/shared/ui/button/Button";
-import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 const UserItem = memo(({ user, ref }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { removeItem, updateItem } = useUsersStore();
 
   const { confirmAction } = useConfirmModal();
 
   const handleToggleIsBlocked = async () => {
-    if (user.is_blocked) await API.user.unblockUser(user.id);
-    else await API.user.blockUser(user.id);
+    if (user.is_blocked) {
+      await API.user.unblockUser(user.id);
+      updateItem(user.id, { is_blocked: false });
+    } else {
+      await API.user.blockUser(user.id);
+      updateItem(user.id, { is_blocked: true });
+    }
   };
 
   const handleDeleteConfirm = async () => {
     await API.user.deleteUser(user.id);
-    closeModal();
+    removeItem(user.id);
   };
 
   const handleDelete = () => {

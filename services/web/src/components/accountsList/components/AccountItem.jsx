@@ -1,24 +1,27 @@
-import { useState } from "react";
+// import { useState } from "react";
+import { memo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import API from "@/app/api";
 import { AppRoutes } from "@/app/routes/routes";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
+import { useAccountStore } from "@/app/store/entity/store";
 
-import ToggleSwitch from "@/shared/ui/toggleSwitch/ToggleSwitch";
+// import ToggleSwitch from "@/shared/ui/toggleSwitch/ToggleSwitch";
 import { ButtonIcon, Button } from "@/shared/ui/button/Button";
 
 import { getSocialIcon } from "@/shared/utils/socialIcon";
 
-const AccountItem = ({ channel, ref }) => {
-  const [isOn, setIsOn] = useState(false);
+const AccountItem = memo(({ channel, ref }) => {
+  // const [isOn, setIsOn] = useState(false);
   const navigate = useNavigate();
+  const { removeItem } = useAccountStore();
 
   const { confirmAction } = useConfirmModal();
 
   const handleDeleteConfirm = async () => {
     await API.account.deleteAccount(channel.id);
-    closeModal();
+    removeItem(channel.id);
   };
 
   const handleDelete = () => {
@@ -43,7 +46,7 @@ const AccountItem = ({ channel, ref }) => {
           </div>
           <p className="_name">{channel.name_channel}</p>
         </div>
-        <ToggleSwitch checked={isOn} onChange={() => setIsOn(!isOn)} />
+        {/* <ToggleSwitch checked={isOn} onChange={() => setIsOn(!isOn)} /> */}
       </div>
       <div className="account_item_bottom _flex_sb">
         <ButtonIcon onClick={handleDelete} name={"trash"} />
@@ -56,6 +59,6 @@ const AccountItem = ({ channel, ref }) => {
       </div>
     </div>
   );
-};
+});
 
 export default AccountItem;
