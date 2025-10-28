@@ -60,12 +60,14 @@ const Statistic = () => {
           onClick={() => toggleMetric("views")}
           active={selectedMetrics.includes("views")}
         />
-        <StatisticBlock
-          title="Публикации"
-          value={sumFields(publushedVideo, ["video_count"]).video_count}
-          onClick={() => toggleMetric("video_count")}
-          active={selectedMetrics.includes("video_count")}
-        />
+        {!filter.video_id && (
+          <StatisticBlock
+            title="Публикации"
+            value={sumFields(publushedVideo, ["video_count"]).video_count}
+            onClick={() => toggleMetric("video_count")}
+            active={selectedMetrics.includes("video_count")}
+          />
+        )}
         <StatisticBlock
           title="Комментарии"
           value={sumFields(statistic, ["comments"]).comments}

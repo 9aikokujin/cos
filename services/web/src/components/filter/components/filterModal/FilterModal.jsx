@@ -24,7 +24,7 @@ const slideVariants = {
 
 export const FiltersModal = () => {
   const { isOpen, close, filters, stack, push, pop, footer } = useFiltersModalStore();
-  const resetFilter = useFilterStore((state) => state.resetFilter);
+  const resetAllFilters = useFilterStore((s) => s.resetFilter);
 
   const [direction, setDirection] = useState(1);
   const handlePush = (filter) => {
@@ -38,7 +38,11 @@ export const FiltersModal = () => {
   };
 
   const hansleResetFilter = () => {
-    resetFilter();
+    if (footer.resetFilter) {
+      footer.resetFilter();
+    } else {
+      resetAllFilters();
+    }
     close();
   };
 

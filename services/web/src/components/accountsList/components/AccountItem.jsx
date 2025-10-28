@@ -41,7 +41,7 @@ const AccountItem = memo(({ channel, ref }) => {
     <div ref={ref} className="account_item _flex_col">
       <div className="account_item_top _flex_sb">
         <div className="_flex_al_center" style={{ gap: 10, width: "100%" }}>
-          <div className="account_social_pic ">
+          <div className="account_social_pic">
             <img src={getSocialIcon(channel?.type)} alt="insta" />
           </div>
           <p className="_name">{channel.name_channel}</p>

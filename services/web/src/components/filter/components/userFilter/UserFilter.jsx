@@ -22,9 +22,14 @@ const UserFilter = () => {
   const setUserId = useFilterStore((s) => s.setFilterUserId);
 
   const { items, isLoading, lastItemRef } = useInfiniteScroll(useUsersStore, fetchUsers, "users");
-  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (user) => {
-    setUserId(user);
-  }, true);
+  const { selected, toggleSelect } = useMultiSelectFilter(
+    "Применить",
+    (user) => {
+      setUserId(user);
+    },
+    true,
+    () => setUserId("")
+  );
   return (
     <div className="account_filter _flex_col_center">
       <h2>Пользователи</h2>
