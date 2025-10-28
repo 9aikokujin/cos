@@ -7,7 +7,7 @@ import { useUserProfileData } from "@/hooks/useUserProfileData";
 import { useUserProfileSubmit } from "@/hooks/useUserProfileSubmit";
 
 import Input from "@/shared/ui/input/Input";
-import Checkbox from "@/shared/ui/checkbox/Checkbox";
+// import Checkbox from "@/shared/ui/checkbox/Checkbox";
 import { socialNetworks } from "@/shared/utils/utils";
 import { Button } from "@/shared/ui/button/Button";
 
@@ -18,10 +18,17 @@ const EditProfileForm = () => {
   const { id: userId } = useParams();
   const goBack = useBack();
 
-  const { register, handleSubmit, setValue, clearErrors, formState: { errors } } = useForm();
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    clearErrors,
+    setError,
+    formState: { errors },
+  } = useForm();
 
   const { initialData, socials, loading } = useUserProfileData(userId, setValue);
-  const onSubmit = useUserProfileSubmit(user, userId, initialData, socials, goBack);
+  const onSubmit = useUserProfileSubmit(user, userId, initialData, socials, goBack, setError);
 
   return (
     <form className="edit_form" action="" onSubmit={handleSubmit(onSubmit)}>
@@ -51,7 +58,7 @@ const EditProfileForm = () => {
           </>
         )}
         <div className="edit_social _flex_col">
-          <div className="_flex_sb">
+          {/* <div className="_flex_sb">
             {socialNetworks.map((network) => (
               <Checkbox
                 key={network}
@@ -61,7 +68,7 @@ const EditProfileForm = () => {
                 // onChange={() => handleCheckboxChange(network)}
               />
             ))}
-          </div>
+          </div> */}
           {errors.socials && <span className="error_text">{errors.socials.message}</span>}
           {socialNetworks.map((network) => (
             <Input

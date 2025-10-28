@@ -7,5 +7,6 @@ export const initialFilterModalState = {
     text: "Применить",
     visible: true,
     onClick: null,
+    resetFilter: null,
   },
 };

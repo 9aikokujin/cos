@@ -31,9 +31,16 @@ const AccountFilter = () => {
     fetchAccounts,
     "channels"
   );
-  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (account) => {
-    setAccountId(account.join(""));
-  });
+  const { selected, toggleSelect } = useMultiSelectFilter(
+    "Применить",
+    (account) => {
+      setAccountId(account.join(""));
+    },
+    false,
+    () => {
+      setAccountId("");
+    }
+  );
   return (
     <div className="account_filter _flex_col_center">
       <h2>Аккаунты</h2>
@@ -48,7 +55,7 @@ const AccountFilter = () => {
             className={`filter_item _flex_center ${selected.includes(account.id) ? "_active" : ""}`}
             onClick={() => toggleSelect(account.id)}
           >
-            <div className="account_social_pic " style={{ marginRight: 10 }}>
+            <div className="account_social_pic" style={{ marginRight: 10 }}>
               <img src={getSocialIcon(account?.type)} alt="insta" />
             </div>
             <p className="_name">{account.name_channel}</p>

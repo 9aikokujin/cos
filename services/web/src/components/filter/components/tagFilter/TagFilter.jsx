@@ -11,7 +11,8 @@ const TagFilter = () => {
     (tags) => {
       setTags(tags.join(", "));
     },
-    true
+    true,
+    () => setTags("")
   );
 
   return (
