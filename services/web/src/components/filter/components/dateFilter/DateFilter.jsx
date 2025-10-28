@@ -26,6 +26,10 @@ const DateFilter = () => {
       text: "Применить",
       visible: true,
       onClick: handleSelectPeriod,
+      resetFilter: () => {
+        setDateFrom("");
+        setDateTo("");
+      },
     });
   }, [selectedPeriod]);
 

@@ -23,7 +23,7 @@ export const createFilterActions = (set, get) => ({
 
   setFilterDateTo: (date_to) => set({ filter: { ...get().filter, date_to } }),
 
-  setWithTags: (withTags) => set({ withTags }),
+  setWithTags: () => set({ withTags: !get().withTags }),
   setIsLoading: (isLoading) => set({ isLoading }),
 
   resetFilter: () =>

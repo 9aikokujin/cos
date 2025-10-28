@@ -1,7 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useFiltersModalStore } from "@/app/store/filterModal/store";
 
-export const useMultiSelectFilter = (applyLabel = "Применить", onApply, multiple = false) => {
+export const useMultiSelectFilter = (
+  applyLabel = "Применить",
+  onApply,
+  multiple = false,
+  resetFilter
+) => {
   const setFooter = useFiltersModalStore((s) => s.setFooter);
   const close = useFiltersModalStore((s) => s.close);
 
@@ -27,7 +32,6 @@ export const useMultiSelectFilter = (applyLabel = "Применить", onApply,
   const handleApply = () => {
     const current = selectedRef.current;
     if (onApply) onApply(current);
-    console.log("✅ Выбранные элементы:", current);
     close();
   };
 
@@ -36,6 +40,7 @@ export const useMultiSelectFilter = (applyLabel = "Применить", onApply,
       text: applyLabel,
       visible: true,
       onClick: handleApply,
+      resetFilter: resetFilter,
     });
   }, []);
 
