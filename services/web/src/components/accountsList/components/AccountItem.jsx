@@ -54,7 +54,7 @@ const AccountItem = memo(({ channel, ref }) => {
       <div className="account_item_bottom _flex_sb">
         <ButtonIcon onClick={handleDelete} name={"trash"} />
         <Button
-          onClick={() => handleNavigate("setFilterChannelId", channel?.id)}
+          onClick={() => handleNavigate("setFilterChannelId", channel?.id.toString())}
           className={"_orange _detail_btn"}
         >
           Детально

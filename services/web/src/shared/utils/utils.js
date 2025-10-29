@@ -20,3 +20,25 @@ export function sumFields(array, fields) {
     return result;
   }, {});
 }
+
+export const getLatestVideos = (videos) => {
+  const latestByVideo = {};
+
+  for (const video of videos) {
+    const existing = latestByVideo[video.video_id];
+
+    if (!existing) {
+      latestByVideo[video.video_id] = video;
+    } else {
+      const existingDate = new Date(existing.updated_at);
+      const newDate = new Date(video.updated_at);
+
+      if (newDate > existingDate) {
+        latestByVideo[video.video_id] = video;
+      }
+    }
+  }
+
+  return Object.values(latestByVideo);
+};
+
