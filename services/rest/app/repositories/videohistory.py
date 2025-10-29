@@ -6,7 +6,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 from typing import Optional, List
 from app.models.videohistory import VideoHistory
-from app.schemas.videohistory import VideoHistoryCreate
+from app.schemas.videohistory import VideoHistoryCreate, VideoAmountViews
 from app.models.videos import Videos
 from app.models.channel import Channel
 
@@ -258,91 +258,87 @@ class VideoHistoryRepository:
         user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ):
-        base_view_date = func.date(VideoHistory.created_at)
-        ranked_entries = (
+        view_date_expr = func.date(VideoHistory.created_at)
+        daily_max_query = (
             select(
-                base_view_date.label("view_date"),
                 VideoHistory.video_id.label("video_id"),
-                VideoHistory.amount_views.label("views"),
-                VideoHistory.amount_likes.label("likes"),
-                VideoHistory.amount_comments.label("comments"),
-                func.row_number()
-                .over(
-                    partition_by=(base_view_date, VideoHistory.video_id),
-                    order_by=(
-                        VideoHistory.amount_views.desc(),
-                        VideoHistory.created_at.desc(),
-                        VideoHistory.id.desc(),
-                    ),
-                )
-                .label("rn"),
+                view_date_expr.label("view_date"),
+                func.max(VideoHistory.amount_views).label("max_views"),
+                func.max(VideoHistory.amount_likes).label("max_likes"),
+                func.max(VideoHistory.amount_comments).label("max_comments"),
             )
+            .select_from(VideoHistory)
             .join(VideoHistory.video)
             .join(Videos.channel)
         )
 
         if id is not None:
-            ranked_entries = ranked_entries.where(VideoHistory.id == id)
+            daily_max_query = daily_max_query.where(VideoHistory.id == id)
 
         if video_id is not None:
-            ranked_entries = ranked_entries.where(VideoHistory.video_id == video_id)
+            daily_max_query = daily_max_query.where(VideoHistory.video_id == video_id)
 
         if date_to is not None:
-            ranked_entries = ranked_entries.where(
-                VideoHistory.created_at <= date_to + timedelta(days=1)
+            daily_max_query = daily_max_query.where(
+                VideoHistory.created_at < date_to + timedelta(days=1)
             )
 
         if date_from is not None:
-            ranked_entries = ranked_entries.where(VideoHistory.created_at >= date_from)
+            daily_max_query = daily_max_query.where(VideoHistory.created_at >= date_from)
 
         if date_published_to is not None:
-            ranked_entries = ranked_entries.where(
+            daily_max_query = daily_max_query.where(
                 VideoHistory.date_published <= date_published_to
             )
 
         if date_published_from is not None:
-            ranked_entries = ranked_entries.where(
+            daily_max_query = daily_max_query.where(
                 VideoHistory.date_published >= date_published_from
             )
 
         effective_user_ids = user_ids or ([user_id] if user_id is not None else None)
         if effective_user_ids:
-            ranked_entries = ranked_entries.where(Channel.user_id.in_(effective_user_ids))
+            daily_max_query = daily_max_query.where(Channel.user_id.in_(effective_user_ids))
 
         if channel_id is not None:
-            ranked_entries = ranked_entries.where(Videos.channel_id == channel_id)
+            daily_max_query = daily_max_query.where(Videos.channel_id == channel_id)
 
         if channel_type is not None:
-            ranked_entries = ranked_entries.where(Channel.type == channel_type)
+            daily_max_query = daily_max_query.where(Channel.type == channel_type)
 
         if articles is not None and len(articles) > 0:
-            ranked_entries = ranked_entries.where(
+            daily_max_query = daily_max_query.where(
                 or_(*[Videos.articles.contains(tag) for tag in articles])
             )
 
-        ranked_subquery = ranked_entries.subquery()
+        daily_max_query = daily_max_query.group_by(
+            VideoHistory.video_id,
+            view_date_expr,
+        )
+
+        daily_max_subquery = daily_max_query.subquery()
 
         aggregated_query = (
             select(
-                ranked_subquery.c.view_date,
-                func.sum(ranked_subquery.c.views).label("total_views"),
-                func.sum(ranked_subquery.c.likes).label("total_likes"),
-                func.sum(ranked_subquery.c.comments).label("total_comments"),
+                daily_max_subquery.c.view_date,
+                func.sum(daily_max_subquery.c.max_views).label("total_views"),
+                func.sum(daily_max_subquery.c.max_likes).label("total_likes"),
+                func.sum(daily_max_subquery.c.max_comments).label("total_comments"),
             )
-            .where(ranked_subquery.c.rn == 1)
-            .group_by(ranked_subquery.c.view_date)
-            .order_by(ranked_subquery.c.view_date)
+            .select_from(daily_max_subquery)
+            .group_by(daily_max_subquery.c.view_date)
+            .order_by(daily_max_subquery.c.view_date)
         )
 
         result = await self.db.execute(aggregated_query)
         rows = result.all()
 
         return [
-            {
-                "date": row.view_date,
-                "views": int(row.total_views) if row.total_views is not None else 0,
-                "likes": int(row.total_likes) if row.total_likes is not None else 0,
-                "comments": int(row.total_comments) if row.total_comments is not None else 0,
-            }
+            VideoAmountViews(
+                date=row.view_date,
+                views=int(row.total_views) if row.total_views is not None else 0,
+                likes=int(row.total_likes) if row.total_likes is not None else 0,
+                comments=int(row.total_comments) if row.total_comments is not None else 0,
+            )
             for row in rows
         ]
