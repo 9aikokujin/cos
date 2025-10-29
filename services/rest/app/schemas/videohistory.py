@@ -55,3 +55,6 @@ class DailyVideoCount(BaseModel):
     date: Optional[datetime] = None
     video_count: Optional[int] = None
     date_published: Optional[datetime] = None
+    views: Optional[int] = None
+    likes: Optional[int] = None
+    comments: Optional[int] = None

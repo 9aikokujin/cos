@@ -1,5 +1,5 @@
 from datetime import date as dt_date
-from datetime import timedelta
+from datetime import timedelta, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from app.repositories.videohistory import VideoHistoryRepository
@@ -217,49 +217,81 @@ class VideoHistoryService:
         user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ) -> List[DailyVideoCount]:
-        subq = (
+        base_view_date = func.date(VideoHistory.created_at)
+        ranked_entries = (
             select(
-                func.date(VideoHistory.date_published).label("view_date"),
-                VideoHistory.video_id
+                base_view_date.label("view_date"),
+                VideoHistory.video_id.label("video_id"),
+                VideoHistory.amount_views.label("views"),
+                VideoHistory.amount_likes.label("likes"),
+                VideoHistory.amount_comments.label("comments"),
+                func.row_number()
+                .over(
+                    partition_by=(base_view_date, VideoHistory.video_id),
+                    order_by=(
+                        VideoHistory.amount_views.desc(),
+                        VideoHistory.created_at.desc(),
+                        VideoHistory.id.desc(),
+                    ),
+                )
+                .label("rn"),
             )
-            .distinct()
             .join(Videos, VideoHistory.video_id == Videos.id)
+            .join(Channel, Videos.channel_id == Channel.id)
             .where(Videos.articles.isnot(None))
-            .where(VideoHistory.date_published.isnot(None))
         )
+
         if date_from is not None:
-            subq = subq.where(VideoHistory.date_published >= date_from)
+            start_dt = datetime.combine(date_from, datetime.min.time())
+            ranked_entries = ranked_entries.where(VideoHistory.created_at >= start_dt)
+
         if date_to is not None:
-            subq = subq.where(
-                VideoHistory.date_published < date_to + timedelta(days=1)
-            )
+            end_dt = datetime.combine(date_to + timedelta(days=1), datetime.min.time())
+            ranked_entries = ranked_entries.where(VideoHistory.created_at < end_dt)
+
         if channel_id is not None:
-            subq = subq.where(Videos.channel_id == channel_id)
-        # 🔥 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: фильтр по подстроке
+            ranked_entries = ranked_entries.where(Videos.channel_id == channel_id)
+
         if articles:
-            or_conditions = [Videos.articles.contains(tag) for tag in articles]
-            subq = subq.where(or_(*or_conditions))
-        subq = subq.join(Channel, Videos.channel_id == Channel.id)
+            ranked_entries = ranked_entries.where(
+                or_(*[Videos.articles.contains(tag) for tag in articles])
+            )
+
         effective_user_ids = self._normalize_user_ids(user_ids)
         if effective_user_ids is None and user_id is not None:
             effective_user_ids = [user_id]
         if effective_user_ids:
-            subq = subq.where(Channel.user_id.in_(effective_user_ids))
+            ranked_entries = ranked_entries.where(Channel.user_id.in_(effective_user_ids))
+
         if channel_type is not None:
-            subq = subq.where(Channel.type == channel_type)
-        subq = subq.subquery()
-        query = (
+            ranked_entries = ranked_entries.where(Channel.type == channel_type)
+
+        ranked_subquery = ranked_entries.subquery()
+
+        aggregated_query = (
             select(
-                subq.c.view_date.label("date"),
-                func.count(subq.c.video_id).label("video_count")
+                ranked_subquery.c.view_date,
+                func.sum(ranked_subquery.c.views).label("total_views"),
+                func.sum(ranked_subquery.c.likes).label("total_likes"),
+                func.sum(ranked_subquery.c.comments).label("total_comments"),
+                func.count(ranked_subquery.c.video_id).label("video_count"),
             )
-            .group_by(subq.c.view_date)
-            .order_by(subq.c.view_date)
+            .where(ranked_subquery.c.rn == 1)
+            .group_by(ranked_subquery.c.view_date)
+            .order_by(ranked_subquery.c.view_date)
         )
-        result = await self.repo.db.execute(query)
+
+        result = await self.repo.db.execute(aggregated_query)
         rows = result.all()
+
         return [
-            DailyVideoCount(date=row.date, video_count=row.video_count)
+            DailyVideoCount(
+                date=row.view_date,
+                video_count=int(row.video_count) if row.video_count is not None else 0,
+                views=int(row.total_views) if row.total_views is not None else 0,
+                likes=int(row.total_likes) if row.total_likes is not None else 0,
+                comments=int(row.total_comments) if row.total_comments is not None else 0,
+            )
             for row in rows
         ]
 
