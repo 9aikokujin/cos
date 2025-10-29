@@ -44,10 +44,8 @@ const Header = () => {
           )}
           {showAccount && (
             <>
-              <Link to={AppRoutes.PROXY}>
-                <ButtonIcon>
-                  <ComponentIcon name={"settings"} />
-                </ButtonIcon>
+              <Link to={AppRoutes.PROXY} style={{ cursor: "pointer" }}>
+                <ButtonIcon name={"settings"} />
               </Link>
               <div className="header_account _flex_center">
                 {/* <p className="_login">{formatNameToInitials(user)}</p> */}
