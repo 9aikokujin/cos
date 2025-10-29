@@ -25,6 +25,7 @@ const fetchAccounts = async (page, term, filter) => {
 
 const AccountFilter = () => {
   const setAccountId = useFilterStore((s) => s.setFilterChannelId);
+  const filteredAccounts = useFilterStore((s) => s.filter.channel_id);
 
   const { items, isLoading, lastItemRef } = useInfiniteScroll(
     useAccountStore,
@@ -39,7 +40,8 @@ const AccountFilter = () => {
     false,
     () => {
       setAccountId("");
-    }
+    },
+    filteredAccounts
   );
   return (
     <div className="account_filter _flex_col_center">
