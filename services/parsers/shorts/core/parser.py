@@ -110,6 +110,68 @@ class ShortsParser:
 
         return int(round(value))
 
+    def _looks_like_views_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "view",
+            "просмот",
+            "visualiz",
+            "vista",
+            "vues",
+            "ansehen",
+            "ansicht",
+            "bekeken",
+            "weergav",
+            "görüntülenme",
+            "المشاهدات",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
+    def _looks_like_likes_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "like",
+            "лайк",
+            "thumb",
+            "класс",
+            "me gusta",
+            "gusta",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
+    def _looks_like_comments_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "comment",
+            "коммент",
+            "coment",
+            "reactie",
+            "ответ",
+            "reply",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
+    def _looks_like_publish_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "publish",
+            "uploaded",
+            "опублик",
+            "вышло",
+            "premiered",
+            "премьера",
+            "дата",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
     async def get_videos_count_from_header(self, page, timeout: int = 8000) -> Optional[int]:
         try:
             try:
@@ -456,6 +518,76 @@ class ShortsParser:
                     return "".join(parts)
         return ""
 
+    def extract_date_from_text(self, text: str) -> Optional[str]:
+        if not text:
+            return None
+
+        cleaned = text.strip()
+        cleaned = re.sub(
+            r"(?i)\b(published|uploaded|опубликован[а-я]*|премьера|premiered|дата публикации|date)\b[:\-]?",
+            "",
+            cleaned,
+        ).strip()
+
+        iso_match = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", cleaned)
+        if iso_match:
+            year, month, day = iso_match.groups()
+            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+        dotted_match = re.search(r"(\d{1,2})[.](\d{1,2})[.](\d{4})", cleaned)
+        if dotted_match:
+            day, month, year = dotted_match.groups()
+            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+        month_aliases = {
+            "january": 1, "jan": 1, "jan.": 1,
+            "february": 2, "feb": 2, "feb.": 2,
+            "march": 3, "mar": 3, "mar.": 3,
+            "april": 4, "apr": 4, "apr.": 4,
+            "may": 5,
+            "june": 6, "jun": 6, "jun.": 6,
+            "july": 7, "jul": 7, "jul.": 7,
+            "august": 8, "aug": 8, "aug.": 8,
+            "september": 9, "sep": 9, "sep.": 9, "sept": 9, "sept.": 9,
+            "october": 10, "oct": 10, "oct.": 10,
+            "november": 11, "nov": 11, "nov.": 11,
+            "december": 12, "dec": 12, "dec.": 12,
+            "января": 1, "январь": 1, "янв": 1, "янв.": 1,
+            "февраля": 2, "февраль": 2, "фев": 2, "фев.": 2,
+            "марта": 3, "март": 3, "мар": 3, "мар.": 3,
+            "апреля": 4, "апрель": 4, "апр": 4, "апр.": 4,
+            "мая": 5, "май": 5,
+            "июня": 6, "июнь": 6, "июн": 6, "июн.": 6,
+            "июля": 7, "июль": 7, "июл": 7, "июл.": 7,
+            "августа": 8, "август": 8, "авг": 8, "авг.": 8,
+            "сентября": 9, "сентябрь": 9, "сен": 9, "сен.": 9,
+            "октября": 10, "октябрь": 10, "окт": 10, "окт.": 10,
+            "ноября": 11, "ноябрь": 11, "ноя": 11, "ноя.": 11,
+            "декабря": 12, "декабрь": 12, "дек": 12, "дек.": 12,
+        }
+
+        def month_to_number(name: str) -> Optional[int]:
+            if not name:
+                return None
+            key = name.strip().lower().replace("ё", "е")
+            return month_aliases.get(key)
+
+        match_en = re.search(r"([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})", cleaned)
+        if match_en:
+            month_name, day, year = match_en.groups()
+            month_num = month_to_number(month_name)
+            if month_num:
+                return f"{int(year):04d}-{month_num:02d}-{int(day):02d}"
+
+        match_day_first = re.search(r"(\d{1,2})\s+([A-Za-zА-Яа-яё.]+)\s+(\d{4})", cleaned)
+        if match_day_first:
+            day, month_name, year = match_day_first.groups()
+            month_num = month_to_number(month_name)
+            if month_num:
+                return f"{int(year):04d}-{month_num:02d}-{int(day):02d}"
+
+        return None
+
     def extract_articles(self, description: str, text_extra: Optional[List[dict]]) -> Optional[str]:
         found: set[str] = set()
 
@@ -601,19 +733,59 @@ class ShortsParser:
 
         return None
 
+    def extract_overlay_metrics(self, data: Any) -> Dict[str, Any]:
+        metrics: Dict[str, Any] = {}
+        if not isinstance(data, dict):
+            return metrics
+
+        overlay = data.get("overlay", {}).get("reelPlayerOverlayRenderer", {})
+        if not isinstance(overlay, dict):
+            return metrics
+
+        header = overlay.get("reelPlayerHeaderSupportedRenderers", {}).get("reelPlayerHeaderRenderer", {})
+        if isinstance(header, dict):
+            accessibility = header.get("accessibility") or {}
+            label_data = accessibility.get("accessibilityData", {}) if isinstance(accessibility, dict) else {}
+            label_text = self._extract_text(label_data.get("label"))
+            if label_text:
+                segments = re.split(r"[•·|•]|\s{2,}", label_text)
+                for segment in segments:
+                    cleaned = segment.strip()
+                    if not cleaned:
+                        continue
+                    if self._looks_like_views_text(cleaned):
+                        metrics.setdefault("views", self.parse_views(cleaned))
+                        continue
+                    if self._looks_like_likes_text(cleaned):
+                        metrics.setdefault("likes", self.parse_views(cleaned))
+                        continue
+                    if self._looks_like_comments_text(cleaned):
+                        metrics.setdefault("comments", self.parse_views(cleaned))
+                        continue
+                    if self._looks_like_publish_text(cleaned):
+                        date_candidate = self.extract_date_from_text(cleaned)
+                        if date_candidate:
+                            metrics.setdefault("date_published", date_candidate)
+
+        description_candidate = overlay.get("description") or overlay.get("descriptionText")
+        description_text = self._extract_text(description_candidate)
+        if description_text:
+            metrics.setdefault("description", description_text.strip())
+
+        return metrics
+
     async def fetch_video_metadata(self, video_id: str, video_url: str, proxy: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Запрашиваем страницу шорта и достаём метаданные (название, просмотры, описание)."""
         formatted_proxy = self.prepare_proxy(proxy)
-        # headers = {
-        #     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-        #     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        # }
+        headers = {
+            "Accept-Language": "en-US,en;q=0.9"
+        }
         proxies = {"http": formatted_proxy, "https": formatted_proxy} if formatted_proxy else None
 
         def _fetch_html() -> str:
             response = requests.get(
                 video_url,
-                # headers=headers,
+                headers=headers,
                 timeout=30.0,
                 # allow_redirects=True,
                 proxies=proxies,
@@ -670,25 +842,27 @@ class ShortsParser:
                 views = self.parse_views(view_count_text)
 
         initial_data = parsed.get("initial") or {}
-        if not views and initial_data:
-            try:
-                overlay = initial_data.get("overlay", {}).get("reelPlayerOverlayRenderer", {})
-                header = overlay.get("reelPlayerHeaderSupportedRenderers", {}).get("reelPlayerHeaderRenderer", {})
-                sub_label = header.get("accessibility", {}).get("accessibilityData", {}).get("label", "")
-                views = self.parse_views(sub_label)
-            except Exception:
-                views = views or 0
+        overlay_metrics: Dict[str, Any] = {}
+        if initial_data:
+            overlay_metrics = self.extract_overlay_metrics(initial_data)
 
-            if not views:
-                extracted = self.extract_views_from_initial_data(initial_data)
-                if extracted:
-                    views = extracted
+        overlay_views = overlay_metrics.get("views")
+        if not views and isinstance(overlay_views, int):
+            views = overlay_views
+        if not views and initial_data:
+            extracted = self.extract_views_from_initial_data(initial_data)
+            if extracted:
+                views = extracted
 
         description = self._extract_text(microformat.get("description")) or ""
         if not description:
             short_description = video_details.get("shortDescription")
             if isinstance(short_description, str):
                 description = short_description
+        if not description:
+            overlay_description = overlay_metrics.get("description")
+            if isinstance(overlay_description, str):
+                description = overlay_description
         description = description.strip()
 
         like_raw = microformat.get("likeCount")
@@ -698,7 +872,14 @@ class ShortsParser:
         elif like_raw is not None:
             likes = self.parse_views(self._extract_text(like_raw)) or 0
 
+        overlay_likes = overlay_metrics.get("likes")
+        if not likes and isinstance(overlay_likes, int):
+            likes = overlay_likes
+
         comments = self.extract_comment_count(initial_data) or 0
+        overlay_comments = overlay_metrics.get("comments")
+        if not comments and isinstance(overlay_comments, int):
+            comments = overlay_comments
 
         publish_candidate = microformat.get("uploadDate") or microformat.get("publishDate")
         date_published = None
@@ -712,6 +893,11 @@ class ShortsParser:
                 except ValueError:
                     if len(iso_candidate) >= 10:
                         date_published = iso_candidate[:10]
+
+        if not date_published:
+            overlay_date = overlay_metrics.get("date_published")
+            if isinstance(overlay_date, str):
+                date_published = overlay_date
 
         articles = self.extract_articles(description, None) if description else None
 
