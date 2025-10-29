@@ -5,13 +5,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import httpx
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 
-
-from utils.logger import TCPLogger
 # try:  # поддержка новых версий playwright-stealth
 #     from playwright_stealth import stealth_async as apply_stealth
 # except ImportError:  # fallback на старый API
@@ -49,7 +47,6 @@ IMPORTANT_COOKIES = {
 }
 COOKIES_FILE_PATH = Path(__file__).with_name("instagram_cookies.json")
 REQUEST_TIMEOUT = 20.0
-MAX_PARALLEL_LOGIN_TASKS = 5
 
 
 class InvalidCredentialsError(Exception):
@@ -57,8 +54,7 @@ class InvalidCredentialsError(Exception):
 
 
 class InstagramParser:
-    def __init__(self, logger: TCPLogger, proxy_list: list = None):
-        self.logger = logger
+    def __init__(self, proxy_list: list = None):
         self.proxy_list = proxy_list or []
         self.cookie_file_path = COOKIES_FILE_PATH
         self.session_cache: Dict[str, Dict[str, Any]] = self._load_cookie_store()
@@ -115,16 +111,6 @@ class InstagramParser:
             return None
 
     @staticmethod
-    def _dedupe_proxies(proxies: list[Optional[str]]) -> list[Optional[str]]:
-        seen: set[Optional[str]] = set()
-        ordered: list[Optional[str]] = []
-        for proxy in proxies:
-            if proxy not in seen:
-                ordered.append(proxy)
-                seen.add(proxy)
-        return ordered
-
-    @staticmethod
     def _extract_auth_cookies(raw_cookies: list[Dict[str, Any]]) -> Dict[str, str]:
         auth_cookies: Dict[str, str] = {}
         for cookie in raw_cookies:
@@ -139,18 +125,11 @@ class InstagramParser:
                 auth_cookies[name] = value
         return auth_cookies
 
-    def _update_cookie_entry(
-        self,
-        username: str,
-        cookies: Dict[str, str],
-        user_agent: Optional[str],
-        proxy: Optional[str],
-    ) -> Dict[str, Any]:
+    def _update_cookie_entry(self, username: str, cookies: Dict[str, str], user_agent: Optional[str]) -> Dict[str, Any]:
         entry = {
             "cookies": cookies,
             "user_agent": user_agent or DEFAULT_USER_AGENT,
             "updated_at": datetime.utcnow().isoformat() + "Z",
-            "proxy": proxy,
         }
         self.session_cache[username] = entry
         self._persist_cookie_store()
@@ -172,129 +151,42 @@ class InstagramParser:
             creds.get("two_factor_code", ""),
         )
 
-    @staticmethod
-    def _format_proxy_for_httpx(proxy_str: Optional[str]) -> Optional[str]:
-        if not proxy_str:
-            return None
-        if proxy_str.startswith("http://") or proxy_str.startswith("https://"):
-            return proxy_str
-        if "@" in proxy_str:
-            auth, host_port = proxy_str.split("@", 1)
-            return f"http://{auth}@{host_port}"
-        return f"http://{proxy_str}"
-
-    async def _validate_cookies(
-        self,
-        entry: Optional[Dict[str, Any]],
-        *,
-        proxy: Optional[str] = None,
-    ) -> tuple[bool, Optional[int]]:
+    async def _validate_cookies(self, entry: Optional[Dict[str, Any]]) -> bool:
         if not entry:
-            return False, None
+            return False
         cookies = entry.get("cookies") or {}
         if not cookies.get("sessionid"):
-            return False, None
+            return False
         headers = self._build_headers(entry.get("user_agent"), cookies.get("csrftoken"))
-        proxies_config = None
-        proxy_for_httpx = self._format_proxy_for_httpx(proxy)
-        if proxy_for_httpx:
-            proxies_config = {
-                "http": proxy_for_httpx,
-                "https": proxy_for_httpx,
-            }
         try:
-            client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT}
-            if proxies_config:
-                client_kwargs["proxies"] = proxies_config
-            async with httpx.AsyncClient(**client_kwargs) as client:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
                 resp = await client.get(
                     "https://i.instagram.com/api/v1/accounts/current_user/",
                     headers=headers,
                     cookies=cookies,
                 )
-                status = resp.status_code
-                if status == 200:
-                    return True, status
-                if status in (401, 403, 400):
-                    return False, status
-                if status == 429:
+                if resp.status_code == 200:
+                    return True
+                if resp.status_code in (401, 403, 400):
+                    return False
+                if resp.status_code == 429:
                     print("⚠️ Получен 429 при проверке cookies, оставляем их валидными.")
-                    return True, status
+                    return True
         except Exception as exc:
             print(f"⚠️ Ошибка при проверке cookies: {exc}")
-        return False, None
+        return False
 
     async def ensure_initial_cookies(self, accounts: list[str]) -> Dict[str, Dict[str, Any]]:
         valid_sessions: Dict[str, Dict[str, Any]] = {}
         if not accounts:
             return valid_sessions
 
-        self.invalid_accounts.clear()
-
-        proxy_pool = self._dedupe_proxies(self.proxy_list or [])
-        if proxy_pool:
-            if None not in proxy_pool:
-                proxy_pool.append(None)
-        else:
-            proxy_pool = [None]
-
-        proxy_pool = list(proxy_pool)
-        total_unique_proxies = len(proxy_pool)
-
-        proxy_condition = asyncio.Condition()
-        in_use_proxies: set[Optional[str]] = set()
-
-        async def acquire_specific_proxy(
-            proxy: Optional[str],
-            tried: set[Optional[str]],
-        ) -> bool:
-            async with proxy_condition:
-                if proxy not in proxy_pool or proxy in tried:
-                    return False
-                if proxy in in_use_proxies:
-                    return False
-                in_use_proxies.add(proxy)
-                return True
-
-        async def acquire_proxy(
-            tried: set[Optional[str]],
-        ) -> tuple[bool, Optional[str]]:
-            async with proxy_condition:
-                while True:
-                    for proxy in proxy_pool:
-                        if proxy not in in_use_proxies and proxy not in tried:
-                            in_use_proxies.add(proxy)
-                            return True, proxy
-                    if len(tried) >= total_unique_proxies:
-                        return False, None
-                    await proxy_condition.wait()
-
-        async def release_proxy(proxy: Optional[str]) -> None:
-            async with proxy_condition:
-                if proxy in in_use_proxies:
-                    in_use_proxies.remove(proxy)
-                    proxy_condition.notify_all()
-
-        # ограничиваем количество одновременно открытых браузеров
-        max_workers = min(total_unique_proxies or 1, MAX_PARALLEL_LOGIN_TASKS, len(accounts))
-        max_workers = max(1, max_workers)
-
-        result_lock = asyncio.Lock()
-
-        async def mark_valid(username: str, entry: Dict[str, Any]) -> None:
-            async with result_lock:
-                valid_sessions[username] = entry
-
-        async def mark_invalid(username: str) -> None:
-            async with result_lock:
-                self.invalid_accounts.add(username)
-
-        async def process_account(account: str) -> None:
+        for account in accounts:
             try:
                 username, password, two_factor_code = account.split(":", 2)
             except ValueError:
                 print(f"⚠️ Некорректный формат аккаунта '{account}', ожидается username:password:2fa")
-                return
+                continue
 
             self.account_credentials[username] = {
                 "password": password,
@@ -302,97 +194,16 @@ class InstagramParser:
             }
 
             cached_entry = self.session_cache.get(username)
-            last_proxy: Optional[str] = None
             if cached_entry:
-                last_proxy = cached_entry.get("proxy")
-                is_valid, status_code = await self._validate_cookies(
-                    cached_entry,
-                    proxy=last_proxy,
-                )
-                if is_valid:
-                    await mark_valid(username, cached_entry)
-                    return
-                status_text = status_code if status_code is not None else "unknown"
-                print(
-                    f"🔁 Куки {username} в кеше просрочены или недоступны (статус {status_text}) — обновляем"
-                )
+                if await self._validate_cookies(cached_entry):
+                    valid_sessions[username] = cached_entry
+                    continue
+                print(f"🔁 Куки {username} в кеше просрочены — обновляем")
                 self._drop_session(username)
 
-            tried_proxies: set[Optional[str]] = set()
-
-            if last_proxy in proxy_pool:
-                acquired_specific = await acquire_specific_proxy(last_proxy, tried_proxies)
-                if acquired_specific:
-                    entry_specific: Optional[Dict[str, Any]] = None
-                    try:
-                        entry_specific = await self._login_and_store_cookies(
-                            username,
-                            password,
-                            two_factor_code,
-                            proxy_candidates=[last_proxy],
-                        )
-                    except InvalidCredentialsError as cred_exc:
-                        print(f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
-                        self._drop_session(username)
-                        await mark_invalid(username)
-                        return
-                    except Exception as exc:
-                        print(f"⚠️ Ошибка авторизации {username} через прокси {last_proxy}: {exc}")
-                    finally:
-                        await release_proxy(last_proxy)
-
-                    tried_proxies.add(last_proxy)
-
-                    if entry_specific:
-                        await mark_valid(username, entry_specific)
-                        return
-
-            while len(tried_proxies) < total_unique_proxies:
-                acquired, proxy = await acquire_proxy(tried_proxies)
-                if not acquired:
-                    break
-
-                entry: Optional[Dict[str, Any]] = None
-                try:
-                    entry = await self._login_and_store_cookies(
-                        username,
-                        password,
-                        two_factor_code,
-                        proxy_candidates=[proxy],
-                    )
-                except InvalidCredentialsError as cred_exc:
-                    print(f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
-                    self._drop_session(username)
-                    await mark_invalid(username)
-                    return
-                except Exception as exc:
-                    print(f"⚠️ Ошибка авторизации {username} через прокси {proxy}: {exc}")
-                finally:
-                    await release_proxy(proxy)
-
-                tried_proxies.add(proxy)
-
-                if entry:
-                    await mark_valid(username, entry)
-                    return
-
-            print(f"❌ Не удалось обновить cookies для {username} — исчерпаны прокси/попытки")
-
-        semaphore = asyncio.Semaphore(max_workers)
-
-        async def worker(account: str) -> None:
-            async with semaphore:
-                await process_account(account)
-
-        tasks = [asyncio.create_task(worker(account)) for account in accounts]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, Exception):
-                print(f"⚠️ Необработанная ошибка при сборе cookies: {result}")
-
-        if self.invalid_accounts:
-            invalid_list = ", ".join(sorted(self.invalid_accounts))
-            print(f"⚠️ Аккаунты с некорректным паролем: {invalid_list}")
+            refreshed_entry = await self._login_and_store_cookies(username, password, two_factor_code)
+            if refreshed_entry:
+                valid_sessions[username] = refreshed_entry
 
         return valid_sessions
 
@@ -401,36 +212,24 @@ class InstagramParser:
         username: str,
         password: str,
         two_factor_code: str,
-        proxy_candidates: Optional[list[Optional[str]]] = None,
     ) -> Optional[Dict[str, Any]]:
         cached_entry = self.session_cache.get(username)
         if cached_entry:
             try:
-                is_valid, status_code = await self._validate_cookies(
-                    cached_entry,
-                    proxy=cached_entry.get("proxy"),
-                )
-                if is_valid:
-                    print(f"♻️ Куки для {username} ещё действительны — повторный логин не требуется (статус {status_code})")
+                if await self._validate_cookies(cached_entry):
+                    print(f"♻️ Куки для {username} ещё действительны — повторный логин не требуется")
                     return cached_entry
                 else:
-                    print(
-                        f"🔁 Куки для {username} устарели — инициируем новое получение"
-                    )
+                    print(f"🔁 Куки для {username} устарели — инициируем новое получение")
                     self._drop_session(username)
             except Exception as exc:
                 print(f"⚠️ Ошибка при проверке сохранённых cookies {username}: {exc}")
 
-        proxy_pool = self._dedupe_proxies(proxy_candidates or self.proxy_list or [])
-        if proxy_candidates is None:
-            if proxy_pool and None not in proxy_pool:
-                proxy_pool.append(None)
-            if not proxy_pool:
-                proxy_pool = [None]
-        elif not proxy_pool:
-            proxy_pool = [None]
+        proxy_candidates = list(self.proxy_list) if self.proxy_list else [None]
+        if None not in proxy_candidates:
+            proxy_candidates.append(None)
 
-        for proxy_str in proxy_pool:
+        for proxy_str in proxy_candidates:
             playwright = await async_playwright().start()
             browser = None
             context = None
@@ -461,13 +260,14 @@ class InstagramParser:
                 cookies = await self.login_to_instagram(page, username, password, two_factor_code)
                 if cookies:
                     user_agent = await page.evaluate("navigator.userAgent")
-                    entry = self._update_cookie_entry(username, cookies, user_agent, proxy_str)
+                    entry = self._update_cookie_entry(username, cookies, user_agent)
                     print(f"✅ Сохранены cookies для {username} (прокси: {proxy_str})")
                     return entry
                 print(f"⚠️ Не удалось авторизоваться с аккаунтом {username} на прокси {proxy_str}")
             except InvalidCredentialsError as cred_exc:
+                print(f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
                 self._drop_session(username)
-                raise cred_exc
+                break
             except Exception as exc:
                 print(f"⚠️ Ошибка авторизации {username} через прокси {proxy_str}: {exc}")
             finally:
@@ -1275,7 +1075,7 @@ class InstagramParser:
                 sessions,
                 user_id,
                 page_size=50,
-                max_pages=None,
+                max_pages=10,
                 preferred_session=preferred_session,
             )
         except Exception as exc:
@@ -1371,7 +1171,7 @@ class InstagramParser:
                                 timeout=20.0,
                             )
                             update_resp.raise_for_status()
-                            # print(f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
+                            print(f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
                         else:
                             is_new = True
                     else:
@@ -1405,7 +1205,7 @@ class InstagramParser:
             if not shortcode or shortcode in seen_shortcodes:
                 continue
             seen_shortcodes.add(shortcode)
-            # print(f"➡️ Обработка рила {shortcode} ({idx}/{total_candidates})")
+            print(f"➡️ Обработка рила {shortcode} ({idx}/{total_candidates})")
             try:
                 play_count = media.get("play_count") or media.get("video_view_count") or 0
                 like_count = media.get("like_count") or 0
@@ -1465,72 +1265,72 @@ class InstagramParser:
         return
 
 
-# async def main():
-#     proxy_list = [
-#         "msEHZ8:tYomUE@152.232.65.53:9461",
-#         "msEHZ8:tYomUE@190.185.108.103:9335",
-#         "msEHZ8:tYomUE@138.99.37.16:9622",
-#         "msEHZ8:tYomUE@138.99.37.136:9248",
-#         "msEHZ8:tYomUE@152.232.72.124:9057",
-#         "msEHZ8:tYomUE@23.229.49.135:9511",
-#         "msEHZ8:tYomUE@209.127.8.189:9281",
-#         "msEHZ8:tYomUE@152.232.72.235:9966",
-#         "msEHZ8:tYomUE@152.232.74.34:9043",
-#         "PvJVn6:jr8EvS@38.148.133.33:8000",
-#         "PvJVn6:jr8EvS@38.148.142.71:8000",
-#         "PvJVn6:jr8EvS@38.148.133.69:8000",
-#         "PvJVn6:jr8EvS@38.148.138.48:8000",
-#         "msEHZ8:tYomUE@168.196.239.222:9211",
-#         "msEHZ8:tYomUE@168.196.237.44:9129",
-#         "msEHZ8:tYomUE@168.196.237.99:9160",
-#         "msEHZ8:tYomUE@138.219.122.56:9409",
-#         "msEHZ8:tYomUE@138.219.122.128:9584",
-#         "msEHZ8:tYomUE@138.219.123.22:9205",
-#         "msEHZ8:tYomUE@138.59.5.46:9559",
-#         "msEHZ8:tYomUE@152.232.68.147:9269",
-#         "msEHZ8:tYomUE@152.232.67.18:9241",
-#         "msEHZ8:tYomUE@152.232.68.149:9212",
-#         "msEHZ8:tYomUE@152.232.66.152:9388",
-#     ]
-#     parser = InstagramParser(proxy_list=proxy_list)
-#     url = "https://www.instagram.com/best_beautydeal"
-#     user_id = 13
-#     accounts = [
-#         # "juan.itaandersen:fsm8f5tb:FOJ2E2475FRD3UR5NY2E45YPTEJK5APH",
-#         # "jodyrhodes74:Kr2V3bxS:2KYNTJCUL74SKSNTVGFENBL6DOAJ65X6",
-#         # "Jeannetteosley12:7nYEEexK:SVTLSGQZVWLNB3ID2PCB5TR7C4VWWPES",
-#         # "hild.amoody:6FL9Jg2j:FW26JAKMNNLP2U5BLQQF6L4ABMMMB4DC",
-#         # "eliseowolf95:CuNAryR3Ly:VF442BGSAVQK3TBMGKM3SAN2U75EKMRG",
-#         # "jolenemccoy650:KQ9GsFqzHy:GI2NPPGSYMTFZD4F75XMOVIAB4GFWSP4",
-#         # "juliadacostabx829:payable64$!:OZITRNHYGIVKF27ZASD26JVIAE54JHLB",
-#         # "claricepeixotokt640:unbeliEvably4$!:ZG33OWOBMCPJ37NKIGCHDTEMTC6FPEGL",
-#         # "allanacaldeiract154:sipHOnic5!*:NQ6453R7RMMPZGNDQWX74KAYZUDHIFA2",
-#         "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
-#         "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
-#         "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
-#         "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
-#         # "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
-#         "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
-#         "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
-#         "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
-#         "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
-#         # "liviadamotaj814:zoophiles5:XLMIX3HUL3N3YSHK7NY6HQBTW5TOPXPC",
-#         # "rezendesuelizn674:TwVHHXku6p:UI6C3HO4CWX2F36KXMLYDM7YVYU5PCY2",
-#         "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
-#         "danielle_stafford:QbR86VfEud:YSKAUQROK633XKXT5M2GJZPGEEJSPGJ3",
-#         "frasheri8498:NzPAAX5xqC:SJZ3D5XWEZYWHOIYXANTZZQTQ34BE47D",
-#         "bonilla.scout:KNWKdS3Gew:J33P5656TMAH7R55WUKML3TEA7RGSFQG",
-#         "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
-#         "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
-#         "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
-#         "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
-#         "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
-#         "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
-#         "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
-#         "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
-#     ]
-#     await parser.parse_channel(url, channel_id=32,
-#                                user_id=user_id, accounts=accounts)
+async def main():
+    proxy_list = [
+        "msEHZ8:tYomUE@168.196.239.222:9211",
+        "msEHZ8:tYomUE@168.196.237.44:9129",
+        "msEHZ8:tYomUE@168.196.237.99:9160",
+        "msEHZ8:tYomUE@138.219.122.56:9409",
+        "msEHZ8:tYomUE@138.219.122.128:9584",
+        "msEHZ8:tYomUE@138.219.123.22:9205",
+        "msEHZ8:tYomUE@138.59.5.46:9559",
+        "msEHZ8:tYomUE@152.232.68.147:9269",
+        "msEHZ8:tYomUE@152.232.67.18:9241",
+        "msEHZ8:tYomUE@152.232.68.149:9212",
+        "msEHZ8:tYomUE@152.232.66.152:9388",
+        "msEHZ8:tYomUE@152.232.65.53:9461",
+        "msEHZ8:tYomUE@190.185.108.103:9335",
+        "msEHZ8:tYomUE@138.99.37.16:9622",
+        "msEHZ8:tYomUE@138.99.37.136:9248",
+        "msEHZ8:tYomUE@152.232.72.124:9057",
+        "msEHZ8:tYomUE@23.229.49.135:9511",
+        "msEHZ8:tYomUE@209.127.8.189:9281",
+        "msEHZ8:tYomUE@152.232.72.235:9966",
+        "msEHZ8:tYomUE@152.232.74.34:9043",
+        "PvJVn6:jr8EvS@38.148.133.33:8000",
+        "PvJVn6:jr8EvS@38.148.142.71:8000",
+        "PvJVn6:jr8EvS@38.148.133.69:8000",
+        "PvJVn6:jr8EvS@38.148.138.48:8000",
+    ]
+    parser = InstagramParser(proxy_list=proxy_list)
+    url = "https://www.instagram.com/best_beautydeal"
+    user_id = 13
+    accounts = [
+        # "juan.itaandersen:fsm8f5tb:FOJ2E2475FRD3UR5NY2E45YPTEJK5APH",
+        # "jodyrhodes74:Kr2V3bxS:2KYNTJCUL74SKSNTVGFENBL6DOAJ65X6",
+        # "Jeannetteosley12:7nYEEexK:SVTLSGQZVWLNB3ID2PCB5TR7C4VWWPES",
+        # "hild.amoody:6FL9Jg2j:FW26JAKMNNLP2U5BLQQF6L4ABMMMB4DC",
+        # "eliseowolf95:CuNAryR3Ly:VF442BGSAVQK3TBMGKM3SAN2U75EKMRG",
+        # "jolenemccoy650:KQ9GsFqzHy:GI2NPPGSYMTFZD4F75XMOVIAB4GFWSP4",
+        # "juliadacostabx829:payable64$!:OZITRNHYGIVKF27ZASD26JVIAE54JHLB",
+        # "claricepeixotokt640:unbeliEvably4$!:ZG33OWOBMCPJ37NKIGCHDTEMTC6FPEGL",
+        "allanacaldeiract154:sipHOnic5!*:NQ6453R7RMMPZGNDQWX74KAYZUDHIFA2",
+        "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
+        "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
+        "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
+        "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
+        "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
+        "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
+        "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
+        "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
+        "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
+        "liviadamotaj814:zoophiles5:XLMIX3HUL3N3YSHK7NY6HQBTW5TOPXPC",
+        # "rezendesuelizn674:TwVHHXku6p:UI6C3HO4CWX2F36KXMLYDM7YVYU5PCY2",
+        "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
+        "danielle_stafford:QbR86VfEud:YSKAUQROK633XKXT5M2GJZPGEEJSPGJ3",
+        "frasheri8498:NzPAAX5xqC:SJZ3D5XWEZYWHOIYXANTZZQTQ34BE47D",
+        "bonilla.scout:KNWKdS3Gew:J33P5656TMAH7R55WUKML3TEA7RGSFQG",
+        "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
+        "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
+        "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
+        "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
+        "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
+        "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
+        "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
+        "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
+    ]
+    await parser.parse_channel(url, channel_id=32,
+                               user_id=user_id, accounts=accounts)
 
-# if __name__ == "__main__":
-#     asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
