@@ -1,1533 +1,1500 @@
-import re
 import asyncio
-# import time
+import inspect
 import json
-from collections import deque
-from datetime import datetime
-from typing import Optional, Dict, List, Union, Any
-import httpx
-import requests
-# from pathlib import Path
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 import random
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+from urllib.parse import quote, urlparse
 
-from bs4 import BeautifulSoup
+import httpx
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 from utils.logger import TCPLogger
-from urllib.parse import urlparse, urlunparse
+
+# try:  # поддержка новых версий playwright-stealth
+#     from playwright_stealth import stealth_async as apply_stealth
+# except ImportError:  # fallback на старый API
+#     try:
+#         from playwright_stealth import Stealth  # type: ignore
+
+#         async def apply_stealth(page):
+#             await Stealth().apply_stealth_async(page)
+#     except Exception:  # если stealth не установлен/сломался
+#         apply_stealth = None  # type: ignore
+
+INSTAGRAM_APP_ID = "936619743392459"
+DEFAULT_DOC_ID_REEL = "25981206651899035"
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+)
+BASE_REQUEST_HEADERS = {
+    "x-ig-app-id": INSTAGRAM_APP_ID,
+    "User-Agent": DEFAULT_USER_AGENT,
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept": "*/*",
+    "Referer": "https://www.instagram.com/",
+}
+IMPORTANT_COOKIES = {
+    "sessionid",
+    "csrftoken",
+    "ds_user_id",
+    "mid",
+    "shbid",
+    "shbts",
+    "rur",
+    "ig_did",
+    "ig_nrcb",
+}
+COOKIES_FILE_PATH = Path(__file__).with_name("instagram_cookies.json")
+REQUEST_TIMEOUT = 20.0
+MAX_PARALLEL_LOGIN_TASKS = 5
+HTTPX_USES_PROXY_PARAM = "proxy" in inspect.signature(httpx.AsyncClient.__init__).parameters
 
 
-ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
-API_BASE_URL = "https://cosmeya.dev-klick.cyou/api/v1/videos"
-# API_BASE_URL = "http://127.0.0.1:8000/api/v1/videos"
+class InvalidCredentialsError(Exception):
+    """Возникает при некорректных учётных данных Instagram."""
 
 
-class ShortsParser:
+class InstagramParser:
     def __init__(
             self,
-            logger: TCPLogger
+            logger: TCPLogger,
     ):
         self.logger = logger
-        self.current_proxy_index = 0
-        self.seen_video_ids: set = set()
-        self.collected_videos: List[Dict] = []
-        self.response_tasks: List[asyncio.Task] = []
-        self.dom_images = {}
-        self.dom_video_links = {}
-        self.dom_order: List[str] = []
-        self.saved_html_count = 0
+        self.proxy_list: list[str] = []
+        self.cookie_file_path = COOKIES_FILE_PATH
+        self.session_cache: Dict[str, Dict[str, Any]] = self._load_cookie_store()
+        self.account_credentials: Dict[str, Dict[str, str]] = {}
+        self.invalid_accounts: set[str] = set()
 
-    def reset_dom_state(self):
-        """Сбрасывает накопленные DOM-данные перед новой попыткой парсинга."""
-        self.dom_images = {}
-        self.dom_video_links = {}
-        self.dom_order = []
-        self.collected_videos.clear()
-        self.seen_video_ids.clear()
-        self.response_tasks.clear()
-        self.saved_html_count = 0
-
-    def _select_next_proxy(self, proxies: List[Optional[str]], last_proxy: Optional[str]) -> Optional[str]:
-        if not proxies:
-            return None
-        if len(proxies) == 1:
-            return proxies[0]
-        candidates = [p for p in proxies if p != last_proxy]
-        return random.choice(candidates) if candidates else proxies[0]
-
-    def normalize_profile_url(self, raw_url: str) -> str:
-        cleaned = (raw_url or "").strip()
-        if not cleaned:
-            raise ValueError("Пустой URL профиля YouTube")
-        if not re.match(r"^https?://", cleaned, re.IGNORECASE):
-            cleaned = f"https://{cleaned.lstrip('/')}"
-        parsed = urlparse(cleaned)
-        scheme = parsed.scheme or "https"
-        netloc = parsed.netloc or "youtube.com"
-        path = parsed.path or ""
-
-        segments = [segment for segment in path.split("/") if segment]
-        username_segment = next((segment for segment in segments if segment.startswith("@")), None)
-        if username_segment:
-            path = f"/{username_segment}"
-        elif segments:
-            path = f"/{segments[0]}"
-        else:
-            path = "/"
-
-        return urlunparse((scheme, netloc, path.rstrip("/"), "", "", ""))
-
-    def parse_views(self, text: str) -> int:
-        if not text:
-            return 0
-        cleaned = text.replace("\xa0", " ").strip()
-        match = re.search(r"([\d\s.,]+)", cleaned)
-        if not match:
-            return 0
-        number_part = match.group(1)
-        digits_only = re.sub(r"[^\d]", "", number_part)
-        return int(digits_only) if digits_only else 0
-
-    def parse_compact_number(self, raw_number: str, suffix: Optional[str] = None) -> Optional[int]:
-        if not raw_number:
-            return None
-
-        cleaned = raw_number.replace("\xa0", "").replace(" ", "")
-        cleaned = cleaned.replace(",", ".")
-
-        try:
-            value = float(cleaned)
-        except ValueError:
-            return None
-
-        if suffix:
-            suffix_normalized = suffix.strip().lower()
-            if suffix_normalized in {"k", "тыс"}:
-                value *= 1_000
-            elif suffix_normalized in {"m", "млн"}:
-                value *= 1_000_000
-            elif suffix_normalized in {"b", "млрд"}:
-                value *= 1_000_000_000
-
-        return int(round(value))
-
-    def _looks_like_views_text(self, text: str) -> bool:
-        if not text:
-            return False
-        normalized = text.lower()
-        keywords = (
-            "view",
-            "просмот",
-            "visualiz",
-            "vista",
-            "vues",
-            "ansehen",
-            "ansicht",
-            "bekeken",
-            "weergav",
-            "görüntülenme",
-            "المشاهدات",
-        )
-        return any(keyword in normalized for keyword in keywords)
-
-    def _looks_like_likes_text(self, text: str) -> bool:
-        if not text:
-            return False
-        normalized = text.lower()
-        keywords = (
-            "like",
-            "лайк",
-            "thumb",
-            "класс",
-            "me gusta",
-            "gusta",
-        )
-        return any(keyword in normalized for keyword in keywords)
-
-    def _looks_like_comments_text(self, text: str) -> bool:
-        if not text:
-            return False
-        normalized = text.lower()
-        keywords = (
-            "comment",
-            "коммент",
-            "coment",
-            "reactie",
-            "ответ",
-            "reply",
-        )
-        return any(keyword in normalized for keyword in keywords)
-
-    def _looks_like_publish_text(self, text: str) -> bool:
-        if not text:
-            return False
-        normalized = text.lower()
-        keywords = (
-            "publish",
-            "uploaded",
-            "опублик",
-            "вышло",
-            "premiered",
-            "премьера",
-            "дата",
-        )
-        return any(keyword in normalized for keyword in keywords)
-
-    async def get_videos_count_from_header(self, page, timeout: int = 8000) -> Optional[int]:
-        try:
+    def _load_cookie_store(self) -> Dict[str, Dict[str, Any]]:
+        if self.cookie_file_path.exists():
             try:
-                await page.wait_for_selector("yt-content-metadata-view-model span", timeout=timeout)
-            except PlaywrightTimeoutError:
-                pass
+                with self.cookie_file_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return data
+                    self.logger.send("INFO", f"⚠️ Некорректный формат cookie-файла {self.cookie_file_path}, ожидается dict")
+            except Exception as exc:
+                self.logger.send("INFO", f"⚠️ Не удалось прочитать cookie-файл {self.cookie_file_path}: {exc}")
+        return {}
 
-            header_elements = await page.query_selector_all("yt-content-metadata-view-model span")
-            for element in header_elements:
+    def _persist_cookie_store(self) -> None:
+        try:
+            self.cookie_file_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.cookie_file_path.open("w", encoding="utf-8") as f:
+                json.dump(self.session_cache, f, ensure_ascii=False, indent=2)
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Не удалось сохранить cookies в {self.cookie_file_path}: {exc}")
+
+    def _build_headers(self, user_agent: Optional[str] = None, csrf_token: Optional[str] = None) -> Dict[str, str]:
+        headers = dict(BASE_REQUEST_HEADERS)
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        if csrf_token:
+            headers["x-csrftoken"] = csrf_token
+        headers.setdefault("X-Requested-With", "XMLHttpRequest")
+        return headers
+
+    @staticmethod
+    def _parse_proxy(proxy_str: Optional[str]) -> Optional[Dict[str, str]]:
+        if not proxy_str:
+            return None
+        try:
+            if "@" in proxy_str:
+                auth, host_port = proxy_str.split("@", 1)
+                username, password = auth.split(":", 1)
+                host, port = host_port.split(":", 1)
+                return {
+                    "server": f"http://{host}:{port}",
+                    "username": username,
+                    "password": password,
+                }
+            host, port = proxy_str.split(":", 1)
+            return {"server": f"http://{host}:{port}"}
+        except Exception as exc:
+            print(f"⚠️ Неверный формат прокси '{proxy_str}': {exc}")
+            return None
+
+    @staticmethod
+    def _dedupe_proxies(proxies: list[Optional[str]]) -> list[Optional[str]]:
+        seen: set[Optional[str]] = set()
+        ordered: list[Optional[str]] = []
+        for proxy in proxies:
+            if proxy not in seen:
+                ordered.append(proxy)
+                seen.add(proxy)
+        return ordered
+
+    @staticmethod
+    def _normalize_proxy_input(proxy_list: Optional[Any]) -> list[str]:
+        if proxy_list is None:
+            return []
+        if isinstance(proxy_list, str):
+            text = proxy_list.strip()
+            if not text:
+                return []
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                proxy_list = [item.strip() for item in text.replace("\r", "\n").split("\n") if item.strip()]
+            else:
+                proxy_list = parsed
+        normalized: list[str] = []
+        for proxy in proxy_list:
+            if not proxy:
+                continue
+            normalized.append(str(proxy).strip())
+        return normalized
+
+    @staticmethod
+    def _extract_auth_cookies(raw_cookies: list[Dict[str, Any]]) -> Dict[str, str]:
+        auth_cookies: Dict[str, str] = {}
+        for cookie in raw_cookies:
+            name = cookie.get("name")
+            value = cookie.get("value")
+            domain = cookie.get("domain", "")
+            if not name or not value:
+                continue
+            if "instagram.com" not in domain:
+                continue
+            if name in IMPORTANT_COOKIES or domain.endswith("instagram.com"):
+                auth_cookies[name] = value
+        return auth_cookies
+
+    def _update_cookie_entry(
+        self,
+        username: str,
+        cookies: Dict[str, str],
+        user_agent: Optional[str],
+        proxy: Optional[str],
+    ) -> Dict[str, Any]:
+        entry = {
+            "cookies": cookies,
+            "user_agent": user_agent or DEFAULT_USER_AGENT,
+            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "proxy": proxy,
+        }
+        self.session_cache[username] = entry
+        self._persist_cookie_store()
+        return entry
+
+    def _drop_session(self, username: str) -> None:
+        if username in self.session_cache:
+            self.session_cache.pop(username, None)
+            self._persist_cookie_store()
+
+    async def _refresh_session(self, username: str) -> Optional[Dict[str, Any]]:
+        creds = self.account_credentials.get(username)
+        if not creds:
+            self.logger.send("INFO", f"⚠️ Нет сохранённых учётных данных для {username}, пропускаем обновление cookies")
+            return None
+        return await self._login_and_store_cookies(
+            username,
+            creds.get("password", ""),
+            creds.get("two_factor_code", ""),
+        )
+
+    @staticmethod
+    def _format_proxy_for_httpx(proxy_str: Optional[str]) -> Optional[str]:
+        if not proxy_str:
+            return None
+        if proxy_str.startswith("http://") or proxy_str.startswith("https://"):
+            return proxy_str
+        if "@" in proxy_str:
+            auth, host_port = proxy_str.split("@", 1)
+            return f"http://{auth}@{host_port}"
+        return f"http://{proxy_str}"
+
+    async def _validate_cookies(
+        self,
+        entry: Optional[Dict[str, Any]],
+        *,
+        proxy: Optional[str] = None,
+    ) -> tuple[bool, Optional[int]]:
+        if not entry:
+            return False, None
+        cookies = entry.get("cookies") or {}
+        if not cookies.get("sessionid"):
+            return False, None
+        headers = self._build_headers(entry.get("user_agent"), cookies.get("csrftoken"))
+        proxy_for_httpx = self._format_proxy_for_httpx(proxy)
+        client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT}
+        if proxy_for_httpx:
+            if HTTPX_USES_PROXY_PARAM:
+                client_kwargs["proxy"] = proxy_for_httpx
+            else:
+                client_kwargs["proxies"] = {
+                    "http": proxy_for_httpx,
+                    "https": proxy_for_httpx,
+                }
+        try:
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                resp = await client.get(
+                    "https://i.instagram.com/api/v1/accounts/current_user/",
+                    headers=headers,
+                    cookies=cookies,
+                )
+                status = resp.status_code
+                if status == 200:
+                    return True, status
+                if status in (401, 403, 400):
+                    return False, status
+                if status == 429:
+                    self.logger.send("INFO", "⚠️ Получен 429 при проверке cookies, оставляем их валидными.")
+                    return True, status
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Ошибка при проверке cookies: {exc}")
+        return False, None
+
+    async def ensure_initial_cookies(self, accounts: list[str]) -> Dict[str, Dict[str, Any]]:
+        valid_sessions: Dict[str, Dict[str, Any]] = {}
+        if not accounts:
+            return valid_sessions
+
+        self.invalid_accounts.clear()
+
+        proxy_pool = self._dedupe_proxies(self.proxy_list or [])
+        if proxy_pool:
+            if None not in proxy_pool:
+                proxy_pool.append(None)
+        else:
+            proxy_pool = [None]
+
+        proxy_pool = list(proxy_pool)
+        total_unique_proxies = len(proxy_pool)
+
+        proxy_condition = asyncio.Condition()
+        in_use_proxies: set[Optional[str]] = set()
+
+        async def acquire_specific_proxy(
+            proxy: Optional[str],
+            tried: set[Optional[str]],
+        ) -> bool:
+            async with proxy_condition:
+                if proxy not in proxy_pool or proxy in tried:
+                    return False
+                if proxy in in_use_proxies:
+                    return False
+                in_use_proxies.add(proxy)
+                return True
+
+        async def acquire_proxy(
+            tried: set[Optional[str]],
+        ) -> tuple[bool, Optional[str]]:
+            async with proxy_condition:
+                while True:
+                    for proxy in proxy_pool:
+                        if proxy not in in_use_proxies and proxy not in tried:
+                            in_use_proxies.add(proxy)
+                            return True, proxy
+                    if len(tried) >= total_unique_proxies:
+                        return False, None
+                    await proxy_condition.wait()
+
+        async def release_proxy(proxy: Optional[str]) -> None:
+            async with proxy_condition:
+                if proxy in in_use_proxies:
+                    in_use_proxies.remove(proxy)
+                    proxy_condition.notify_all()
+
+        # ограничиваем количество одновременно открытых браузеров
+        max_workers = min(total_unique_proxies or 1, MAX_PARALLEL_LOGIN_TASKS, len(accounts))
+        max_workers = max(1, max_workers)
+
+        result_lock = asyncio.Lock()
+
+        async def mark_valid(username: str, entry: Dict[str, Any]) -> None:
+            async with result_lock:
+                valid_sessions[username] = entry
+
+        async def mark_invalid(username: str) -> None:
+            async with result_lock:
+                self.invalid_accounts.add(username)
+
+        async def process_account(account: str) -> None:
+            try:
+                username, password, two_factor_code = account.split(":", 2)
+            except ValueError:
+                self.logger.send("INFO", f"⚠️ Некорректный формат аккаунта '{account}', ожидается username:password:2fa")
+                return
+
+            self.account_credentials[username] = {
+                "password": password,
+                "two_factor_code": two_factor_code,
+            }
+
+            cached_entry = self.session_cache.get(username)
+            last_proxy: Optional[str] = None
+            if cached_entry:
+                last_proxy = cached_entry.get("proxy")
+                is_valid, status_code = await self._validate_cookies(
+                    cached_entry,
+                    proxy=last_proxy,
+                )
+                if is_valid:
+                    await mark_valid(username, cached_entry)
+                    return
+                status_text = status_code if status_code is not None else "unknown"
+                self.logger.send(
+                    "INFO",
+                    f"🔁 Куки {username} в кеше просрочены или недоступны (статус {status_text}) — обновляем"
+                )
+                self._drop_session(username)
+
+            tried_proxies: set[Optional[str]] = set()
+
+            if last_proxy in proxy_pool:
+                acquired_specific = await acquire_specific_proxy(last_proxy, tried_proxies)
+                if acquired_specific:
+                    entry_specific: Optional[Dict[str, Any]] = None
+                    try:
+                        entry_specific = await self._login_and_store_cookies(
+                            username,
+                            password,
+                            two_factor_code,
+                            proxy_candidates=[last_proxy],
+                        )
+                    except InvalidCredentialsError as cred_exc:
+                        self.logger.send("INFO", f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
+                        self._drop_session(username)
+                        await mark_invalid(username)
+                        return
+                    except Exception as exc:
+                        self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {last_proxy}: {exc}")
+                    finally:
+                        await release_proxy(last_proxy)
+
+                    tried_proxies.add(last_proxy)
+
+                    if entry_specific:
+                        await mark_valid(username, entry_specific)
+                        return
+
+            while len(tried_proxies) < total_unique_proxies:
+                acquired, proxy = await acquire_proxy(tried_proxies)
+                if not acquired:
+                    break
+
+                entry: Optional[Dict[str, Any]] = None
                 try:
-                    raw_text = await element.inner_text()
+                    entry = await self._login_and_store_cookies(
+                        username,
+                        password,
+                        two_factor_code,
+                        proxy_candidates=[proxy],
+                    )
+                except InvalidCredentialsError as cred_exc:
+                    self.logger.send("INFO", f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
+                    self._drop_session(username)
+                    await mark_invalid(username)
+                    return
+                except Exception as exc:
+                    self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {proxy}: {exc}")
+                finally:
+                    await release_proxy(proxy)
+
+                tried_proxies.add(proxy)
+
+                if entry:
+                    await mark_valid(username, entry)
+                    return
+
+            self.logger.send("INFO", f"❌ Не удалось обновить cookies для {username} — исчерпаны прокси/попытки")
+
+        semaphore = asyncio.Semaphore(max_workers)
+
+        async def worker(account: str) -> None:
+            async with semaphore:
+                await process_account(account)
+
+        tasks = [asyncio.create_task(worker(account)) for account in accounts]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                self.logger.send("INFO", f"⚠️ Необработанная ошибка при сборе cookies: {result}")
+
+        if self.invalid_accounts:
+            invalid_list = ", ".join(sorted(self.invalid_accounts))
+            self.logger.send("INFO", f"⚠️ Аккаунты с некорректным паролем: {invalid_list}")
+
+        return valid_sessions
+
+    async def _login_and_store_cookies(
+        self,
+        username: str,
+        password: str,
+        two_factor_code: str,
+        proxy_candidates: Optional[list[Optional[str]]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        cached_entry = self.session_cache.get(username)
+        if cached_entry:
+            try:
+                is_valid, status_code = await self._validate_cookies(
+                    cached_entry,
+                    proxy=cached_entry.get("proxy"),
+                )
+                if is_valid:
+                    self.logger.send("INFO", f"♻️ Куки для {username} ещё действительны — повторный логин не требуется (статус {status_code})")
+                    return cached_entry
+                else:
+                    self.logger.send(
+                        "INFO",
+                        f"🔁 Куки для {username} устарели — инициируем новое получение"
+                    )
+                    self._drop_session(username)
+            except Exception as exc:
+                self.logger.send("INFO", f"⚠️ Ошибка при проверке сохранённых cookies {username}: {exc}")
+
+        proxy_pool = self._dedupe_proxies(proxy_candidates or self.proxy_list or [])
+        if proxy_candidates is None:
+            if proxy_pool and None not in proxy_pool:
+                proxy_pool.append(None)
+            if not proxy_pool:
+                proxy_pool = [None]
+        elif not proxy_pool:
+            proxy_pool = [None]
+
+        for proxy_str in proxy_pool:
+            playwright = await async_playwright().start()
+            browser = None
+            context = None
+            page = None
+            try:
+                device = playwright.devices.get("iPhone 14 Pro")
+                browser = await playwright.chromium.launch(
+                    headless=True,
+                    args=["--window-size=390,844"],
+                )
+                context_kwargs: Dict[str, Any] = {
+                    **(device or {}),
+                    "locale": "en-US",
+                    # "timezone_id": "America/Vancouver",
+                }
+                proxy_config = self._parse_proxy(proxy_str)
+                if proxy_config:
+                    context_kwargs["proxy"] = proxy_config
+
+                context = await browser.new_context(**context_kwargs)
+                page = await context.new_page()
+                # if apply_stealth:
+                #     try:
+                #         await apply_stealth(page)
+                #     except Exception as stealth_exc:
+                #         self.logger.send("INFO", f"⚠️ Не удалось применить playwright-stealth: {stealth_exc}")
+
+                cookies = await self.login_to_instagram(page, username, password, two_factor_code)
+                if cookies:
+                    user_agent = await page.evaluate("navigator.userAgent")
+                    entry = self._update_cookie_entry(username, cookies, user_agent, proxy_str)
+                    self.logger.send("INFO", f"✅ Сохранены cookies для {username} (прокси: {proxy_str})")
+                    return entry
+                self.logger.send("INFO", f"⚠️ Не удалось авторизоваться с аккаунтом {username} на прокси {proxy_str}")
+            except InvalidCredentialsError as cred_exc:
+                self._drop_session(username)
+                raise cred_exc
+            except Exception as exc:
+                self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {proxy_str}: {exc}")
+            finally:
+                if browser:
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+                try:
+                    await playwright.stop()
                 except Exception:
-                    continue
-
-                if not raw_text:
-                    continue
-
-                normalized = re.sub(r"\s+", " ", raw_text).strip()
-                lowered = normalized.lower()
-
-                if "video" not in lowered and "видео" not in lowered:
-                    continue
-
-                match = re.search(r"([\d\s.,]+)\s*(k|m|b|тыс|млн|млрд)?", normalized, re.IGNORECASE)
-                if not match:
-                    continue
-
-                number_part = match.group(1)
-                suffix = match.group(2)
-                parsed = self.parse_compact_number(number_part, suffix)
-                if parsed:
-                    return parsed
-        except Exception as e:
-            self.logger.send("INFO", f"Не удалось получить количество видео из шапки: {e}")
-
+                    pass
         return None
 
-    async def extract_images_from_dom(self, page, url: str):
-        """Проходимся по карточкам, сохраняем ссылки и превью для шортов."""
-        self.logger.send("INFO", "🔍 Извлекаем данные о шортах из DOM…")
+    async def _request_with_sessions(
+        self,
+        sessions: Dict[str, Dict[str, Any]],
+        url: str,
+        *,
+        method: str = "GET",
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> tuple[httpx.Response, str, Dict[str, Any]]:
+        if not sessions:
+            raise RuntimeError("Нет доступных сохранённых cookies для Instagram")
 
-        item_selectors = [
-            "ytm-shorts-lockup-view-model",   # мобильная
-            "ytd-rich-item-renderer",         # десктопная
-            "ytd-reel-item-renderer",         # reel items
-            "ytd-grid-video-renderer"         # сетка
-        ]
+        session_items = list(sessions.items())
+        random.shuffle(session_items)
+        last_exception: Optional[Exception] = None
 
-        added_images = 0
-        added_links = 0
-        total_cards_seen = 0
-
-        for selector in item_selectors:
+        for username, entry in session_items:
+            headers = self._build_headers(entry.get("user_agent"), entry["cookies"].get("csrftoken"))
             try:
-                items = await page.query_selector_all(selector)
-                total_cards_seen += len(items)
-                self.logger.send("INFO", f"Карточек по '{selector}': {len(items)}")
+                async with httpx.AsyncClient(
+                    timeout=REQUEST_TIMEOUT,
+                    headers=headers,
+                    cookies=entry["cookies"],
+                ) as client:
+                    response = await client.request(method, url, params=params, data=data)
 
-                for el in items:
-                    try:
-                        link_el = await el.query_selector("a[href*='/shorts/']") \
-                                or await el.query_selector("a.shortsLockupViewModelHostEndpoint")
-                        href = await link_el.get_attribute("href") if link_el else None
-                        if not href:
-                            continue
-                        m = re.search(r"/shorts/([a-zA-Z0-9_-]{11})", href)
-                        if not m:
-                            continue
-                        video_id = m.group(1)
+                status = response.status_code
+                if status == 200:
+                    return response, username, entry
 
-                        if video_id not in self.dom_video_links:
-                            self.dom_video_links[video_id] = f"https://www.youtube.com/shorts/{video_id}"
-                            self.dom_order.append(video_id)
-                            added_links += 1
+                if status in (401, 403):
+                    self.logger.send("INFO", f"⚠️ Сессия {username} вернула {status}, обновляем cookies...")
+                    self._drop_session(username)
+                    refreshed = await self._refresh_session(username)
+                    if refreshed:
+                        sessions[username] = refreshed
+                    else:
+                        sessions.pop(username, None)
+                    continue
 
-                        img_el = await el.query_selector("img.ytCoreImageHost, img.yt-img-shadow, img")
-                        img_url = None
-                        if img_el:
-                            src = await img_el.get_attribute("src")
-                            if src and src.strip() and not src.startswith("data:"):
-                                img_url = src
-                            else:
-                                # бывает, что только srcset
-                                srcset = await img_el.get_attribute("srcset")
-                                if srcset:
-                                    parts = [p.strip().split(" ")[0] for p in srcset.split(",") if p.strip()]
-                                    if parts:
-                                        img_url = parts[-1]
+                if status == 400:
+                    self.logger.send("INFO", f"⚠️ Сессия {username} вернула 400, пробуем другую сессию.")
+                    continue
 
-                        if not img_url:
-                            img_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                if status == 429:
+                    self.logger.send("INFO", f"⚠️ Сессия {username} получила 429 (rate limit), пробуем другую.")
+                    continue
 
-                        if video_id not in self.dom_images or not self.dom_images[video_id]:
-                            self.dom_images[video_id] = img_url
-                            added_images += 1
+                if status == 404:
+                    return response, username, entry
 
-                    except Exception:
-                        continue
+                response.raise_for_status()
+                return response, username, entry
+            except Exception as exc:
+                last_exception = exc
+                self.logger.send("INFO", f"⚠️ Ошибка при запросе ({username}): {exc}")
 
-            except Exception as e:
-                self.logger.send("INFO", f"Ошибка при обходе '{selector}': {e}")
-                continue
+        if last_exception:
+            raise last_exception
+        raise RuntimeError("Не удалось выполнить запрос: отсутствуют рабочие сессии Instagram")
 
-        self.logger.send(
-            "INFO",
-            f"✅ Извлечено: +{added_links} ссылок, +{added_images} превью; всего уникальных видео: "
-            f"{len(self.dom_order)}; карточек просмотрено: {total_cards_seen}"
+    async def _request_with_specific_session(
+        self,
+        sessions: Dict[str, Dict[str, Any]],
+        username: str,
+        entry: Dict[str, Any],
+        url: str,
+        *,
+        method: str = "GET",
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> tuple[httpx.Response, str, Dict[str, Any]]:
+        headers = self._build_headers(entry.get("user_agent"), entry["cookies"].get("csrftoken"))
+        try:
+            async with httpx.AsyncClient(
+                timeout=REQUEST_TIMEOUT,
+                headers=headers,
+                cookies=entry["cookies"],
+            ) as client:
+                response = await client.request(method, url, params=params, data=data)
+
+            status = response.status_code
+            if status in (200, 404):
+                return response, username, entry
+
+            if status in (401, 403):
+                self.logger.send("INFO", f"⚠️ Сессия {username} устарела ({status}), пытаемся обновить.")
+                self._drop_session(username)
+                refreshed = await self._refresh_session(username)
+                if refreshed:
+                    sessions[username] = refreshed
+                    return await self._request_with_specific_session(
+                        sessions,
+                        username,
+                        refreshed,
+                        url,
+                        method=method,
+                        params=params,
+                        data=data,
+                    )
+                sessions.pop(username, None)
+                return await self._request_with_sessions(
+                    sessions,
+                    url,
+                    method=method,
+                    params=params,
+                    data=data,
+                )
+
+            if status == 400:
+                self.logger.send("INFO", f"⚠️ Сессия {username} вернула 400, переключаемся на другую.")
+                return await self._request_with_sessions(
+                    sessions,
+                    url,
+                    method=method,
+                    params=params,
+                    data=data,
+                )
+
+            if status == 429:
+                self.logger.send("INFO", f"⚠️ Сессия {username} получила 429, переключаемся.")
+                return await self._request_with_sessions(
+                    sessions,
+                    url,
+                    method=method,
+                    params=params,
+                    data=data,
+                )
+
+            response.raise_for_status()
+            return response, username, entry
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Ошибка запроса через сессию {username}: {exc}")
+            return await self._request_with_sessions(
+                sessions,
+                url,
+                method=method,
+                params=params,
+                data=data,
+            )
+
+    async def _fetch_profile_via_api(
+        self,
+        sessions: Dict[str, Dict[str, Any]],
+        username: str,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, Any]]]:
+        url = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}"
+        response, session_username, entry = await self._request_with_sessions(sessions, url)
+
+        if response.status_code == 404:
+            self.logger.send("INFO", f"⚠️ Профиль @{username} не найден (404).")
+            return None, session_username, entry
+
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise RuntimeError(f"Не удалось распарсить профиль @{username}: {exc}") from exc
+
+        user_data = (data or {}).get("data", {}).get("user")
+        if not user_data:
+            raise RuntimeError(f"Неожиданная структура ответа профиля @{username}: {data}")
+
+        return user_data, session_username, entry
+
+    async def _fetch_reel_via_api(
+        self,
+        sessions: Dict[str, Dict[str, Any]],
+        shortcode: str,
+        preferred_session: Optional[tuple[str, Dict[str, Any]]] = None,
+        doc_id: str = DEFAULT_DOC_ID_REEL,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, Any]]]:
+        variables = {
+            "shortcode": shortcode,
+            "fetch_like_count": True,
+            "fetch_comment_count": True,
+            "parent_comment_count": 24,
+            "has_threaded_comments": True,
+        }
+        variables_str = json.dumps(variables, separators=(",", ":"))
+        url = (
+            "https://www.instagram.com/graphql/query/"
+            f"?doc_id={doc_id}&variables={quote(variables_str)}"
         )
-        return len(self.dom_order)
 
-    async def scroll_until(self, page, url: str, selector: str, target_count: Optional[int] = None,
-                           delay: float = 2.5, max_idle_rounds: int = 7):
-        """Скроллим страницу, пока не соберём нужное количество шортов или не дойдём до конца."""
-        prev_count = len(self.dom_order)
+        if preferred_session and preferred_session[0] in sessions:
+            response, session_username, entry = await self._request_with_specific_session(
+                sessions,
+                preferred_session[0],
+                preferred_session[1],
+                url,
+            )
+        else:
+            response, session_username, entry = await self._request_with_sessions(sessions, url)
+
+        if response.status_code == 404:
+            self.logger.send("INFO", f"⚠️ Рил {shortcode} не найден (404).")
+            return None, session_username, entry
+
+        try:
+            data = response.json()
+        except Exception as exc:
+            raise RuntimeError(f"Не удалось распарсить JSON рила {shortcode}: {exc}") from exc
+
+        media = (data or {}).get("data", {}).get("shortcode_media")
+        if not media:
+            self.logger.send("INFO", f"⚠️ Неожиданная структура для рила {shortcode}: {data}")
+            return None, session_username, entry
+
+        return media, session_username, entry
+
+    async def _fetch_user_clips(
+        self,
+        sessions: Dict[str, Dict[str, Any]],
+        user_id: str,
+        *,
+        page_size: int = 12,
+        max_pages: Optional[int] = None,
+        preferred_session: Optional[tuple[str, Dict[str, Any]]] = None,
+    ) -> tuple[list[Dict[str, Any]], Optional[tuple[str, Dict[str, Any]]]]:
+        clips_url = "https://www.instagram.com/api/v1/clips/user/"
+        collected: list[Dict[str, Any]] = []
+        next_max_id: Optional[str] = None
+        session_hint = preferred_session
+
+        pages_fetched = 0
+
+        while True:
+            if max_pages is not None and pages_fetched >= max_pages:
+                break
+            pages_fetched += 1
+            payload: Dict[str, Any] = {
+                "target_user_id": user_id,
+                "page_size": page_size,
+            }
+            if next_max_id:
+                payload["max_id"] = next_max_id
+
+            if session_hint and session_hint[0] in sessions:
+                response, session_username, session_entry = await self._request_with_specific_session(
+                    sessions,
+                    session_hint[0],
+                    session_hint[1],
+                    clips_url,
+                    method="POST",
+                    data=payload,
+                )
+            else:
+                response, session_username, session_entry = await self._request_with_sessions(
+                    sessions,
+                    clips_url,
+                    method="POST",
+                    data=payload,
+                )
+
+            try:
+                data = response.json()
+            except Exception as exc:
+                self.logger.send("INFO", f"⚠️ Не удалось декодировать JSON списка рилов: {exc}")
+                break
+
+            items = data.get("items", [])
+            for item in items:
+                media = item.get("media")
+                if isinstance(media, dict):
+                    collected.append(media)
+
+            paging_info = data.get("paging_info", {}) or {}
+            more_available = bool(paging_info.get("more_available"))
+            next_max_id = paging_info.get("max_id")
+            session_hint = (session_username, session_entry)
+
+            if not more_available or not next_max_id:
+                break
+
+        return collected, session_hint
+
+    async def save_html_on_error(self, page, url: str, error_message: str):
+        """Save page HTML on error for debugging"""
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            parsed_url = urlparse(url)
+            domain = parsed_url.netloc.replace(".", "_")
+            path = parsed_url.path.replace("/", "_").strip("_")
+            filename = f"error_{domain}_{path}_{timestamp}.html"
+            html_content = await page.content()
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            self.logger.send("INFO", f"HTML saved to {filename} due to error: {error_message}")
+        except Exception as save_error:
+            self.logger.send("INFO", f"Failed to save HTML: {str(save_error)}")
+
+    async def get_2fa_code(self, page, two_factor_code):
+        two_factor_page = await page.context.new_page()
+        try:
+            await two_factor_page.goto(
+                f"https://2fa.fb.rip/{two_factor_code}", timeout=60000)
+            await two_factor_page.wait_for_selector(
+                "div#verifyCode", timeout=60000)
+            two_factor_code_element = await two_factor_page.query_selector(
+                "div#verifyCode")
+            if two_factor_code_element:
+                code = await two_factor_code_element.inner_text()
+                code = re.sub(r"\D", "", code)
+                if len(code) == 6 and code.isdigit():
+                    self.logger.send("INFO", f"2FA код успешно получен: {code}")
+                    return code
+                else:
+                    self.logger.send("INFO", f"Неверный формат 2FA кода: {code}")
+                    return None
+            else:
+                self.logger.send("INFO", "Элемент 2FA кода не найден")
+                return None
+        except Exception as e:
+            await self.save_html_on_error(
+                two_factor_page,
+                f"https://2fa.fb.rip/{two_factor_code}", str(e))
+            self.logger.send("INFO", f"Не удалось получить 2FA код: {e}")
+            return None
+        finally:
+            await two_factor_page.close()
+
+    async def login_to_instagram(self, page, username, password, two_factor_code) -> Optional[Dict[str, str]]:
+        # Сбор ошибок API
+        api_errors = []
+
+        async def log_response(response):
+            if "www.instagram.com/api/v1" in response.url or "i.instagram.com/api" in response.url:
+                try:
+                    status = response.status
+                    if status >= 400:
+                        body = await response.text()
+                        self.logger.send("INFO", f"API Error {status} from {response.url}: {body[:500]}")
+                        api_errors.append({"url": response.url, "status": status, "body": body})
+                except Exception as e:
+                    self.logger.send("INFO", f"Не удалось прочитать тело ответа API: {e}")
+
+        page.on("response", log_response)
+
+        try:
+            self.logger.send("INFO", f"Начало авторизации для пользователя {username}")
+
+            # Логируем среду
+            user_agent = await page.evaluate("navigator.userAgent")
+            language = await page.evaluate("navigator.language")
+            timezone = await page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
+            try:
+                ip = await page.evaluate("await (await fetch('https://api.ipify.org?format=json')).json().then(r => r.ip)")
+            except:
+                ip = "unknown"
+            self.logger.send("INFO", f"User-Agent: {user_agent}")
+            self.logger.send("INFO", f"Language: {language}, Timezone: {timezone}, IP: {ip}")
+
+            await page.goto("https://www.instagram.com", timeout=50000)
+            await page.wait_for_load_state("networkidle", timeout=30000)
+            self.logger.send("INFO", "Страница загружена")
+
+            # Обработка баннера cookies
+            self.logger.send("INFO", "Проверка наличия баннера cookies")
+            cookie_found = False
+            cookie_selectors = [
+                'button:has-text("Allow all cookies")',
+                'button:has-text("Decline optional cookies")',
+            ]
+            for selector in cookie_selectors:
+                self.logger.send("INFO", f"Поиск кнопки cookies: {selector}")
+                try:
+                    await page.wait_for_selector(selector, timeout=5000)
+                    btn = await page.query_selector(selector)
+                    if btn and await btn.is_visible() and await btn.is_enabled():
+                        self.logger.send("INFO", f"Клик по кнопке cookies: {selector}")
+                        await btn.click()
+                        await page.wait_for_timeout(3000)
+                        cookie_found = True
+                        break
+                except Exception as e:
+                    self.logger.send("INFO", f"Селектор {selector} не сработал: {e}")
+
+            if not cookie_found:
+                self.logger.send("INFO", "Баннер cookies не найден или не обработан — продолжаем")
+
+            # === КНОПКА "Log in" на главной ===
+            self.logger.send("INFO", "Поиск начальной кнопки Log in")
+            login_button = await page.query_selector('button:has-text("Log in")')
+            if not login_button:
+                await self.save_html_on_error(page, page.url, "Кнопка Log in не найдена")
+                self.logger.send("INFO", "Кнопка Log in не найдена")
+                return None
+
+            is_visible = await login_button.is_visible()
+            is_enabled = await login_button.is_enabled()
+            self.logger.send("INFO", f"Кнопка Log in видима: {is_visible}, активна: {is_enabled}")
+            if not (is_visible and is_enabled):
+                await self.save_html_on_error(page, page.url, "Кнопка Log in неактивна")
+                return None
+
+            self.logger.send("INFO", "Клик по кнопке Log in")
+            await login_button.click(timeout=30000)
+            await page.wait_for_timeout(4000)
+
+            # === ПРОВЕРКА ОШИБОК НА ФОРМЕ ===
+            self.logger.send("INFO", "Проверка сообщений об ошибке после перехода на форму")
+            error_selectors = [
+                'p:has-text("Sorry, your password was incorrect")',
+                'p:has-text("We couldn\'t find an account with that username")',
+                'span:has-text("Incorrect username or password")',
+                'div:has-text("There was a problem logging you into Instagram")',
+                'div[role="alert"]',
+            ]
+            for sel in error_selectors:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    err_text = (await el.text_content()).strip()
+                    self.logger.send("INFO", f"Ошибка на форме: {err_text}")
+                    await self.save_html_on_error(page, page.url, f"Ошибка входа: {err_text}")
+                    err_lower = err_text.lower()
+                    if "incorrect password" in err_lower or "incorrect username or password" in err_lower:
+                        raise InvalidCredentialsError(f"Неверный пароль для {username}")
+                    if "couldn't find an account" in err_lower:
+                        raise InvalidCredentialsError(f"Аккаунт {username} не найден")
+                    return None
+
+            # === ОЖИДАНИЕ ФОРМЫ ===
+            self.logger.send("INFO", "Ожидание поля username")
+            try:
+                await page.wait_for_selector('input[name="username"]', timeout=20000)
+            except PlaywrightTimeoutError:
+                await self.save_html_on_error(page, page.url, "Форма входа не загрузилась")
+                self.logger.send("INFO", "Форма входа не появилась")
+                return None
+
+            # === ЗАПОЛНЕНИЕ USERNAME ===
+            username_field = await page.query_selector('input[name="username"]')
+            if not username_field:
+                await self.save_html_on_error(page, page.url, "Поле username отсутствует")
+                return None
+
+            await username_field.fill(username)
+            actual_user = await username_field.input_value()
+            self.logger.send("INFO", f"Введён username: '{username}', фактическое значение: '{actual_user}'")
+            if actual_user != username:
+                self.logger.send("INFO", "Поле username не сохранило значение")
+                return None
+
+            # === ЗАПОЛНЕНИЕ PASSWORD ===
+            password_field = await page.query_selector('input[name="password"]')
+            if not password_field:
+                await self.save_html_on_error(page, page.url, "Поле password отсутствует")
+                return None
+
+            await password_field.fill(password)
+            self.logger.send("INFO", "Пароль введён")
+
+            # === КНОПКА ВХОДА НА ФОРМЕ ===
+            final_login_button = await page.query_selector('button[type="submit"]')
+            if not final_login_button:
+                # fallback: иногда это div с aria-label
+                final_login_button = await page.query_selector('div[role="button"][aria-label="Log in"]')
+
+            if not final_login_button:
+                await self.save_html_on_error(page, page.url, "Кнопка входа на форме не найдена")
+                self.logger.send("INFO", "Кнопка входа на форме не найдена")
+                return None
+
+            is_vis = await final_login_button.is_visible()
+            is_en = await final_login_button.is_enabled()
+            self.logger.send("INFO", f"Кнопка входа на форме: видима={is_vis}, активна={is_en}")
+            if not (is_vis and is_en):
+                await self.save_html_on_error(page, page.url, "Кнопка входа неактивна")
+                return None
+
+            self.logger.send("INFO", "Клик по финальной кнопке Log in")
+            await final_login_button.click(timeout=30000)
+            await page.wait_for_timeout(6000)
+
+            # === ПОСЛЕ КЛИКА: ПРОВЕРКА URL И ОШИБОК ===
+            current_url = page.url
+            title = await page.title()
+            self.logger.send("INFO", f"После входа: URL={current_url}, Title={title}")
+
+            # Проверка на challenge / suspended
+            if "/challenge/" in current_url:
+                await self.save_html_on_error(page, current_url, "Требуется верификация (challenge)")
+                self.logger.send("INFO", "Обнаружен challenge — требуется ручная верификация")
+                return None
+
+            if "/suspended/" in current_url:
+                await self.save_html_on_error(page, current_url, "Аккаунт приостановлен")
+                self.logger.send("INFO", "Аккаунт приостановлен")
+                return None
+
+            # Повторная проверка ошибок на форме (иногда появляются позже)
+            for sel in error_selectors:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    err_text = (await el.text_content()).strip()
+                    self.logger.send("INFO", f"Ошибка после отправки формы: {err_text}")
+                    await self.save_html_on_error(page, page.url, f"Ошибка после входа: {err_text}")
+                    err_lower = err_text.lower()
+                    if "incorrect password" in err_lower or "incorrect username or password" in err_lower:
+                        raise InvalidCredentialsError(f"Неверный пароль для {username}")
+                    if "couldn't find an account" in err_lower:
+                        raise InvalidCredentialsError(f"Аккаунт {username} не найден")
+                    return None
+
+            # === 2FA ===
+            self.logger.send("INFO", "Проверка 2FA")
+            try:
+                await page.wait_for_selector('input[aria-label="Code"]', timeout=15000)
+                self.logger.send("INFO", "Обнаружено поле 2FA")
+                code_field = await page.query_selector('input[aria-label="Code"]')
+                if not code_field:
+                    raise Exception("Поле кода не найдено")
+
+                verification_code = await self.get_2fa_code(page, two_factor_code)
+                if not verification_code:
+                    self.logger.send("INFO", "Не удалось получить 2FA код")
+                    return None
+
+                await code_field.fill(verification_code)
+                self.logger.send("INFO", f"2FA код введён: {verification_code}")
+
+                continue_btn = await page.query_selector('div[role="button"][aria-label="Continue"]')
+                if continue_btn:
+                    await continue_btn.click()
+                    await page.wait_for_timeout(3000)
+
+                # Trust device
+                trust_checkbox = await page.query_selector('div[role="checkbox"][aria-label*="Trust"]')
+                if trust_checkbox:
+                    await trust_checkbox.click()
+                    self.logger.send("INFO", "Устройство помечено как доверенное")
+
+            except PlaywrightTimeoutError:
+                self.logger.send("INFO", "2FA не требуется")
+
+            # === КНОПКА "Not now" ===
+            try:
+                # Попробуем найти кнопку по тексту и роли
+                not_now_button = page.get_by_role("button", name="Not now")
+                if await not_now_button.is_visible(timeout=5000):
+                    await not_now_button.click()
+                    self.logger.send("INFO", "Клик по 'Not now'")
+                else:
+                    # Попробуем русскую локализацию
+                    not_now_button_ru = page.get_by_role("button", name="Не сейчас")
+                    if await not_now_button_ru.is_visible(timeout=3000):
+                        await not_now_button_ru.click()
+                        self.logger.send("INFO", "Клик по 'Не сейчас'")
+            except Exception as e:
+                self.logger.send("INFO", f"'Not now' не найден или не удалось нажать: {e}")
+
+            # === ФИНАЛЬНАЯ ПРОВЕРКА: УСПЕХ ===
+            await page.wait_for_timeout(5000)
+            if "instagram.com/accounts/login/" in page.url:
+                self.logger.send("INFO", "Всё ещё на странице входа — вход не удался")
+                await self.save_html_on_error(page, page.url, "Вход не удался: остался на login-странице")
+                try:
+                    page_text = await page.content()
+                except Exception:
+                    page_text = ""
+                lowered = page_text.lower()
+                if "incorrect password" in lowered or "incorrect username or password" in lowered:
+                    raise InvalidCredentialsError(f"Неверный пароль для {username}")
+                if "couldn't find" in lowered and "account" in lowered:
+                    raise InvalidCredentialsError(f"Аккаунт {username} не найден")
+                return None
+
+            cookies = self._extract_auth_cookies(await page.context.cookies())
+
+            if "/accounts/onetap/" in page.url or "/accounts/login/" not in page.url:
+                self.logger.send("INFO", "Успешный вход в Instagram")
+                if cookies:
+                    return cookies
+                self.logger.send("INFO", "⚠️ Не удалось извлечь cookies после успешного входа")
+                return None
+
+            self.logger.send("INFO", "Неясное состояние после входа — возможно, частичный успех")
+            if cookies:
+                return cookies
+            self.logger.send("INFO", "⚠️ Не удалось извлечь cookies в неясном состоянии входа")
+            return None
+
+        except InvalidCredentialsError:
+            raise
+        except Exception as e:
+            self.logger.send("INFO", f"Исключение в login_to_instagram: {str(e)}")
+            await self.save_html_on_error(page, page.url or "https://www.instagram.com", "Необработанная ошибка")
+            return None
+
+    async def scroll_until(self, page, url: str, selector: str,
+                           delay: float = 5.0, max_idle_rounds: int = 5):
+        prev_count = 0
         idle_rounds = 0
-        max_scroll_attempts = 6
+        max_scroll_attempts = 3
+        reel_data = set()
 
         for attempt in range(max_scroll_attempts):
             self.logger.send("INFO", f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
 
-            if attempt > 0:
-                try:
-                    await page.evaluate("() => window.scrollTo({top: 0, behavior: 'instant'})")
-                    await page.wait_for_timeout(800)
-                except Exception:
-                    pass
-
             while True:
-                prev_height = await page.evaluate("() => document.documentElement.scrollHeight")
+                # Собираем все элементы рилсов
+                reel_elements = await page.query_selector_all('a[href*="/reel/"]')
+                for element in reel_elements:
+                    href = await element.get_attribute('href')
+                    if href and href.startswith('/'):
+                        full_url = f"https://www.instagram.com{href}"
+                        # Ищем элемент с классом x1lvsgvq для получения URL изображения
+                        image_element = await element.query_selector('div.x1lvsgvq')
+                        image_url = None
+                        if image_element:
+                            style = await image_element.get_attribute('style')
+                            if style and 'background-image: url' in style:
+                                # Извлекаем URL из background-image
+                                start = style.find('url("') + 5
+                                end = style.find('")')
+                                if start > 4 and end > start:
+                                    image_url = style[start:end]
+                        reel_data.add((full_url, image_url))
 
-                try:
-                    await page.keyboard.press("End")
-                except Exception:
-                    pass
+                # Прокрутка страницы
+                await page.evaluate("""
+                    async () => {
+                        return new Promise((resolve) => {
+                            let totalHeight = 0;
+                            const distance = 1000;
+                            const timer = setInterval(() => {
+                                const scrollHeight = document.body.scrollHeight;
+                                window.scrollBy(0, distance);
+                                totalHeight += distance;
 
-                try:
-                    await page.mouse.wheel(0, 1800)
-                except Exception:
-                    pass
-
+                                if (totalHeight >= scrollHeight) {
+                                    clearInterval(timer);
+                                    resolve();
+                                }
+                            }, 100);
+                        });
+                    }
+                """)
                 await page.wait_for_timeout(int(delay * 1000))
+                current_count = await page.eval_on_selector_all(selector, "els => els.length")
+                self.logger.send("INFO", f"Текущее количество элементов: {current_count}, URL-ов рилов: {len(reel_data)}")
 
-                height_increased = True
-                try:
-                    await page.wait_for_function(
-                        "(oldHeight) => document.documentElement.scrollHeight - oldHeight > 120",
-                        prev_height,
-                        timeout=2500
-                    )
-                except PlaywrightTimeoutError:
-                    height_increased = False
-                except Exception:
-                    height_increased = False
-
-                captcha = await page.query_selector("text=CAPTCHA")
-                if captcha:
-                    self.logger.send("INFO", "Обнаружена CAPTCHA на странице")
-                    return len(self.dom_order)
-
-                await self.extract_images_from_dom(page, url)
-
-                current_total = len(self.dom_order)
-                target_info = target_count if target_count else "?"
-                self.logger.send("INFO", f"🔢 Собрано {current_total} уникальных видео (цель: {target_info})")
-
-                if target_count and current_total >= target_count:
-                    self.logger.send("INFO", "🎯 Достигнуто требуемое количество видео из шапки.")
-                    return current_total
-
-                try:
-                    current_count = await page.eval_on_selector_all(selector, "els => els.length")
-                    self.logger.send("INFO", f"Текущее количество элементов по селектору '{selector}': {current_count}")
-                except PlaywrightTimeoutError:
-                    self.logger.send("INFO", "Timeout при оценке элементов, продолжаем...")
-
-                if current_total == prev_count and not height_increased:
+                if current_count == prev_count:
                     idle_rounds += 1
+                    self.logger.send("INFO", f"Количество элементов не изменилось, idle_rounds: {idle_rounds}")
                     if idle_rounds >= max_idle_rounds:
-                        self.logger.send("INFO", f"Достигнут конец списка видео профиля {url}")
-                        return current_total
+                        self.logger.send("INFO", f"Достигнут конец списка рилов для профиля {url}")
+                        self.logger.send("INFO", f"Собрано {len(reel_data)} пар (URL рила, URL изображения)")
+                        break
                 else:
                     idle_rounds = 0
-                    prev_count = current_total
+                    prev_count = current_count
 
-                # если высота не увеличилась и мы всё ещё внизу — делаем небольшую паузу
-                if not height_increased:
-                    await page.wait_for_timeout(800)
-
-                if height_increased:
-                    continue
-
-                # проверяем, появился ли новый элемент
-                try:
-                    newly_visible = await page.eval_on_selector_all(
-                        selector,
-                        "els => els.length"
-                    )
-                except PlaywrightTimeoutError:
-                    newly_visible = None
-
-                if newly_visible is not None and newly_visible <= current_total:
+                is_at_bottom = await page.evaluate("""
+                    () => {
+                        return (window.innerHeight + window.scrollY) >= document.body.scrollHeight;
+                    }
+                """)
+                if is_at_bottom and idle_rounds >= max_idle_rounds:
+                    self.logger.send("INFO", f"Достигнут конец страницы для {url}")
                     break
 
-        await self.extract_images_from_dom(page, url)
-        return len(self.dom_order)
+        return list(reel_data)
 
-    def prepare_proxy(self, proxy_str: Optional[str]) -> Optional[str]:
-        """Приводим строку прокси к формату, понятному requests."""
-        if not proxy_str:
-            return None
-        proxy_str = proxy_str.strip()
-        if not proxy_str:
-            return None
-        if proxy_str.startswith(("http://", "https://")):
-            return proxy_str
-        if "@" in proxy_str:
-            auth, host_port = proxy_str.split("@", 1)
-            host, port = host_port.split(":", 1)
-            return f"http://{auth}@{host}:{port}"
-        if ":" in proxy_str:
-            host, port = proxy_str.split(":", 1)
-            return f"http://{host}:{port}"
-        return proxy_str
+    def generate_short_title(self, full_title: str, max_length: int = 20) -> str:
+        if not full_title:
+            return ""
+        # Убираем переносы строк и лишние пробелы
+        clean_title = " ".join(full_title.split())
+        if len(clean_title) <= max_length:
+            return clean_title
+        truncated = clean_title[:max_length]
+        last_space = truncated.rfind(' ')
+        if last_space != -1:
+            return truncated[:last_space]
+        return truncated
 
-    def _extract_json_fragment(self, text: str, marker: str) -> Optional[str]:
-        """Извлекаем JSON-структуру, начинающуюся сразу после маркера."""
-        if marker not in text:
+    def extract_article_tag(self, caption: str) -> Optional[str]:
+        """Возвращает первый найденный артикул-хештег (#sv, #jw и т.д.) или None."""
+        if not caption:
             return None
-        start = text.find(marker)
-        if start == -1:
-            return None
-        start += len(marker)
-        while start < len(text) and text[start] in " \n\r\t=":
-            start += 1
-        if start >= len(text):
-            return None
-        opening = text[start]
-        if opening not in "{[":
-            return None
-        closing = "}" if opening == "{" else "]"
-        depth = 0
-        in_string = False
-        escape = False
-
-        for pos in range(start, len(text)):
-            ch = text[pos]
-            if in_string:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_string = False
-                continue
-
-            if ch == '"':
-                in_string = True
-            elif ch == opening:
-                depth += 1
-            elif ch == closing:
-                depth -= 1
-                if depth == 0:
-                    return text[start:pos + 1]
-
+        caption_lower = caption.lower()
+        for tag in ["#sv", "#jw", "#qz", "#sr", "#fg"]:
+            if tag in caption_lower:
+                # Найти точное написание в оригинале (сохранить регистр)
+                start = caption_lower.find(tag)
+                if start != -1:
+                    return caption[start:start + len(tag)]
         return None
 
-    def _load_json_segment(self, text: str, markers: List[str]) -> Optional[Dict[str, Any]]:
-        for marker in markers:
-            fragment = self._extract_json_fragment(text, marker)
-            if not fragment:
-                continue
-            try:
-                return json.loads(fragment)
-            except json.JSONDecodeError as e:
-                self.logger.send("INFO", f"Не удалось распарсить JSON по маркеру '{marker}': {e}")
-        return None
-
-    def parse_video_page(self, html: str) -> Dict[str, Optional[Dict[str, Any]]]:
-        """Возвращаем распарсенные структуры ytInitialPlayerResponse и ytInitialData."""
-        soup = BeautifulSoup(html, "html.parser")
-        script_texts = []
-        for script in soup.find_all("script"):
-            if script.string:
-                script_texts.append(script.string)
-
-        player_markers = [
-            "var ytInitialPlayerResponse = ",
-            "ytInitialPlayerResponse = ",
-            'window["ytInitialPlayerResponse"] = ',
-            "window.ytInitialPlayerResponse = ",
-        ]
-        initial_markers = [
-            "var ytInitialData = ",
-            "ytInitialData = ",
-            'window["ytInitialData"] = ',
-            "window.ytInitialData = ",
-        ]
-
-        player_data = None
-        initial_data = None
-
-        for text in script_texts:
-            if not player_data and "ytInitialPlayerResponse" in text:
-                player_data = self._load_json_segment(text, player_markers)
-            if not initial_data and "ytInitialData" in text:
-                initial_data = self._load_json_segment(text, initial_markers)
-            if player_data and initial_data:
-                break
-
-        # fallback — ищем прямо в html, если BeautifulSoup не помог
-        if not player_data:
-            player_data = self._load_json_segment(html, player_markers)
-        if not initial_data:
-            initial_data = self._load_json_segment(html, initial_markers)
-
-        return {"player": player_data, "initial": initial_data}
-
-    def _normalize_article(self, tag: str) -> Optional[str]:
-        if not tag:
-            return None
-        if not tag.startswith("#"):
-            tag = "#" + tag
-        lower_tag = tag.lower()
-        for prefix in ARTICLE_PREFIXES:
-            if lower_tag.startswith(prefix):
-                return tag
-        return None
-
-    def _extract_text(self, value: Any) -> str:
-        if isinstance(value, str):
-            return value
-        if isinstance(value, dict):
-            simple = value.get("simpleText") or value.get("text")
-            if isinstance(simple, str):
-                return simple
-            runs = value.get("runs")
-            if isinstance(runs, list):
-                parts = [
-                    run.get("text", "")
-                    for run in runs
-                    if isinstance(run, dict) and isinstance(run.get("text"), str)
-                ]
-                if parts:
-                    return "".join(parts)
-        return ""
-
-    def extract_date_from_text(self, text: str) -> Optional[str]:
-        if not text:
-            return None
-
-        cleaned = text.strip()
-        cleaned = re.sub(
-            r"(?i)\b(published|uploaded|опубликован[а-я]*|премьера|premiered|дата публикации|date)\b[:\-]?",
-            "",
-            cleaned,
-        ).strip()
-
-        iso_match = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", cleaned)
-        if iso_match:
-            year, month, day = iso_match.groups()
-            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
-
-        dotted_match = re.search(r"(\d{1,2})[.](\d{1,2})[.](\d{4})", cleaned)
-        if dotted_match:
-            day, month, year = dotted_match.groups()
-            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
-
-        month_aliases = {
-            "january": 1, "jan": 1, "jan.": 1,
-            "february": 2, "feb": 2, "feb.": 2,
-            "march": 3, "mar": 3, "mar.": 3,
-            "april": 4, "apr": 4, "apr.": 4,
-            "may": 5,
-            "june": 6, "jun": 6, "jun.": 6,
-            "july": 7, "jul": 7, "jul.": 7,
-            "august": 8, "aug": 8, "aug.": 8,
-            "september": 9, "sep": 9, "sep.": 9, "sept": 9, "sept.": 9,
-            "october": 10, "oct": 10, "oct.": 10,
-            "november": 11, "nov": 11, "nov.": 11,
-            "december": 12, "dec": 12, "dec.": 12,
-            "января": 1, "январь": 1, "янв": 1, "янв.": 1,
-            "февраля": 2, "февраль": 2, "фев": 2, "фев.": 2,
-            "марта": 3, "март": 3, "мар": 3, "мар.": 3,
-            "апреля": 4, "апрель": 4, "апр": 4, "апр.": 4,
-            "мая": 5, "май": 5,
-            "июня": 6, "июнь": 6, "июн": 6, "июн.": 6,
-            "июля": 7, "июль": 7, "июл": 7, "июл.": 7,
-            "августа": 8, "август": 8, "авг": 8, "авг.": 8,
-            "сентября": 9, "сентябрь": 9, "сен": 9, "сен.": 9,
-            "октября": 10, "октябрь": 10, "окт": 10, "окт.": 10,
-            "ноября": 11, "ноябрь": 11, "ноя": 11, "ноя.": 11,
-            "декабря": 12, "декабрь": 12, "дек": 12, "дек.": 12,
-        }
-
-        def month_to_number(name: str) -> Optional[int]:
-            if not name:
-                return None
-            key = name.strip().lower().replace("ё", "е")
-            return month_aliases.get(key)
-
-        match_en = re.search(r"([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})", cleaned)
-        if match_en:
-            month_name, day, year = match_en.groups()
-            month_num = month_to_number(month_name)
-            if month_num:
-                return f"{int(year):04d}-{month_num:02d}-{int(day):02d}"
-
-        match_day_first = re.search(r"(\d{1,2})\s+([A-Za-zА-Яа-яё.]+)\s+(\d{4})", cleaned)
-        if match_day_first:
-            day, month_name, year = match_day_first.groups()
-            month_num = month_to_number(month_name)
-            if month_num:
-                return f"{int(year):04d}-{month_num:02d}-{int(day):02d}"
-
-        return None
-
-    def extract_articles(self, description: str, text_extra: Optional[List[dict]]) -> Optional[str]:
-        found: set[str] = set()
-
-        if description:
-            for match in re.findall(r"#[\w-]+", description):
-                normalized = self._normalize_article(match)
-                if normalized:
-                    found.add(normalized)
-
-        if isinstance(text_extra, list):
-            for block in text_extra:
-                if not isinstance(block, dict):
-                    continue
-                name = block.get("hashtagName")
-                if isinstance(name, str):
-                    normalized = self._normalize_article(name)
-                    if normalized:
-                        found.add(normalized)
-
-        if not found:
-            return None
-
-        # сохраняем порядок для детерминированности
-        return ", ".join(sorted(found, key=lambda x: x.lower()))
-
-    def extract_views_from_initial_data(self, data: Any) -> Optional[int]:
-        """Извлекаем количество просмотров из различных структур ytInitialData."""
-
-        def parse_candidate(value: Any) -> Optional[int]:
-            if value is None:
-                return None
-            if isinstance(value, str):
-                parsed = self.parse_views(value)
-                return parsed if parsed else None
-            if isinstance(value, dict):
-                text = value.get("simpleText") or value.get("text")
-                if text:
-                    parsed = self.parse_views(text)
-                    if parsed:
-                        return parsed
-                runs = value.get("runs")
-                if runs:
-                    combined = "".join(run.get("text", "") for run in runs if run.get("text"))
-                    parsed = self.parse_views(combined)
-                    if parsed:
-                        return parsed
-            return None
-
-        stack = [data]
-        visited = set()
-
-        while stack:
-            node = stack.pop()
-            node_id = id(node)
-            if node_id in visited:
-                continue
-            visited.add(node_id)
-
-            if isinstance(node, dict):
-                # videoDescriptionHeaderRenderer -> views / factoid
-                header = node.get("videoDescriptionHeaderRenderer")
-                if isinstance(header, dict):
-                    direct_views = parse_candidate(header.get("views"))
-                    if direct_views:
-                        return direct_views
-
-                    factoids = header.get("factoid")
-                    if isinstance(factoids, list):
-                        for fact in factoids:
-                            renderer = fact.get("viewCountFactoidRenderer") if isinstance(fact, dict) else None
-                            if isinstance(renderer, dict):
-                                factoid_renderer = renderer.get("factoid", {}).get("factoidRenderer", {})
-                                for key in ("accessibilityText", "value", "label"):
-                                    candidate = factoid_renderer.get(key)
-                                    parsed = parse_candidate(candidate)
-                                    if parsed:
-                                        return parsed
-                                views_candidate = renderer.get("viewCount")
-                                parsed = parse_candidate(views_candidate)
-                                if parsed:
-                                    return parsed
-
-                # direct factoid structure without header wrapper
-                renderer = node.get("viewCountFactoidRenderer")
-                if isinstance(renderer, dict):
-                    factoid_renderer = renderer.get("factoid", {}).get("factoidRenderer", {})
-                    for key in ("accessibilityText", "value", "label"):
-                        candidate = factoid_renderer.get(key)
-                        parsed = parse_candidate(candidate)
-                        if parsed:
-                            return parsed
-                    parsed = parse_candidate(renderer.get("viewCount"))
-                    if parsed:
-                        return parsed
-
-                label = node.get("label")
-                parsed_label = parse_candidate(label)
-                if parsed_label:
-                    for key in ("accessibilityText", "simpleText", "text", "title"):
-                        candidate = node.get(key)
-                        parsed = parse_candidate(candidate)
-                        if parsed:
-                            return parsed
-
-                for value in node.values():
-                    if isinstance(value, (dict, list)):
-                        stack.append(value)
-
-            elif isinstance(node, list):
-                for item in node:
-                    if isinstance(item, (dict, list)):
-                        stack.append(item)
-
-        return None
-
-    def _extract_metric_from_factoids(self, data: Any, label_checker) -> Optional[int]:
-        """Общий обход структур factoidRenderer для извлечения числовых метрик по подписи."""
-
-        def parse_candidate(value: Any) -> Optional[int]:
-            if value is None:
-                return None
-            if isinstance(value, (str, dict, list)):
-                text = self._extract_text(value)
-            else:
-                text = str(value)
-            if not text:
-                return None
-            parsed = self.parse_views(text)
-            return parsed if parsed else None
-
-        def extract_from_renderer(renderer: Any) -> Optional[int]:
-            if not isinstance(renderer, dict):
-                return None
-            label_text = self._extract_text(renderer.get("label"))
-            if label_text and label_checker(label_text):
-                for key in (
-                    "value",
-                    "viewCount",
-                    "accessibilityText",
-                    "simpleText",
-                    "text",
-                    "title",
-                ):
-                    candidate = renderer.get(key)
-                    parsed = parse_candidate(candidate)
-                    if parsed is not None:
-                        return parsed
-                nested = renderer.get("factoid")
-                if isinstance(nested, dict):
-                    nested_renderer = nested.get("factoidRenderer")
-                    if nested_renderer:
-                        parsed = extract_from_renderer(nested_renderer)
-                        if parsed is not None:
-                            return parsed
-            else:
-                nested = renderer.get("factoid")
-                if isinstance(nested, dict):
-                    nested_renderer = nested.get("factoidRenderer")
-                    if nested_renderer:
-                        parsed = extract_from_renderer(nested_renderer)
-                        if parsed is not None:
-                            return parsed
-            return None
-
-        if not isinstance(data, (dict, list)):
-            return None
-
-        stack = [data]
-        visited: set[int] = set()
-
-        while stack:
-            node = stack.pop()
-            node_id = id(node)
-            if node_id in visited:
-                continue
-            visited.add(node_id)
-
-            if isinstance(node, dict):
-                if "factoidRenderer" in node:
-                    result = extract_from_renderer(node["factoidRenderer"])
-                    if result is not None:
-                        return result
-
-                renderer = node.get("viewCountFactoidRenderer")
-                if isinstance(renderer, dict):
-                    result = extract_from_renderer(renderer)
-                    if result is not None:
-                        return result
-
-                factoids = node.get("factoid")
-                if isinstance(factoids, list):
-                    for fact in factoids:
-                        if isinstance(fact, (dict, list)):
-                            stack.append(fact)
-
-                for value in node.values():
-                    if isinstance(value, (dict, list)):
-                        stack.append(value)
-
-            elif isinstance(node, list):
-                for item in node:
-                    if isinstance(item, (dict, list)):
-                        stack.append(item)
-
-        return None
-
-    def extract_likes_from_initial_data(self, data: Any) -> Optional[int]:
-        """Ищет количество лайков в factoidRenderer внутри ytInitialData."""
-        return self._extract_metric_from_factoids(data, self._looks_like_likes_text)
-
-    def extract_publish_date_from_initial_data(self, data: Any) -> Optional[str]:
-        """Извлекает дату публикации из factoidRenderer внутри ytInitialData."""
-
-        def try_parse_from_renderer(renderer: dict) -> Optional[str]:
-            if not isinstance(renderer, dict):
-                return None
-            candidates = [
-                renderer.get("accessibilityText"),
-                renderer.get("value"),
-                renderer.get("label"),
-            ]
-            for candidate in candidates:
-                text = self._extract_text(candidate)
-                if not text:
-                    continue
-                parsed = self.extract_date_from_text(text)
-                if parsed:
-                    return parsed
-            combined = " ".join(
-                filter(
-                    None,
-                    [
-                        self._extract_text(renderer.get("value")),
-                        self._extract_text(renderer.get("label")),
-                    ],
-                )
-            )
-            if combined:
-                parsed = self.extract_date_from_text(combined)
-                if parsed:
-                    return parsed
-            nested = renderer.get("factoid")
-            if isinstance(nested, dict):
-                nested_renderer = nested.get("factoidRenderer")
-                if nested_renderer:
-                    return try_parse_from_renderer(nested_renderer)
-            return None
-
-        if not isinstance(data, (dict, list)):
-            return None
-
-        stack = [data]
-        visited: set[int] = set()
-
-        while stack:
-            node = stack.pop()
-            node_id = id(node)
-            if node_id in visited:
-                continue
-            visited.add(node_id)
-
-            if isinstance(node, dict):
-                renderer = node.get("factoidRenderer")
-                if isinstance(renderer, dict):
-                    parsed = try_parse_from_renderer(renderer)
-                    if parsed:
-                        return parsed
-                renderer = node.get("viewCountFactoidRenderer")
-                if isinstance(renderer, dict):
-                    parsed = try_parse_from_renderer(renderer)
-                    if parsed:
-                        return parsed
-                factoids = node.get("factoid")
-                if isinstance(factoids, list):
-                    stack.extend(
-                        item for item in factoids if isinstance(item, (dict, list))
-                    )
-                for value in node.values():
-                    if isinstance(value, (dict, list)):
-                        stack.append(value)
-
-            elif isinstance(node, list):
-                for item in node:
-                    if isinstance(item, (dict, list)):
-                        stack.append(item)
-
-        return None
-
-    def extract_comment_count(self, data: Any) -> Optional[int]:
-        """Извлекаем количество комментариев из engagementPanels."""
-        if not isinstance(data, dict):
-            return None
-
-        panels = data.get("engagementPanels")
-        if not isinstance(panels, list):
-            return None
-
-        for panel in panels:
-            if not isinstance(panel, dict):
-                continue
-            renderer = panel.get("engagementPanelSectionListRenderer")
-            if not isinstance(renderer, dict):
-                continue
-            header = renderer.get("header")
-            if not isinstance(header, dict):
-                continue
-            title_renderer = header.get("engagementPanelTitleHeaderRenderer")
-            if not isinstance(title_renderer, dict):
-                continue
-            title_text = self._extract_text(title_renderer.get("title")).lower()
-            if "comment" not in title_text and "коммент" not in title_text:
-                continue
-            contextual = title_renderer.get("contextualInfo")
-            count_text = self._extract_text(contextual)
-            parsed = self.parse_views(count_text)
-            if parsed:
-                return parsed
-
-        return None
-
-    def extract_overlay_metrics(self, data: Any) -> Dict[str, Any]:
-        metrics: Dict[str, Any] = {}
-        if not isinstance(data, dict):
-            return metrics
-
-        overlay = data.get("overlay", {}).get("reelPlayerOverlayRenderer", {})
-        if not isinstance(overlay, dict):
-            return metrics
-
-        header = overlay.get("reelPlayerHeaderSupportedRenderers", {}).get("reelPlayerHeaderRenderer", {})
-        if isinstance(header, dict):
-            accessibility = header.get("accessibility") or {}
-            label_data = accessibility.get("accessibilityData", {}) if isinstance(accessibility, dict) else {}
-            label_text = self._extract_text(label_data.get("label"))
-            if label_text:
-                segments = re.split(r"[•·|•]|\s{2,}", label_text)
-                for segment in segments:
-                    cleaned = segment.strip()
-                    if not cleaned:
-                        continue
-                    if self._looks_like_views_text(cleaned):
-                        metrics.setdefault("views", self.parse_views(cleaned))
-                        continue
-                    if self._looks_like_likes_text(cleaned):
-                        metrics.setdefault("likes", self.parse_views(cleaned))
-                        continue
-                    if self._looks_like_comments_text(cleaned):
-                        metrics.setdefault("comments", self.parse_views(cleaned))
-                        continue
-                    if self._looks_like_publish_text(cleaned):
-                        date_candidate = self.extract_date_from_text(cleaned)
-                        if date_candidate:
-                            metrics.setdefault("date_published", date_candidate)
-
-        description_candidate = overlay.get("description") or overlay.get("descriptionText")
-        description_text = self._extract_text(description_candidate)
-        if description_text:
-            metrics.setdefault("description", description_text.strip())
-
-        return metrics
-
-    async def fetch_video_metadata(self, video_id: str, video_url: str, proxy: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        """Запрашиваем страницу шорта и достаём метаданные (название, просмотры, описание)."""
-        formatted_proxy = self.prepare_proxy(proxy)
-        headers = {
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-        proxies = {"http": formatted_proxy, "https": formatted_proxy} if formatted_proxy else None
-
-        def _fetch_html() -> str:
-            response = requests.get(
-                video_url,
-                headers=headers,
-                timeout=30.0,
-                # allow_redirects=True,
-                proxies=proxies,
-            )
-            response.raise_for_status()
-            return response.text
-
-        try:
-            html = await asyncio.to_thread(_fetch_html)
-        except Exception as e:
-            self.logger.send("INFO", f"❌ Не удалось получить страницу {video_url} через {formatted_proxy or 'без прокси'}: {e}")
-            return None
-
-        # if self.saved_html_count < 2:
-        #     debug_dir = Path("debug_html")
-        #     debug_dir.mkdir(parents=True, exist_ok=True)
-        #     safe_video_id = video_id or f"video_{self.saved_html_count + 1}"
-        #     debug_path = debug_dir / f"{self.saved_html_count + 1}_{safe_video_id}.html"
-        #     try:
-        #         debug_path.write_text(html)
-        #         self.logger.send("INFO", f"💾 Сохранён HTML ответа {debug_path}")
-        #     except Exception as save_err:
-        #         self.logger.send("INFO", f"⚠️ Не удалось сохранить HTML {debug_path}: {save_err}")
-        #     finally:
-        #         self.saved_html_count += 1
-
-        parsed = self.parse_video_page(html)
-        player_data = parsed.get("player") or {}
-        if not player_data:
-            self.logger.send("INFO", f"⚠️ Не найден ytInitialPlayerResponse для {video_url}")
-            return None
-
-        video_details = player_data.get("videoDetails", {}) or {}
-        microformat_container = player_data.get("microformat", {})
-        if not isinstance(microformat_container, dict):
-            microformat_container = {}
-        microformat = microformat_container.get("playerMicroformatRenderer", {}) or {}
-        if not isinstance(microformat, dict):
-            microformat = {}
-
-        title_candidate = video_details.get("title") or microformat.get("title")
-        title = self._extract_text(title_candidate)
-
-        view_count_raw = video_details.get("viewCount")
-        views = 0
-        if isinstance(view_count_raw, str) and view_count_raw.isdigit():
-            views = int(view_count_raw)
-        elif isinstance(view_count_raw, str):
-            views = self.parse_views(view_count_raw)
-
-        if not views:
-            view_count_text = self._extract_text(microformat.get("viewCount"))
-            if view_count_text:
-                views = self.parse_views(view_count_text)
-
-        initial_data = parsed.get("initial") or {}
-        overlay_metrics: Dict[str, Any] = {}
-        if initial_data:
-            overlay_metrics = self.extract_overlay_metrics(initial_data)
-
-        overlay_views = overlay_metrics.get("views")
-        if not views and isinstance(overlay_views, int):
-            views = overlay_views
-        if not views and initial_data:
-            extracted = self.extract_views_from_initial_data(initial_data)
-            if extracted:
-                views = extracted
-
-        description = self._extract_text(microformat.get("description")) or ""
-        if not description:
-            short_description = video_details.get("shortDescription")
-            if isinstance(short_description, str):
-                description = short_description
-        if not description:
-            overlay_description = overlay_metrics.get("description")
-            if isinstance(overlay_description, str):
-                description = overlay_description
-        description = description.strip()
-
-        like_raw = microformat.get("likeCount")
-        likes = 0
-        if isinstance(like_raw, str):
-            likes = self.parse_views(like_raw) or 0
-        elif like_raw is not None:
-            likes = self.parse_views(self._extract_text(like_raw)) or 0
-
-        overlay_likes = overlay_metrics.get("likes")
-        if not likes and isinstance(overlay_likes, int):
-            likes = overlay_likes
-        if not likes and initial_data:
-            extracted_likes = self.extract_likes_from_initial_data(initial_data)
-            if extracted_likes:
-                likes = extracted_likes
-
-        comments = self.extract_comment_count(initial_data) or 0
-        overlay_comments = overlay_metrics.get("comments")
-        if not comments and isinstance(overlay_comments, int):
-            comments = overlay_comments
-
-        publish_candidate = microformat.get("uploadDate") or microformat.get("publishDate")
-        date_published = None
-        if isinstance(publish_candidate, str):
-            iso_candidate = publish_candidate.strip()
-            if iso_candidate:
-                if iso_candidate.endswith("Z"):
-                    iso_candidate = iso_candidate[:-1] + "+00:00"
-                try:
-                    date_published = datetime.fromisoformat(iso_candidate).date().isoformat()
-                except ValueError:
-                    if len(iso_candidate) >= 10:
-                        date_published = iso_candidate[:10]
-
-        if not date_published:
-            overlay_date = overlay_metrics.get("date_published")
-            if isinstance(overlay_date, str):
-                date_published = overlay_date
-        if not date_published and initial_data:
-            extracted_date = self.extract_publish_date_from_initial_data(initial_data)
-            if extracted_date:
-                date_published = extracted_date
-
-        articles = self.extract_articles(description, None) if description else None
+    def _extract_metrics_from_media(self, shortcode_media: Dict[str, Any]) -> Dict[str, Any]:
+        likes = (
+            shortcode_media
+            .get("edge_media_preview_like", {})
+            .get("count")
+        )
+        comments = (
+            shortcode_media
+            .get("edge_media_to_parent_comment", shortcode_media.get("edge_media_to_comment", {}))
+            .get("count")
+        )
+        views = shortcode_media.get("video_view_count") or shortcode_media.get("video_play_count")
+        ts = shortcode_media.get("taken_at_timestamp")
+        caption_edges = (
+            shortcode_media
+            .get("edge_media_to_caption", {})
+            .get("edges", [])
+        )
+        caption = caption_edges[0]["node"]["text"] if caption_edges else ""
+        preview = shortcode_media.get("display_url") or shortcode_media.get("thumbnail_src")
+        video_url = shortcode_media.get("video_url")
 
         return {
-            "video_id": video_id,
-            "link": video_url,
-            "title": title,
-            "views": views,
-            "description": description,
-            "likes": likes,
-            "comments": comments,
-            "articles": articles,
-            "date_published": date_published,
+            "shortcode": shortcode_media.get("shortcode"),
+            "likes": likes or 0,
+            "comments": comments or 0,
+            "views": views or 0,
+            "timestamp": ts,
+            "caption": caption or "",
+            "preview_image": preview,
+            "video_url": video_url,
         }
 
-    async def fetch_videos_with_proxies(self, video_ids: List[str], delay: float = 5.0) -> List[Dict[str, Any]]:
-        """Запрашиваем страницы шортов пакетами, по одному URL на прокси."""
-        if not video_ids:
-            return []
-
-        # video_ids = video_ids[:20]  # тестовый пример первые 20 видосов
-
-        proxies = self.proxy_list if self.proxy_list else [None]
-        total_proxies = len(proxies) if proxies else 1
-        batch_size = total_proxies or 1
-        results: List[Dict[str, Any]] = []
-
-        index = 0
-        total = len(video_ids)
-        while index < total:
-            batch_ids = video_ids[index:index + batch_size]
-            tasks: List[asyncio.Task] = []
-            task_video_ids: List[str] = []
-
-            for idx, video_id in enumerate(batch_ids):
-                video_url = self.dom_video_links.get(video_id)
-                if not video_url:
-                    self.logger.send("INFO", f"⚠️ Для видео {video_id} не найдена ссылка в DOM, пропускаем.")
-                    continue
-                start_proxy_idx = idx % (total_proxies or 1)
-                task_video_ids.append(video_id)
-                tasks.append(asyncio.create_task(
-                    self._fetch_with_proxy_rotation(video_id, video_url, proxies, start_proxy_idx)
-                ))
-
-            if tasks:
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                for video_id, result in zip(task_video_ids, batch_results):
-                    if isinstance(result, Exception):
-                        self.logger.send("INFO", f"❌ Ошибка при обработке {video_id}: {result}")
-                        continue
-                    if result:
-                        results.append(result)
-
-            index += batch_size
-            if index < total:
-                self.logger.send("INFO", f"⏳ Ждём {delay} секунд перед следующей пачкой запросов ({index}/{total})")
-                await asyncio.sleep(delay)
-
-        return results
-
-    async def _fetch_with_proxy_rotation(
-        self,
-        video_id: str,
-        video_url: str,
-        proxies: List[Optional[str]],
-        start_index: int,
-    ) -> Optional[Dict[str, Any]]:
-        """Пробуем получить метаданные видео, перебирая прокси по кругу."""
-        if not proxies:
-            proxies = [None]
-
-        total_proxies = len(proxies)
-        for attempt in range(total_proxies):
-            proxy = proxies[(start_index + attempt) % total_proxies]
-            if attempt > 0:
-                self.logger.send("INFO", f"🔁 Повторная попытка для {video_url} через {proxy or 'без прокси'} (попытка {attempt + 1})")
-            result = await self.fetch_video_metadata(video_id, video_url, proxy)
-            if result:
-                return result
-
-        self.logger.send("INFO", f"⚠️ Все прокси исчерпаны для {video_url}, видео пропущено.")
-        return None
-
-    async def download_image(self, url: str, proxy: str = None) -> Union[bytes, None]:
-        """Скачивает изображение с YouTube (можно с прокси)."""
-        formatted_proxy = self.prepare_proxy(proxy)
-        proxies = {"http": formatted_proxy, "https": formatted_proxy} if formatted_proxy else None
-
-        def _download() -> bytes:
-            response = requests.get(url, timeout=20.0, proxies=proxies)
-            response.raise_for_status()
-            return response.content
-
-        try:
-            return await asyncio.to_thread(_download)
-        except Exception as e:
-            self.logger.send("INFO", f"❌ Ошибка загрузки изображения {url}: {e}")
+    @staticmethod
+    def extract_username_from_url(profile_url: str) -> Optional[str]:
+        parsed = urlparse(profile_url)
+        path = parsed.path.strip("/")
+        if not path:
             return None
+        return path.split("/")[0]
 
-    async def upload_image(self, video_id: int, image_url: str, proxy: str = None):
-        """Скачивает изображение (с прокси) и загружает его на API, нормализуя путь."""
-        image_bytes = await self.download_image(image_url, proxy=proxy)
-        if not image_bytes:
-            return None, "Download failed"
+    async def parse_channel(
+        self,
+        url: str,
+        channel_id: int,
+        user_id: int,
+        max_retries: int = 0,
+        accounts: Optional[list[str]] = None,
+        proxy_list: Optional[list[str]] = None,
+    ):
+        if proxy_list is None:
+            self.logger.send("INFO", "❌ proxy_list не передан в parse_channel — задача остановлена.")
+            return
 
-        file_name = image_url.split("/")[-1].split("?")[0] or "cover.jpg"
-        files = {"file": (file_name, image_bytes, "image/jpeg")}
+        normalized_proxies = self._normalize_proxy_input(proxy_list)
+        if normalized_proxies:
+            self.logger.send("INFO", f"🔁 Обновляем список прокси из аргумента: {normalized_proxies}")
+        else:
+            self.logger.send("INFO", "ℹ️ Парсинг будет выполнен без прокси (после нормализации список пуст).")
+        self.proxy_list = normalized_proxies
 
-        def _upload():
-            response = requests.post(
-                f"{API_BASE_URL}/{video_id}/upload-image/",
-                files=files,
-                timeout=30.0,
-            )
-            response.raise_for_status()
-            try:
-                payload = response.json()
-            except ValueError:
-                payload = {}
-            return response.status_code, payload
+        accounts = accounts or []
+        if not accounts:
+            self.logger.send("INFO", "⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
+            return
 
         try:
-            status_code, payload = await asyncio.to_thread(_upload)
-        except Exception as e:
-            self.logger.send("INFO", f"⚠️ Ошибка загрузки фото для видео {video_id}: {e}")
-            return None, str(e)
+            sessions = await self.ensure_initial_cookies(accounts)
+        except Exception as exc:
+            self.logger.send("INFO", f"❌ Не удалось подготовить cookies: {exc}")
+            return
 
-        image_path = None
-        if isinstance(payload, dict):
-            image_path = payload.get("image")
-            if image_path and not image_path.startswith(("http://", "https://", "/")):
-                image_path = "/" + image_path
+        if not sessions:
+            self.logger.send("INFO", "❌ Не удалось получить валидные cookies ни для одного аккаунта.")
+            return
 
-        return status_code, image_path or payload
+        username = self.extract_username_from_url(url)
+        if not username:
+            self.logger.send("INFO", f"❌ Не удалось определить username из URL {url}")
+            return
 
-    async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
-        """
-        Новая логика:
-        1. Получаем общее количество видео из шапки канала.
-        2. Скроллим ленту шортов до совпадения количества либо до конца.
-        3. Сохраняем ссылки и превью из DOM.
-        4. По одному запросу на прокси собираем метаданные каждого видео через httpx + BS4.
-        5. Передаём данные дальше на API (ниже по функции).
-        """
-        self.proxy_list = proxy_list or []
+        self.logger.send("INFO", f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
+        preferred_session: Optional[tuple[str, Dict[str, Any]]] = None
 
-        url = self.normalize_profile_url(url)
-        if not url.endswith('/shorts'):
-            url = url.rstrip('/') + '/shorts'
-        self.logger.send("INFO", f"Переход на канал: {url}")
+        try:
+            profile_data, session_username, session_entry = await self._fetch_profile_via_api(sessions, username)
+        except Exception as exc:
+            self.logger.send("INFO", f"❌ Ошибка получения профиля @{username}: {exc}")
+            return
 
-        async def get_proxy_config(proxy_str):
+        if not profile_data:
+            self.logger.send("INFO", f"⚠️ Профиль @{username} недоступен или отсутствует.")
+            return
+
+        if session_username and session_entry:
+            preferred_session = (session_username, session_entry)
+
+        user_id = profile_data.get("id")
+        if not user_id:
+            self.logger.send("INFO", f"❌ Не удалось получить ID пользователя для @{username}")
+            return
+
+        try:
+            clips_media, fetched_session = await self._fetch_user_clips(
+                sessions,
+                user_id,
+                page_size=50,
+                max_pages=None,
+                preferred_session=preferred_session,
+            )
+        except Exception as exc:
+            self.logger.send("INFO", f"❌ Ошибка получения списка рилов для @{username}: {exc}")
+            return
+
+        if fetched_session:
+            preferred_session = fetched_session
+
+        if not clips_media:
+            self.logger.send("INFO", f"⚠️ API не вернуло рилы для @{username}.")
+            return
+
+        items_limit = max_retries if max_retries and max_retries > 0 else len(clips_media)
+        reel_sequence = clips_media[:items_limit] if items_limit < len(clips_media) else clips_media
+        self.logger.send("INFO", f"📹 Получено {len(clips_media)} рилов для @{username}, обрабатываем {len(reel_sequence)}")
+
+        image_tasks: list[tuple[int, str]] = []
+
+        async def download_image(image_url: str) -> bytes:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(image_url)
+                resp.raise_for_status()
+                return resp.content
+
+        async def upload_image(video_id: int, image_url: str):
             try:
-                if "@" in proxy_str:
-                    auth, host_port = proxy_str.split("@", 1)
-                    username, password = auth.split(":")
-                    host, port = host_port.split(":")
-                    return {"server": f"http://{host}:{port}", "username": username, "password": password}
-                else:
-                    host, port = proxy_str.split(":")
-                    return {"server": f"http://{host}:{port}"}
-            except Exception as e:
-                self.logger.send("INFO", f"Неверный формат прокси: {e}")
-                return None
+                image_bytes = await download_image(image_url)
+                file_name = image_url.split("/")[-1].split("?")[0] or f"{video_id}.jpg"
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    files = {"file": (file_name, image_bytes, "image/jpeg")}
+                    resp = await client.post(
+                        f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                        files=files,
+                    )
+                    resp.raise_for_status()
+                    self.logger.send("INFO", f"📸 Загружено превью для видео {video_id}")
+            except Exception as exc:
+                self.logger.send("INFO", f"❌ Ошибка загрузки превью {video_id}: {exc}")
 
-        async def create_browser_with_proxy(proxy_str, playwright):
-            proxy_config = await get_proxy_config(proxy_str) if proxy_str else None
-            browser = await playwright.chromium.launch(
-                headless=False,
-                args=[
-                    # "--headless=new",
-                    "--disable-blink-features=AutomationControlled",
-                    "--start-maximized"
-                ],
-            )
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080},
-                proxy=proxy_config
-            )
-            page = await context.new_page()
-            return browser, context, page
+        async def save_video_and_image(
+            channel_id: int,
+            reel_code: str,
+            reel_url: str,
+            play_count: int,
+            amount_likes: int,
+            amount_comments: int,
+            image_url: str,
+            date_published: Optional[str],
+            article: str,
+            caption_text: str,
+        ):
+            video_name = self.generate_short_title(caption_text, max_length=20)
 
-        proxy_candidates = list(self.proxy_list) if self.proxy_list else [None]
-        if self.proxy_list:
-            random.shuffle(proxy_candidates)
-        effective_retries = max_retries if max_retries is not None else 0
-        if self.proxy_list:
-            base_attempts = len(proxy_candidates)
-            max_proxy_attempts = max(1, max(base_attempts, effective_retries))
-        else:
-            max_proxy_attempts = max(1, effective_retries or 1)
-
-        all_videos_data: List[Dict] = []
-        header_videos_count: Optional[int] = None
-        total_videos_from_dom = 0
-        videos_limit = 0
-        total_collected = 0
-
-        best_state = None
-        best_total = 0
-
-        for attempt_idx in range(max_proxy_attempts):
-            current_proxy = proxy_candidates[attempt_idx % len(proxy_candidates)] if proxy_candidates else None
-            self.logger.send(
-                "INFO",
-                f"🔁 Попытка {attempt_idx + 1}/{max_proxy_attempts} "
-                f"с прокси {current_proxy or 'без прокси'}"
-            )
-            self.reset_dom_state()
-
-            playwright = None
-            browser = None
-            context = None
-            page = None
-
+            video_data = {
+                "type": "instagram",
+                "channel_id": channel_id,
+                "link": reel_url,
+                "name": video_name,
+                "article": article,
+                "amount_views": play_count,
+                "amount_likes": amount_likes,
+                "amount_comments": amount_comments,
+                "image_url": image_url,
+                "date_published": date_published,
+            }
             try:
-                playwright = await async_playwright().start()
-                browser, context, page = await create_browser_with_proxy(current_proxy, playwright)
+                async with httpx.AsyncClient() as client:
+                    check_resp = await client.get(
+                        f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={reel_url}",
+                        timeout=20.0,
+                    )
 
-                self.logger.send("INFO", "🔍 Загружаем страницу Shorts…")
-                await page.goto(url, wait_until="networkidle", timeout=60000)
-
-                cookie_selectors = [
-                    "button[aria-label='Accept all']",
-                    "button:has-text('Accept all')",
-                    "button:has-text('Принять все')",
-                    "button:has-text('Принять всё')",
-                    "ytd-button-renderer#accept-button button",
-                ]
-                for selector in cookie_selectors:
-                    try:
-                        btn = await page.query_selector(selector)
-                        if btn:
-                            await btn.click()
-                            await page.wait_for_timeout(1200)
-                            self.logger.send("INFO", "Закрыта модалка с куки")
-                            break
-                    except Exception:
-                        continue
-
-                header_videos_count = await self.get_videos_count_from_header(page)
-                if header_videos_count:
-                    self.logger.send("INFO", f"🎯 Количество видео из шапки: {header_videos_count}")
-                else:
-                    self.logger.send("INFO", "ℹ️ Не удалось определить количество видео из шапки, опираемся на DOM.")
-
-                selector = "ytd-rich-item-renderer, ytd-reel-item-renderer, ytm-shorts-lockup-view-model, ytd-grid-video-renderer"
-                total_videos_from_dom = await self.scroll_until(
-                    page,
-                    url,
-                    selector=selector,
-                    target_count=header_videos_count,
-                    delay=3.0
-                )
-                self.logger.send("INFO", f"📊 Всего уникальных видео в DOM: {len(self.dom_order)} (scroll_until вернул {total_videos_from_dom})")
-
-            except Exception as main_error:
-                self.logger.send("INFO", f"Критическая ошибка при работе с Playwright: {main_error}")
-            finally:
-                for obj, name in [(page, "page"), (context, "context"), (browser, "browser"), (playwright, "playwright")]:
-                    if obj:
-                        try:
-                            if name == "playwright":
-                                await obj.stop()
-                            else:
-                                await obj.close()
-                        except Exception as e:
-                            self.logger.send("INFO", f"Ошибка закрытия {name}: {e}")
-
-            total_collected = len(self.dom_order)
-            if total_collected > best_total:
-                best_state = {
-                    "dom_images": dict(self.dom_images),
-                    "dom_video_links": dict(self.dom_video_links),
-                    "dom_order": list(self.dom_order),
-                    "header_count": header_videos_count,
-                    "total_from_dom": total_videos_from_dom,
-                }
-                best_total = total_collected
-
-            if total_collected == 0:
-                self.logger.send("INFO", "⚠️ Не удалось собрать ни одного видео в этой попытке, пробуем другой прокси.")
-                await asyncio.sleep(1.5)
-                continue
-
-            if (
-                header_videos_count
-                and total_collected < header_videos_count
-                and attempt_idx + 1 < max_proxy_attempts
-            ):
-                self.logger.send(
-                    "INFO",
-                    f"⚠️ Собрано только {total_collected} из {header_videos_count} видео. "
-                    "Пробуем обновить страницу с другим прокси."
-                )
-                await asyncio.sleep(1.0)
-                continue
-
-            break
-        else:
-            if best_state and best_state["dom_order"]:
-                self.logger.send("INFO", "ℹ️ Используем данные лучшей из предыдущих попыток.")
-                self.dom_images = best_state["dom_images"]
-                self.dom_video_links = best_state["dom_video_links"]
-                self.dom_order = best_state["dom_order"]
-                header_videos_count = best_state["header_count"]
-                total_videos_from_dom = best_state["total_from_dom"]
-                total_collected = len(self.dom_order)
-            else:
-                self.logger.send("INFO", "⚠️ Не удалось собрать ни одного видео из DOM после всех попыток.")
-                return []
-        total_collected = len(self.dom_order)
-        if total_collected == 0:
-            self.logger.send("INFO", "⚠️ Не удалось собрать ни одного видео из DOM.")
-            return []
-
-        videos_limit = header_videos_count if header_videos_count else total_collected
-        videos_limit = min(videos_limit, total_collected)
-        videos_to_process = self.dom_order[:videos_limit]
-        self.logger.send(
-            "INFO",
-            f"🎯 Подготовлено к обработке {len(videos_to_process)} видео "
-            f"(шапка: {header_videos_count or '—'}, собрано: {total_collected})"
-        )
-
-        metadata_list = await self.fetch_videos_with_proxies(videos_to_process)
-        self.logger.send("INFO", f"📦 Получены метаданные для {len(metadata_list)} видео")
-
-        for meta in metadata_list:
-            video_id = meta.get("video_id")
-            if not video_id:
-                continue
-            image_url = self.dom_images.get(video_id) or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-            all_videos_data.append(
-                {
-                    "link": meta.get("link"),
-                    "type": "youtube",
-                    "name": meta.get("title") or "",
-                    "image_url": image_url,
-                    "channel_id": channel_id,
-                    # "description": meta.get("description") or "",
-                    "amount_views": meta.get("views") or 0,
-                    "amount_likes": meta.get("likes") or 0,
-                    "amount_comments": meta.get("comments") or 0,
-                    "articles": meta.get("articles"),
-                    "date_published": meta.get("date_published"),
-                }
-            )
-
-        self.logger.send(
-            "INFO",
-            f"✅ Собрано {len(all_videos_data)} из {videos_limit} видео "
-            f"(DOM найдено: {total_collected})"
-        )
-        processed_count = 0
-        image_queue = []
-        queued_video_ids = set()
-        for video_data in all_videos_data:
-            try:
-                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-                    # self.logger.send("INFO", f"🔍 Проверка видео: {video_data['link']}")
-                    check_resp = await client.get(f"{API_BASE_URL}/?link={video_data['link']}")
-                    is_new = False
                     video_id = None
+                    is_new = False
 
                     if check_resp.status_code == 200:
-                        res = check_resp.json()
-                        vids = res.get("videos", [])
-                        if vids:
-                            existing_video = vids[0]
-                            video_id = existing_video['id']
+                        result = check_resp.json()
+                        videos = result.get("videos", [])
+                        if videos:
+                            existing_video = videos[0]
+                            video_id = existing_video["id"]
                             update_payload = {
-                                "amount_views": video_data.get("amount_views", 0),
-                                "amount_likes": video_data.get("amount_likes", 0),
-                                "amount_comments": video_data.get("amount_comments", 0),
-                                "articles": video_data.get("articles"),
-                                # "description": video_data.get("description"),
-                                "date_published": video_data.get("date_published"),
+                                "amount_views": play_count,
+                                "amount_likes": amount_likes,
+                                "amount_comments": amount_comments,
                             }
-                            update_payload = {k: v for k, v in update_payload.items() if v is not None}
-                            await client.patch(
-                                f"{API_BASE_URL}/{video_id}",
-                                json=update_payload
+                            if date_published and not existing_video.get("date_published"):
+                                update_payload["date_published"] = date_published
+                            update_resp = await client.patch(
+                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
+                                json=update_payload,
+                                timeout=20.0,
                             )
-
-                            existing_image = existing_video.get("image")
-                            image_missing = not (isinstance(existing_image, str) and existing_image.strip())
-                            if image_missing and video_data.get("image_url"):
-                                if video_id not in queued_video_ids:
-                                    image_queue.append((video_id, video_data["image_url"]))
-                                    queued_video_ids.add(video_id)
+                            update_resp.raise_for_status()
+                            self.logger.send("INFO", f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
                         else:
                             is_new = True
                     else:
                         is_new = True
 
                     if is_new:
-                        create_payload = {
-                            key: value
-                            for key, value in video_data.items()
-                            if value is not None
-                        }
-                        resp = await client.post(f"{API_BASE_URL}/", json=create_payload)
+                        resp = await client.post(
+                            "https://cosmeya.dev-klick.cyou/api/v1/videos/",
+                            json=video_data,
+                            timeout=20.0,
+                        )
                         resp.raise_for_status()
                         created_video = resp.json()
                         video_id = created_video["id"]
-                        # self.logger.send("INFO", f"✅ Создано новое видео {video_id}")
-                        created_image = created_video.get("image")
-                        image_missing = not (isinstance(created_image, str) and created_image.strip())
-                        if image_missing and video_data.get("image_url") and video_id not in queued_video_ids:
-                            image_queue.append((video_id, video_data["image_url"]))
-                            queued_video_ids.add(video_id)
-                processed_count += 1
-            except Exception as e:
-                self.logger.send("INFO", f"⚠️ Ошибка при обработке {video_data.get('link')}: {e}")
+                        self.logger.send("INFO", f"📦 Создано видео {video_id} ({reel_url})")
 
-        self.logger.send("INFO", f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
+                    if video_id and is_new and image_url:
+                        image_tasks.append((video_id, image_url))
+                        self.logger.send("INFO", f"Добавлено в очередь {video_id}: {image_url}")
 
-        # --- Загрузка изображений ---
-        proxy_candidates: List[Optional[str]] = list(proxy_list) if proxy_list else [None]
-        pending_images = deque((vid, img_url, None) for vid, img_url in image_queue)
+            except Exception as exc:
+                self.logger.send("INFO", f"❌ Ошибка сохранения видео {reel_url}: {exc}")
 
-        while pending_images:
-            vid, img_url, last_proxy_used = pending_images.popleft()
-            proxy = self._select_next_proxy(proxy_candidates, last_proxy_used)
-            self.logger.send("INFO", f"🖼️ Загружаем изображение для {vid} через {proxy or 'без прокси'}")
-
+        processed = 0
+        total_candidates = len(reel_sequence)
+        seen_shortcodes: set[str] = set()
+        for idx, media in enumerate(reel_sequence, start=1):
+            if media.get("product_type") not in ("clips", "clip", "reel"):
+                continue
+            shortcode = media.get("code") or media.get("pk")
+            if not shortcode or shortcode in seen_shortcodes:
+                continue
+            seen_shortcodes.add(shortcode)
+            self.logger.send("INFO", f"➡️ Обработка рила {shortcode} ({idx}/{total_candidates})")
             try:
-                status, _ = await self.upload_image(vid, img_url, proxy=proxy)
-                if status == 200:
-                    self.logger.send("INFO", f"✅ Фото для видео {vid} загружено")
-                    await asyncio.sleep(5.0)
-                    continue
-                self.logger.send("INFO", f"⚠️ Фото для видео {vid} вернуло статус {status}")
-            except Exception as e:
-                self.logger.send("INFO", f"❌ Ошибка загрузки фото {vid}: {e}")
+                play_count = media.get("play_count") or media.get("video_view_count") or 0
+                like_count = media.get("like_count") or 0
+                comment_count = media.get("comment_count") or 0
+                caption_data = media.get("caption") or {}
+                if isinstance(caption_data, dict):
+                    caption_text = caption_data.get("text", "") or ""
+                else:
+                    caption_text = str(caption_data or "")
+                article = self.extract_article_tag(caption_text)
+                image_url = None
+                candidates = media.get("image_versions2", {}).get("candidates", [])
+                if candidates:
+                    image_url = candidates[0].get("url")
+                taken_at = media.get("taken_at")
+                published_at = None
+                if isinstance(taken_at, (int, float)):
+                    try:
+                        published_at = datetime.fromtimestamp(int(taken_at), tz=timezone.utc).strftime("%Y-%m-%d")
+                    except (ValueError, OSError, OverflowError):
+                        published_at = None
+                if not published_at and isinstance(caption_data, dict):
+                    created_at = caption_data.get("created_at")
+                    if isinstance(created_at, (int, float)):
+                        try:
+                            published_at = datetime.fromtimestamp(int(created_at), tz=timezone.utc).strftime("%Y-%m-%d")
+                        except (ValueError, OSError, OverflowError):
+                            published_at = None
 
-            self.logger.send("INFO", f"🔄 Повторим загрузку фото для {vid} через 1 минуту на другой прокси")
-            pending_images.append((vid, img_url, proxy))
-            await asyncio.sleep(60.0)
+                reel_url = f"https://www.instagram.com/reel/{shortcode}/"
+                await save_video_and_image(
+                    channel_id,
+                    shortcode,
+                    reel_url,
+                    int(play_count or 0),
+                    int(like_count or 0),
+                    int(comment_count or 0),
+                    image_url,
+                    published_at,
+                    article,
+                    caption_text,
+                )
+                processed += 1
+                await asyncio.sleep(0.5)
+            except Exception as exc:
+                self.logger.send("INFO", f"❌ Ошибка обработки рила {shortcode}: {exc}")
 
-        self.logger.send("INFO", f"🎉 Парсинг завершён: {processed_count} видео обработано.")
+        if image_tasks:
+            self.logger.send("INFO", f"📸 Начинаем загрузку {len(image_tasks)} изображений...")
+            for idx, (video_id, img_url) in enumerate(image_tasks):
+                self.logger.send("INFO", f"🖼️ Загрузка {idx + 1}/{len(image_tasks)} для видео {video_id}...")
+                await upload_image(video_id, img_url)
+                if idx < len(image_tasks) - 1:
+                    await asyncio.sleep(2.0)
 
+        self.logger.send("INFO", f"✅ Обработано {processed} рилов для @{username}")
+        return
 
-# ----------------------- Пример запуска -----------------------
 
 # async def main():
 #     proxy_list = [
@@ -1556,11 +1523,45 @@ class ShortsParser:
 #         "msEHZ8:tYomUE@152.232.68.149:9212",
 #         "msEHZ8:tYomUE@152.232.66.152:9388",
 #     ]
-#     parser = ShortsParser()
-#     url = "https://www.youtube.com/@sofi.beomaa"
-#     user_id = 1
-#     await parser.parse_channel(url, channel_id=7, user_id=user_id, proxy_list=proxy_list)
-
+#     parser = InstagramParser(proxy_list=proxy_list)
+#     url = "https://www.instagram.com/best_beautydeal"
+#     user_id = 13
+#     accounts = [
+#         # "juan.itaandersen:fsm8f5tb:FOJ2E2475FRD3UR5NY2E45YPTEJK5APH",
+#         # "jodyrhodes74:Kr2V3bxS:2KYNTJCUL74SKSNTVGFENBL6DOAJ65X6",
+#         # "Jeannetteosley12:7nYEEexK:SVTLSGQZVWLNB3ID2PCB5TR7C4VWWPES",
+#         # "hild.amoody:6FL9Jg2j:FW26JAKMNNLP2U5BLQQF6L4ABMMMB4DC",
+#         # "eliseowolf95:CuNAryR3Ly:VF442BGSAVQK3TBMGKM3SAN2U75EKMRG",
+#         # "jolenemccoy650:KQ9GsFqzHy:GI2NPPGSYMTFZD4F75XMOVIAB4GFWSP4",
+#         # "juliadacostabx829:payable64$!:OZITRNHYGIVKF27ZASD26JVIAE54JHLB",
+#         # "claricepeixotokt640:unbeliEvably4$!:ZG33OWOBMCPJ37NKIGCHDTEMTC6FPEGL",
+#         # "allanacaldeiract154:sipHOnic5!*:NQ6453R7RMMPZGNDQWX74KAYZUDHIFA2",
+#         "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
+#         "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
+#         "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
+#         "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
+#         # "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
+#         "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
+#         "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
+#         "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
+#         "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
+#         # "liviadamotaj814:zoophiles5:XLMIX3HUL3N3YSHK7NY6HQBTW5TOPXPC",
+#         # "rezendesuelizn674:TwVHHXku6p:UI6C3HO4CWX2F36KXMLYDM7YVYU5PCY2",
+#         "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
+#         "danielle_stafford:QbR86VfEud:YSKAUQROK633XKXT5M2GJZPGEEJSPGJ3",
+#         "frasheri8498:NzPAAX5xqC:SJZ3D5XWEZYWHOIYXANTZZQTQ34BE47D",
+#         "bonilla.scout:KNWKdS3Gew:J33P5656TMAH7R55WUKML3TEA7RGSFQG",
+#         "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
+#         "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
+#         "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
+#         "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
+#         "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
+#         "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
+#         "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
+#         "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
+#     ]
+#     await parser.parse_channel(url, channel_id=32,
+#                                user_id=user_id, accounts=accounts)
 
 # if __name__ == "__main__":
 #     asyncio.run(main())

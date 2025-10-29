@@ -617,6 +617,8 @@ class ShortsParser:
         """Извлекаем количество просмотров из различных структур ytInitialData."""
 
         def parse_candidate(value: Any) -> Optional[int]:
+            if value is None:
+                return None
             if isinstance(value, str):
                 parsed = self.parse_views(value)
                 return parsed if parsed else None
@@ -690,6 +692,179 @@ class ShortsParser:
                         if parsed:
                             return parsed
 
+                for value in node.values():
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+
+            elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+
+        return None
+
+    def _extract_metric_from_factoids(self, data: Any, label_checker) -> Optional[int]:
+        """Общий обход структур factoidRenderer для извлечения числовых метрик по подписи."""
+
+        def parse_candidate(value: Any) -> Optional[int]:
+            if value is None:
+                return None
+            if isinstance(value, (str, dict, list)):
+                text = self._extract_text(value)
+            else:
+                text = str(value)
+            if not text:
+                return None
+            parsed = self.parse_views(text)
+            return parsed if parsed else None
+
+        def extract_from_renderer(renderer: Any) -> Optional[int]:
+            if not isinstance(renderer, dict):
+                return None
+            label_text = self._extract_text(renderer.get("label"))
+            if label_text and label_checker(label_text):
+                for key in (
+                    "value",
+                    "viewCount",
+                    "accessibilityText",
+                    "simpleText",
+                    "text",
+                    "title",
+                ):
+                    candidate = renderer.get(key)
+                    parsed = parse_candidate(candidate)
+                    if parsed is not None:
+                        return parsed
+                nested = renderer.get("factoid")
+                if isinstance(nested, dict):
+                    nested_renderer = nested.get("factoidRenderer")
+                    if nested_renderer:
+                        parsed = extract_from_renderer(nested_renderer)
+                        if parsed is not None:
+                            return parsed
+            else:
+                nested = renderer.get("factoid")
+                if isinstance(nested, dict):
+                    nested_renderer = nested.get("factoidRenderer")
+                    if nested_renderer:
+                        parsed = extract_from_renderer(nested_renderer)
+                        if parsed is not None:
+                            return parsed
+            return None
+
+        if not isinstance(data, (dict, list)):
+            return None
+
+        stack = [data]
+        visited: set[int] = set()
+
+        while stack:
+            node = stack.pop()
+            node_id = id(node)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+
+            if isinstance(node, dict):
+                if "factoidRenderer" in node:
+                    result = extract_from_renderer(node["factoidRenderer"])
+                    if result is not None:
+                        return result
+
+                renderer = node.get("viewCountFactoidRenderer")
+                if isinstance(renderer, dict):
+                    result = extract_from_renderer(renderer)
+                    if result is not None:
+                        return result
+
+                factoids = node.get("factoid")
+                if isinstance(factoids, list):
+                    for fact in factoids:
+                        if isinstance(fact, (dict, list)):
+                            stack.append(fact)
+
+                for value in node.values():
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+
+            elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+
+        return None
+
+    def extract_likes_from_initial_data(self, data: Any) -> Optional[int]:
+        """Ищет количество лайков в factoidRenderer внутри ytInitialData."""
+        return self._extract_metric_from_factoids(data, self._looks_like_likes_text)
+
+    def extract_publish_date_from_initial_data(self, data: Any) -> Optional[str]:
+        """Извлекает дату публикации из factoidRenderer внутри ytInitialData."""
+
+        def try_parse_from_renderer(renderer: dict) -> Optional[str]:
+            if not isinstance(renderer, dict):
+                return None
+            candidates = [
+                renderer.get("accessibilityText"),
+                renderer.get("value"),
+                renderer.get("label"),
+            ]
+            for candidate in candidates:
+                text = self._extract_text(candidate)
+                if not text:
+                    continue
+                parsed = self.extract_date_from_text(text)
+                if parsed:
+                    return parsed
+            combined = " ".join(
+                filter(
+                    None,
+                    [
+                        self._extract_text(renderer.get("value")),
+                        self._extract_text(renderer.get("label")),
+                    ],
+                )
+            )
+            if combined:
+                parsed = self.extract_date_from_text(combined)
+                if parsed:
+                    return parsed
+            nested = renderer.get("factoid")
+            if isinstance(nested, dict):
+                nested_renderer = nested.get("factoidRenderer")
+                if nested_renderer:
+                    return try_parse_from_renderer(nested_renderer)
+            return None
+
+        if not isinstance(data, (dict, list)):
+            return None
+
+        stack = [data]
+        visited: set[int] = set()
+
+        while stack:
+            node = stack.pop()
+            node_id = id(node)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+
+            if isinstance(node, dict):
+                renderer = node.get("factoidRenderer")
+                if isinstance(renderer, dict):
+                    parsed = try_parse_from_renderer(renderer)
+                    if parsed:
+                        return parsed
+                renderer = node.get("viewCountFactoidRenderer")
+                if isinstance(renderer, dict):
+                    parsed = try_parse_from_renderer(renderer)
+                    if parsed:
+                        return parsed
+                factoids = node.get("factoid")
+                if isinstance(factoids, list):
+                    stack.extend(
+                        item for item in factoids if isinstance(item, (dict, list))
+                    )
                 for value in node.values():
                     if isinstance(value, (dict, list)):
                         stack.append(value)
@@ -875,6 +1050,10 @@ class ShortsParser:
         overlay_likes = overlay_metrics.get("likes")
         if not likes and isinstance(overlay_likes, int):
             likes = overlay_likes
+        if not likes and initial_data:
+            extracted_likes = self.extract_likes_from_initial_data(initial_data)
+            if extracted_likes:
+                likes = extracted_likes
 
         comments = self.extract_comment_count(initial_data) or 0
         overlay_comments = overlay_metrics.get("comments")
@@ -898,6 +1077,10 @@ class ShortsParser:
             overlay_date = overlay_metrics.get("date_published")
             if isinstance(overlay_date, str):
                 date_published = overlay_date
+        if not date_published and initial_data:
+            extracted_date = self.extract_publish_date_from_initial_data(initial_data)
+            if extracted_date:
+                date_published = extracted_date
 
         articles = self.extract_articles(description, None) if description else None
 
@@ -1348,13 +1531,35 @@ class ShortsParser:
 
 # async def main():
 #     proxy_list = [
-#         "2p9UY4YAxP:O9Mru1m26m@109.120.131.161:34945",
-#         "LgSCXw:UCNpHx@138.219.120.153:9466",
+#         "msEHZ8:tYomUE@152.232.65.53:9461",
+#         "msEHZ8:tYomUE@190.185.108.103:9335",
+#         "msEHZ8:tYomUE@138.99.37.16:9622",
+#         "msEHZ8:tYomUE@138.99.37.136:9248",
+#         "msEHZ8:tYomUE@152.232.72.124:9057",
+#         "msEHZ8:tYomUE@23.229.49.135:9511",
+#         "msEHZ8:tYomUE@209.127.8.189:9281",
+#         "msEHZ8:tYomUE@152.232.72.235:9966",
+#         "msEHZ8:tYomUE@152.232.74.34:9043",
+#         "PvJVn6:jr8EvS@38.148.133.33:8000",
+#         "PvJVn6:jr8EvS@38.148.142.71:8000",
+#         "PvJVn6:jr8EvS@38.148.133.69:8000",
+#         "PvJVn6:jr8EvS@38.148.138.48:8000",
+#         "msEHZ8:tYomUE@168.196.239.222:9211",
+#         "msEHZ8:tYomUE@168.196.237.44:9129",
+#         "msEHZ8:tYomUE@168.196.237.99:9160",
+#         "msEHZ8:tYomUE@138.219.122.56:9409",
+#         "msEHZ8:tYomUE@138.219.122.128:9584",
+#         "msEHZ8:tYomUE@138.219.123.22:9205",
+#         "msEHZ8:tYomUE@138.59.5.46:9559",
+#         "msEHZ8:tYomUE@152.232.68.147:9269",
+#         "msEHZ8:tYomUE@152.232.67.18:9241",
+#         "msEHZ8:tYomUE@152.232.68.149:9212",
+#         "msEHZ8:tYomUE@152.232.66.152:9388",
 #     ]
 #     parser = ShortsParser()
-#     url = "https://www.youtube.com/@nastya.beomaa"
+#     url = "https://www.youtube.com/@sofi.beomaa"
 #     user_id = 1
-#     await parser.parse_channel(url, channel_id=3, user_id=user_id, proxy_list=proxy_list)
+#     await parser.parse_channel(url, channel_id=7, user_id=user_id, proxy_list=proxy_list)
 
 
 # if __name__ == "__main__":
