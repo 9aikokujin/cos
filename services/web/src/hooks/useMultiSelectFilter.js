@@ -1,17 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import { useFiltersModalStore } from "@/app/store/filterModal/store";
 
 export const useMultiSelectFilter = (
   applyLabel = "Применить",
   onApply,
   multiple = false,
-  resetFilter
+  resetFilter,
+  initialSelected = []
 ) => {
   const setFooter = useFiltersModalStore((s) => s.setFooter);
   const close = useFiltersModalStore((s) => s.close);
 
   const [selected, setSelected] = useState([]);
   const selectedRef = useRef(selected);
+
+  useEffect(() => setSelected(initialSelected || []), [initialSelected]);
 
   useEffect(() => {
     selectedRef.current = selected;

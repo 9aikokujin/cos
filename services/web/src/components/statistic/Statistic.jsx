@@ -12,6 +12,7 @@ import "./Statistic.css";
 
 const Statistic = () => {
   const { filter, withTags, isLoading, tag } = useFilterStore();
+  console.log(filter);
   const [statistic, setStatistic] = useState([]);
   const [publushedVideo, setPublishedVideo] = useState([]);
   const [selectedMetrics, setSelectedMetrics] = useState([]);
@@ -25,11 +26,11 @@ const Statistic = () => {
     const getStatistic = async () => {
       if (withTags) {
         const data = await API.statistic.getStatisticWithTags({
-          articles: clean(tag),
+          articles: tag,
           ...clean(filter),
         });
         const published = await API.statistic.getCountPublishedVideoWithTags({
-          ...clean(filter),
+          ...clean(filter), articles: tag,
         });
         setPublishedVideo(published);
         setStatistic(data);
@@ -43,7 +44,7 @@ const Statistic = () => {
       }
     };
     getStatistic();
-  }, [filter, withTags]);
+  }, [filter, withTags, tag]);
 
   const toggleMetric = (metric) => {
     setSelectedMetrics((prev) =>

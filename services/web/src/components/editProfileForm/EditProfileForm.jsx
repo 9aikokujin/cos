@@ -5,6 +5,7 @@ import { useBack } from "@/hooks/useBack";
 import { useAuthStore } from "@/app/store/user/store";
 import { useUserProfileData } from "@/hooks/useUserProfileData";
 import { useUserProfileSubmit } from "@/hooks/useUserProfileSubmit";
+import { useNotificationStore } from "@/app/store/notification/store";
 
 import Input from "@/shared/ui/input/Input";
 // import Checkbox from "@/shared/ui/checkbox/Checkbox";
@@ -17,6 +18,7 @@ const EditProfileForm = () => {
   const { user } = useAuthStore();
   const { id: userId } = useParams();
   const goBack = useBack();
+  const showNotification = useNotificationStore((s) => s.showNotification);
 
   const {
     register,
@@ -28,7 +30,7 @@ const EditProfileForm = () => {
   } = useForm();
 
   const { initialData, socials, loading } = useUserProfileData(userId, setValue);
-  const onSubmit = useUserProfileSubmit(user, userId, initialData, socials, goBack, setError);
+  const onSubmit = useUserProfileSubmit(user, userId, initialData, socials, goBack, setError, showNotification);
 
   return (
     <form className="edit_form" action="" onSubmit={handleSubmit(onSubmit)}>
