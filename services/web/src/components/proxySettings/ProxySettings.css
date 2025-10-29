@@ -1,0 +1,18 @@
+.proxy_settings {
+  gap: 25px;
+  padding-bottom: 30px;
+  max-width: 450px;
+  margin: 0 auto;
+}
+
+.proxy_container,
+.parser_container {
+  width: 100%;
+  gap: 15px;
+}
+
+.proxy_btn {
+    width: 100%;
+    max-width: 450px;
+    height: 42px;
+}

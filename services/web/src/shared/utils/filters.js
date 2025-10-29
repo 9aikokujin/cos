@@ -76,3 +76,10 @@ export const hasTags = [
   { id: "#sr", title: "Промо" },
   { id: "#fg", title: "Обычный" },
 ];
+
+export const isNotEmpty = (value) => {
+  if (!value) return false; 
+  if (Array.isArray(value)) return value.length > 0; 
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
+};

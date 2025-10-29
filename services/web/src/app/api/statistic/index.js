@@ -77,7 +77,7 @@ export default (instance) => ({
       },
     }).then((response) => response.data);
   },
-  getCountPublishedVideoWithTags(params) {
+  getCountPublishedVideoWithTags(params, tags) {
     const allowedKeys = ["date_to", "date_from", "channel_id", "channel_type", "user_ids"];
     const cleanParams = Object.fromEntries(
       Object.entries(params).filter(
@@ -87,7 +87,7 @@ export default (instance) => ({
     return instance({
       method: "GET",
       url: "/videohistory/daily_article_count",
-      params: cleanParams,
+      params: {...cleanParams, articles: tags},
       paramsSerializer: {
         indexes: null,
       },

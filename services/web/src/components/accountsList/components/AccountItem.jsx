@@ -6,6 +6,7 @@ import API from "@/app/api";
 import { AppRoutes } from "@/app/routes/routes";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { useAccountStore } from "@/app/store/entity/store";
+import { useNotificationStore } from "@/app/store/notification/store";
 
 // import ToggleSwitch from "@/shared/ui/toggleSwitch/ToggleSwitch";
 import { ButtonIcon, Button } from "@/shared/ui/button/Button";
@@ -16,12 +17,14 @@ const AccountItem = memo(({ channel, ref }) => {
   // const [isOn, setIsOn] = useState(false);
   const navigate = useNavigate();
   const { removeItem } = useAccountStore();
+  const showNotification = useNotificationStore((s) => s.showNotification);
 
   const { confirmAction } = useConfirmModal();
 
   const handleDeleteConfirm = async () => {
     await API.account.deleteAccount(channel.id);
     removeItem(channel.id);
+    showNotification("Аккаунт успешно удален");
   };
 
   const handleDelete = () => {

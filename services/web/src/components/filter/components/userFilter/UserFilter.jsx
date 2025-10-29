@@ -20,6 +20,7 @@ const fetchUsers = async (page, term) => {
 
 const UserFilter = () => {
   const setUserId = useFilterStore((s) => s.setFilterUserId);
+  const filteredUser = useFilterStore((s) => s.filter.user_ids);
 
   const { items, isLoading, lastItemRef } = useInfiniteScroll(useUsersStore, fetchUsers, "users");
   const { selected, toggleSelect } = useMultiSelectFilter(
@@ -28,7 +29,8 @@ const UserFilter = () => {
       setUserId(user);
     },
     true,
-    () => setUserId("")
+    () => setUserId(""),
+    filteredUser
   );
   return (
     <div className="account_filter _flex_col_center">
