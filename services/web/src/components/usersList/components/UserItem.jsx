@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AppRoutes } from "@/app/routes/routes";
 import API from "@/app/api";
 import { useUsersStore } from "@/app/store/entity/store";
+import { useNotificationStore } from "@/app/store/notification/store";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 
 import ToggleSwitch from "@/shared/ui/toggleSwitch/ToggleSwitch";
@@ -14,6 +15,7 @@ const UserItem = memo(({ user, ref }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { removeItem, updateItem } = useUsersStore();
+  const showNotification = useNotificationStore((s) => s.showNotification);
 
   const { confirmAction } = useConfirmModal();
 
@@ -30,6 +32,7 @@ const UserItem = memo(({ user, ref }) => {
   const handleDeleteConfirm = async () => {
     await API.user.deleteUser(user.id);
     removeItem(user.id);
+    showNotification("Пользователь успешно удален");
   };
 
   const handleDelete = () => {

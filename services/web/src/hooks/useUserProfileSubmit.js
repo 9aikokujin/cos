@@ -2,7 +2,8 @@ import API from "@/app/api";
 import { socialNetworks } from "@/shared/utils/utils";
 import { validateSocialUrl } from "@/shared/utils/validate";
 
-export const useUserProfileSubmit = (user, userId, initialData, socials, goBack, setError) => {
+
+export const useUserProfileSubmit = (user, userId, initialData, socials, goBack, setError, showNotification) => {
   return async (data) => {
     const updates = [];
 
@@ -32,7 +33,7 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack,
         })
       );
     }
-    // 460798253
+
     // --- Проверка изменений соцсетей ---
     for (const network of socialNetworks) {
       const fieldValue = data[network]?.trim() || "";
@@ -84,7 +85,7 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack,
 
     if (updates.length > 0) {
       await Promise.all(updates);
-      // showNotification("Профиль обновлен");
+      showNotification("Профиль обновлен");
     } else {
       console.log("Нет изменений");
     }

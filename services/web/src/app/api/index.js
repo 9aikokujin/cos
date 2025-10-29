@@ -4,6 +4,7 @@ import user from "./user";
 import account from "./account";
 import video from "./video";
 import statistic from "./statistic";
+import proxy from "./proxy";
 
 import { useAuthStore } from "../store/user/store";
 import { useNotificationStore } from "../store/notification/store";
@@ -14,11 +15,6 @@ export const instance = axios.create({
     "Content-Type": "application/json",
   },
 });
-
-// export const instanceFormData = axios.create({
-//   baseURL: "https://sn.dev-klick.cyou/api/v1",
-//   headers: {},
-// });
 
 instance.interceptors.request.use(
   (config) => {
@@ -77,6 +73,7 @@ const API = {
   account: account(instance),
   video: video(instance),
   statistic: statistic(instance),
+  proxy: proxy(instance),
 };
 
 export default API;

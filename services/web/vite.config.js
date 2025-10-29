@@ -8,7 +8,7 @@ export default defineConfig({
   plugins: [react(), svgr()],
   server: {
     host: true,
-    allowedHosts: ["666f9d2d356e7c.lhr.life"],
+    allowedHosts: ["e22120480c0069.lhr.life"],
   },
   resolve: {
     alias: {
