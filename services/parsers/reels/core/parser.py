@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import random
 import re
@@ -9,9 +10,8 @@ from urllib.parse import quote, urlparse
 
 import httpx
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
-
-
 from utils.logger import TCPLogger
+
 # try:  # поддержка новых версий playwright-stealth
 #     from playwright_stealth import stealth_async as apply_stealth
 # except ImportError:  # fallback на старый API
@@ -50,6 +50,7 @@ IMPORTANT_COOKIES = {
 COOKIES_FILE_PATH = Path(__file__).with_name("instagram_cookies.json")
 REQUEST_TIMEOUT = 20.0
 MAX_PARALLEL_LOGIN_TASKS = 5
+HTTPX_USES_PROXY_PARAM = "proxy" in inspect.signature(httpx.AsyncClient.__init__).parameters
 
 
 class InvalidCredentialsError(Exception):
@@ -57,9 +58,12 @@ class InvalidCredentialsError(Exception):
 
 
 class InstagramParser:
-    def __init__(self, logger: TCPLogger, proxy_list: list = None):
+    def __init__(
+            self,
+            logger: TCPLogger,
+    ):
         self.logger = logger
-        self.proxy_list = proxy_list or []
+        self.proxy_list: list[str] = []
         self.cookie_file_path = COOKIES_FILE_PATH
         self.session_cache: Dict[str, Dict[str, Any]] = self._load_cookie_store()
         self.account_credentials: Dict[str, Dict[str, str]] = {}
@@ -72,9 +76,9 @@ class InstagramParser:
                     data = json.load(f)
                     if isinstance(data, dict):
                         return data
-                    print(f"⚠️ Некорректный формат cookie-файла {self.cookie_file_path}, ожидается dict")
+                    self.logger.send("INFO", f"⚠️ Некорректный формат cookie-файла {self.cookie_file_path}, ожидается dict")
             except Exception as exc:
-                print(f"⚠️ Не удалось прочитать cookie-файл {self.cookie_file_path}: {exc}")
+                self.logger.send("INFO", f"⚠️ Не удалось прочитать cookie-файл {self.cookie_file_path}: {exc}")
         return {}
 
     def _persist_cookie_store(self) -> None:
@@ -83,7 +87,7 @@ class InstagramParser:
             with self.cookie_file_path.open("w", encoding="utf-8") as f:
                 json.dump(self.session_cache, f, ensure_ascii=False, indent=2)
         except Exception as exc:
-            print(f"⚠️ Не удалось сохранить cookies в {self.cookie_file_path}: {exc}")
+            self.logger.send("INFO", f"⚠️ Не удалось сохранить cookies в {self.cookie_file_path}: {exc}")
 
     def _build_headers(self, user_agent: Optional[str] = None, csrf_token: Optional[str] = None) -> Dict[str, str]:
         headers = dict(BASE_REQUEST_HEADERS)
@@ -125,6 +129,27 @@ class InstagramParser:
         return ordered
 
     @staticmethod
+    def _normalize_proxy_input(proxy_list: Optional[Any]) -> list[str]:
+        if proxy_list is None:
+            return []
+        if isinstance(proxy_list, str):
+            text = proxy_list.strip()
+            if not text:
+                return []
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                proxy_list = [item.strip() for item in text.replace("\r", "\n").split("\n") if item.strip()]
+            else:
+                proxy_list = parsed
+        normalized: list[str] = []
+        for proxy in proxy_list:
+            if not proxy:
+                continue
+            normalized.append(str(proxy).strip())
+        return normalized
+
+    @staticmethod
     def _extract_auth_cookies(raw_cookies: list[Dict[str, Any]]) -> Dict[str, str]:
         auth_cookies: Dict[str, str] = {}
         for cookie in raw_cookies:
@@ -164,7 +189,7 @@ class InstagramParser:
     async def _refresh_session(self, username: str) -> Optional[Dict[str, Any]]:
         creds = self.account_credentials.get(username)
         if not creds:
-            print(f"⚠️ Нет сохранённых учётных данных для {username}, пропускаем обновление cookies")
+            self.logger.send("INFO", f"⚠️ Нет сохранённых учётных данных для {username}, пропускаем обновление cookies")
             return None
         return await self._login_and_store_cookies(
             username,
@@ -195,17 +220,17 @@ class InstagramParser:
         if not cookies.get("sessionid"):
             return False, None
         headers = self._build_headers(entry.get("user_agent"), cookies.get("csrftoken"))
-        proxies_config = None
         proxy_for_httpx = self._format_proxy_for_httpx(proxy)
+        client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT}
         if proxy_for_httpx:
-            proxies_config = {
-                "http": proxy_for_httpx,
-                "https": proxy_for_httpx,
-            }
+            if HTTPX_USES_PROXY_PARAM:
+                client_kwargs["proxy"] = proxy_for_httpx
+            else:
+                client_kwargs["proxies"] = {
+                    "http": proxy_for_httpx,
+                    "https": proxy_for_httpx,
+                }
         try:
-            client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT}
-            if proxies_config:
-                client_kwargs["proxies"] = proxies_config
             async with httpx.AsyncClient(**client_kwargs) as client:
                 resp = await client.get(
                     "https://i.instagram.com/api/v1/accounts/current_user/",
@@ -218,10 +243,10 @@ class InstagramParser:
                 if status in (401, 403, 400):
                     return False, status
                 if status == 429:
-                    print("⚠️ Получен 429 при проверке cookies, оставляем их валидными.")
+                    self.logger.send("INFO", "⚠️ Получен 429 при проверке cookies, оставляем их валидными.")
                     return True, status
         except Exception as exc:
-            print(f"⚠️ Ошибка при проверке cookies: {exc}")
+            self.logger.send("INFO", f"⚠️ Ошибка при проверке cookies: {exc}")
         return False, None
 
     async def ensure_initial_cookies(self, accounts: list[str]) -> Dict[str, Dict[str, Any]]:
@@ -293,7 +318,7 @@ class InstagramParser:
             try:
                 username, password, two_factor_code = account.split(":", 2)
             except ValueError:
-                print(f"⚠️ Некорректный формат аккаунта '{account}', ожидается username:password:2fa")
+                self.logger.send("INFO", f"⚠️ Некорректный формат аккаунта '{account}', ожидается username:password:2fa")
                 return
 
             self.account_credentials[username] = {
@@ -313,7 +338,8 @@ class InstagramParser:
                     await mark_valid(username, cached_entry)
                     return
                 status_text = status_code if status_code is not None else "unknown"
-                print(
+                self.logger.send(
+                    "INFO",
                     f"🔁 Куки {username} в кеше просрочены или недоступны (статус {status_text}) — обновляем"
                 )
                 self._drop_session(username)
@@ -332,12 +358,12 @@ class InstagramParser:
                             proxy_candidates=[last_proxy],
                         )
                     except InvalidCredentialsError as cred_exc:
-                        print(f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
+                        self.logger.send("INFO", f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
                         self._drop_session(username)
                         await mark_invalid(username)
                         return
                     except Exception as exc:
-                        print(f"⚠️ Ошибка авторизации {username} через прокси {last_proxy}: {exc}")
+                        self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {last_proxy}: {exc}")
                     finally:
                         await release_proxy(last_proxy)
 
@@ -361,12 +387,12 @@ class InstagramParser:
                         proxy_candidates=[proxy],
                     )
                 except InvalidCredentialsError as cred_exc:
-                    print(f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
+                    self.logger.send("INFO", f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
                     self._drop_session(username)
                     await mark_invalid(username)
                     return
                 except Exception as exc:
-                    print(f"⚠️ Ошибка авторизации {username} через прокси {proxy}: {exc}")
+                    self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {proxy}: {exc}")
                 finally:
                     await release_proxy(proxy)
 
@@ -376,7 +402,7 @@ class InstagramParser:
                     await mark_valid(username, entry)
                     return
 
-            print(f"❌ Не удалось обновить cookies для {username} — исчерпаны прокси/попытки")
+            self.logger.send("INFO", f"❌ Не удалось обновить cookies для {username} — исчерпаны прокси/попытки")
 
         semaphore = asyncio.Semaphore(max_workers)
 
@@ -388,11 +414,11 @@ class InstagramParser:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for result in results:
             if isinstance(result, Exception):
-                print(f"⚠️ Необработанная ошибка при сборе cookies: {result}")
+                self.logger.send("INFO", f"⚠️ Необработанная ошибка при сборе cookies: {result}")
 
         if self.invalid_accounts:
             invalid_list = ", ".join(sorted(self.invalid_accounts))
-            print(f"⚠️ Аккаунты с некорректным паролем: {invalid_list}")
+            self.logger.send("INFO", f"⚠️ Аккаунты с некорректным паролем: {invalid_list}")
 
         return valid_sessions
 
@@ -411,15 +437,16 @@ class InstagramParser:
                     proxy=cached_entry.get("proxy"),
                 )
                 if is_valid:
-                    print(f"♻️ Куки для {username} ещё действительны — повторный логин не требуется (статус {status_code})")
+                    self.logger.send("INFO", f"♻️ Куки для {username} ещё действительны — повторный логин не требуется (статус {status_code})")
                     return cached_entry
                 else:
-                    print(
+                    self.logger.send(
+                        "INFO",
                         f"🔁 Куки для {username} устарели — инициируем новое получение"
                     )
                     self._drop_session(username)
             except Exception as exc:
-                print(f"⚠️ Ошибка при проверке сохранённых cookies {username}: {exc}")
+                self.logger.send("INFO", f"⚠️ Ошибка при проверке сохранённых cookies {username}: {exc}")
 
         proxy_pool = self._dedupe_proxies(proxy_candidates or self.proxy_list or [])
         if proxy_candidates is None:
@@ -456,20 +483,20 @@ class InstagramParser:
                 #     try:
                 #         await apply_stealth(page)
                 #     except Exception as stealth_exc:
-                #         print(f"⚠️ Не удалось применить playwright-stealth: {stealth_exc}")
+                #         self.logger.send("INFO", f"⚠️ Не удалось применить playwright-stealth: {stealth_exc}")
 
                 cookies = await self.login_to_instagram(page, username, password, two_factor_code)
                 if cookies:
                     user_agent = await page.evaluate("navigator.userAgent")
                     entry = self._update_cookie_entry(username, cookies, user_agent, proxy_str)
-                    print(f"✅ Сохранены cookies для {username} (прокси: {proxy_str})")
+                    self.logger.send("INFO", f"✅ Сохранены cookies для {username} (прокси: {proxy_str})")
                     return entry
-                print(f"⚠️ Не удалось авторизоваться с аккаунтом {username} на прокси {proxy_str}")
+                self.logger.send("INFO", f"⚠️ Не удалось авторизоваться с аккаунтом {username} на прокси {proxy_str}")
             except InvalidCredentialsError as cred_exc:
                 self._drop_session(username)
                 raise cred_exc
             except Exception as exc:
-                print(f"⚠️ Ошибка авторизации {username} через прокси {proxy_str}: {exc}")
+                self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {proxy_str}: {exc}")
             finally:
                 if browser:
                     try:
@@ -513,7 +540,7 @@ class InstagramParser:
                     return response, username, entry
 
                 if status in (401, 403):
-                    print(f"⚠️ Сессия {username} вернула {status}, обновляем cookies...")
+                    self.logger.send("INFO", f"⚠️ Сессия {username} вернула {status}, обновляем cookies...")
                     self._drop_session(username)
                     refreshed = await self._refresh_session(username)
                     if refreshed:
@@ -523,11 +550,11 @@ class InstagramParser:
                     continue
 
                 if status == 400:
-                    print(f"⚠️ Сессия {username} вернула 400, пробуем другую сессию.")
+                    self.logger.send("INFO", f"⚠️ Сессия {username} вернула 400, пробуем другую сессию.")
                     continue
 
                 if status == 429:
-                    print(f"⚠️ Сессия {username} получила 429 (rate limit), пробуем другую.")
+                    self.logger.send("INFO", f"⚠️ Сессия {username} получила 429 (rate limit), пробуем другую.")
                     continue
 
                 if status == 404:
@@ -537,7 +564,7 @@ class InstagramParser:
                 return response, username, entry
             except Exception as exc:
                 last_exception = exc
-                print(f"⚠️ Ошибка при запросе ({username}): {exc}")
+                self.logger.send("INFO", f"⚠️ Ошибка при запросе ({username}): {exc}")
 
         if last_exception:
             raise last_exception
@@ -568,7 +595,7 @@ class InstagramParser:
                 return response, username, entry
 
             if status in (401, 403):
-                print(f"⚠️ Сессия {username} устарела ({status}), пытаемся обновить.")
+                self.logger.send("INFO", f"⚠️ Сессия {username} устарела ({status}), пытаемся обновить.")
                 self._drop_session(username)
                 refreshed = await self._refresh_session(username)
                 if refreshed:
@@ -592,7 +619,7 @@ class InstagramParser:
                 )
 
             if status == 400:
-                print(f"⚠️ Сессия {username} вернула 400, переключаемся на другую.")
+                self.logger.send("INFO", f"⚠️ Сессия {username} вернула 400, переключаемся на другую.")
                 return await self._request_with_sessions(
                     sessions,
                     url,
@@ -602,7 +629,7 @@ class InstagramParser:
                 )
 
             if status == 429:
-                print(f"⚠️ Сессия {username} получила 429, переключаемся.")
+                self.logger.send("INFO", f"⚠️ Сессия {username} получила 429, переключаемся.")
                 return await self._request_with_sessions(
                     sessions,
                     url,
@@ -614,7 +641,7 @@ class InstagramParser:
             response.raise_for_status()
             return response, username, entry
         except Exception as exc:
-            print(f"⚠️ Ошибка запроса через сессию {username}: {exc}")
+            self.logger.send("INFO", f"⚠️ Ошибка запроса через сессию {username}: {exc}")
             return await self._request_with_sessions(
                 sessions,
                 url,
@@ -632,7 +659,7 @@ class InstagramParser:
         response, session_username, entry = await self._request_with_sessions(sessions, url)
 
         if response.status_code == 404:
-            print(f"⚠️ Профиль @{username} не найден (404).")
+            self.logger.send("INFO", f"⚠️ Профиль @{username} не найден (404).")
             return None, session_username, entry
 
         try:
@@ -677,7 +704,7 @@ class InstagramParser:
             response, session_username, entry = await self._request_with_sessions(sessions, url)
 
         if response.status_code == 404:
-            print(f"⚠️ Рил {shortcode} не найден (404).")
+            self.logger.send("INFO", f"⚠️ Рил {shortcode} не найден (404).")
             return None, session_username, entry
 
         try:
@@ -687,7 +714,7 @@ class InstagramParser:
 
         media = (data or {}).get("data", {}).get("shortcode_media")
         if not media:
-            print(f"⚠️ Неожиданная структура для рила {shortcode}: {data}")
+            self.logger.send("INFO", f"⚠️ Неожиданная структура для рила {shortcode}: {data}")
             return None, session_username, entry
 
         return media, session_username, entry
@@ -739,7 +766,7 @@ class InstagramParser:
             try:
                 data = response.json()
             except Exception as exc:
-                print(f"⚠️ Не удалось декодировать JSON списка рилов: {exc}")
+                self.logger.send("INFO", f"⚠️ Не удалось декодировать JSON списка рилов: {exc}")
                 break
 
             items = data.get("items", [])
@@ -769,9 +796,9 @@ class InstagramParser:
             html_content = await page.content()
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(html_content)
-            print(f"HTML saved to {filename} due to error: {error_message}")
+            self.logger.send("INFO", f"HTML saved to {filename} due to error: {error_message}")
         except Exception as save_error:
-            print(f"Failed to save HTML: {str(save_error)}")
+            self.logger.send("INFO", f"Failed to save HTML: {str(save_error)}")
 
     async def get_2fa_code(self, page, two_factor_code):
         two_factor_page = await page.context.new_page()
@@ -786,19 +813,19 @@ class InstagramParser:
                 code = await two_factor_code_element.inner_text()
                 code = re.sub(r"\D", "", code)
                 if len(code) == 6 and code.isdigit():
-                    print(f"2FA код успешно получен: {code}")
+                    self.logger.send("INFO", f"2FA код успешно получен: {code}")
                     return code
                 else:
-                    print(f"Неверный формат 2FA кода: {code}")
+                    self.logger.send("INFO", f"Неверный формат 2FA кода: {code}")
                     return None
             else:
-                print("Элемент 2FA кода не найден")
+                self.logger.send("INFO", "Элемент 2FA кода не найден")
                 return None
         except Exception as e:
             await self.save_html_on_error(
                 two_factor_page,
                 f"https://2fa.fb.rip/{two_factor_code}", str(e))
-            print(f"Не удалось получить 2FA код: {e}")
+            self.logger.send("INFO", f"Не удалось получить 2FA код: {e}")
             return None
         finally:
             await two_factor_page.close()
@@ -813,15 +840,15 @@ class InstagramParser:
                     status = response.status
                     if status >= 400:
                         body = await response.text()
-                        print(f"API Error {status} from {response.url}: {body[:500]}")
+                        self.logger.send("INFO", f"API Error {status} from {response.url}: {body[:500]}")
                         api_errors.append({"url": response.url, "status": status, "body": body})
                 except Exception as e:
-                    print(f"Не удалось прочитать тело ответа API: {e}")
+                    self.logger.send("INFO", f"Не удалось прочитать тело ответа API: {e}")
 
         page.on("response", log_response)
 
         try:
-            print(f"Начало авторизации для пользователя {username}")
+            self.logger.send("INFO", f"Начало авторизации для пользователя {username}")
 
             # Логируем среду
             user_agent = await page.evaluate("navigator.userAgent")
@@ -831,58 +858,58 @@ class InstagramParser:
                 ip = await page.evaluate("await (await fetch('https://api.ipify.org?format=json')).json().then(r => r.ip)")
             except:
                 ip = "unknown"
-            print(f"User-Agent: {user_agent}")
-            print(f"Language: {language}, Timezone: {timezone}, IP: {ip}")
+            self.logger.send("INFO", f"User-Agent: {user_agent}")
+            self.logger.send("INFO", f"Language: {language}, Timezone: {timezone}, IP: {ip}")
 
             await page.goto("https://www.instagram.com", timeout=50000)
             await page.wait_for_load_state("networkidle", timeout=30000)
-            print("Страница загружена")
+            self.logger.send("INFO", "Страница загружена")
 
             # Обработка баннера cookies
-            print("Проверка наличия баннера cookies")
+            self.logger.send("INFO", "Проверка наличия баннера cookies")
             cookie_found = False
             cookie_selectors = [
                 'button:has-text("Allow all cookies")',
                 'button:has-text("Decline optional cookies")',
             ]
             for selector in cookie_selectors:
-                print(f"Поиск кнопки cookies: {selector}")
+                self.logger.send("INFO", f"Поиск кнопки cookies: {selector}")
                 try:
                     await page.wait_for_selector(selector, timeout=5000)
                     btn = await page.query_selector(selector)
                     if btn and await btn.is_visible() and await btn.is_enabled():
-                        print(f"Клик по кнопке cookies: {selector}")
+                        self.logger.send("INFO", f"Клик по кнопке cookies: {selector}")
                         await btn.click()
                         await page.wait_for_timeout(3000)
                         cookie_found = True
                         break
                 except Exception as e:
-                    print(f"Селектор {selector} не сработал: {e}")
+                    self.logger.send("INFO", f"Селектор {selector} не сработал: {e}")
 
             if not cookie_found:
-                print("Баннер cookies не найден или не обработан — продолжаем")
+                self.logger.send("INFO", "Баннер cookies не найден или не обработан — продолжаем")
 
             # === КНОПКА "Log in" на главной ===
-            print("Поиск начальной кнопки Log in")
+            self.logger.send("INFO", "Поиск начальной кнопки Log in")
             login_button = await page.query_selector('button:has-text("Log in")')
             if not login_button:
                 await self.save_html_on_error(page, page.url, "Кнопка Log in не найдена")
-                print("Кнопка Log in не найдена")
+                self.logger.send("INFO", "Кнопка Log in не найдена")
                 return None
 
             is_visible = await login_button.is_visible()
             is_enabled = await login_button.is_enabled()
-            print(f"Кнопка Log in видима: {is_visible}, активна: {is_enabled}")
+            self.logger.send("INFO", f"Кнопка Log in видима: {is_visible}, активна: {is_enabled}")
             if not (is_visible and is_enabled):
                 await self.save_html_on_error(page, page.url, "Кнопка Log in неактивна")
                 return None
 
-            print("Клик по кнопке Log in")
+            self.logger.send("INFO", "Клик по кнопке Log in")
             await login_button.click(timeout=30000)
             await page.wait_for_timeout(4000)
 
             # === ПРОВЕРКА ОШИБОК НА ФОРМЕ ===
-            print("Проверка сообщений об ошибке после перехода на форму")
+            self.logger.send("INFO", "Проверка сообщений об ошибке после перехода на форму")
             error_selectors = [
                 'p:has-text("Sorry, your password was incorrect")',
                 'p:has-text("We couldn\'t find an account with that username")',
@@ -894,7 +921,7 @@ class InstagramParser:
                 el = await page.query_selector(sel)
                 if el and await el.is_visible():
                     err_text = (await el.text_content()).strip()
-                    print(f"Ошибка на форме: {err_text}")
+                    self.logger.send("INFO", f"Ошибка на форме: {err_text}")
                     await self.save_html_on_error(page, page.url, f"Ошибка входа: {err_text}")
                     err_lower = err_text.lower()
                     if "incorrect password" in err_lower or "incorrect username or password" in err_lower:
@@ -904,12 +931,12 @@ class InstagramParser:
                     return None
 
             # === ОЖИДАНИЕ ФОРМЫ ===
-            print("Ожидание поля username")
+            self.logger.send("INFO", "Ожидание поля username")
             try:
                 await page.wait_for_selector('input[name="username"]', timeout=20000)
             except PlaywrightTimeoutError:
                 await self.save_html_on_error(page, page.url, "Форма входа не загрузилась")
-                print("Форма входа не появилась")
+                self.logger.send("INFO", "Форма входа не появилась")
                 return None
 
             # === ЗАПОЛНЕНИЕ USERNAME ===
@@ -920,9 +947,9 @@ class InstagramParser:
 
             await username_field.fill(username)
             actual_user = await username_field.input_value()
-            print(f"Введён username: '{username}', фактическое значение: '{actual_user}'")
+            self.logger.send("INFO", f"Введён username: '{username}', фактическое значение: '{actual_user}'")
             if actual_user != username:
-                print("Поле username не сохранило значение")
+                self.logger.send("INFO", "Поле username не сохранило значение")
                 return None
 
             # === ЗАПОЛНЕНИЕ PASSWORD ===
@@ -932,7 +959,7 @@ class InstagramParser:
                 return None
 
             await password_field.fill(password)
-            print("Пароль введён")
+            self.logger.send("INFO", "Пароль введён")
 
             # === КНОПКА ВХОДА НА ФОРМЕ ===
             final_login_button = await page.query_selector('button[type="submit"]')
@@ -942,34 +969,34 @@ class InstagramParser:
 
             if not final_login_button:
                 await self.save_html_on_error(page, page.url, "Кнопка входа на форме не найдена")
-                print("Кнопка входа на форме не найдена")
+                self.logger.send("INFO", "Кнопка входа на форме не найдена")
                 return None
 
             is_vis = await final_login_button.is_visible()
             is_en = await final_login_button.is_enabled()
-            print(f"Кнопка входа на форме: видима={is_vis}, активна={is_en}")
+            self.logger.send("INFO", f"Кнопка входа на форме: видима={is_vis}, активна={is_en}")
             if not (is_vis and is_en):
                 await self.save_html_on_error(page, page.url, "Кнопка входа неактивна")
                 return None
 
-            print("Клик по финальной кнопке Log in")
+            self.logger.send("INFO", "Клик по финальной кнопке Log in")
             await final_login_button.click(timeout=30000)
             await page.wait_for_timeout(6000)
 
             # === ПОСЛЕ КЛИКА: ПРОВЕРКА URL И ОШИБОК ===
             current_url = page.url
             title = await page.title()
-            print(f"После входа: URL={current_url}, Title={title}")
+            self.logger.send("INFO", f"После входа: URL={current_url}, Title={title}")
 
             # Проверка на challenge / suspended
             if "/challenge/" in current_url:
                 await self.save_html_on_error(page, current_url, "Требуется верификация (challenge)")
-                print("Обнаружен challenge — требуется ручная верификация")
+                self.logger.send("INFO", "Обнаружен challenge — требуется ручная верификация")
                 return None
 
             if "/suspended/" in current_url:
                 await self.save_html_on_error(page, current_url, "Аккаунт приостановлен")
-                print("Аккаунт приостановлен")
+                self.logger.send("INFO", "Аккаунт приостановлен")
                 return None
 
             # Повторная проверка ошибок на форме (иногда появляются позже)
@@ -977,7 +1004,7 @@ class InstagramParser:
                 el = await page.query_selector(sel)
                 if el and await el.is_visible():
                     err_text = (await el.text_content()).strip()
-                    print(f"Ошибка после отправки формы: {err_text}")
+                    self.logger.send("INFO", f"Ошибка после отправки формы: {err_text}")
                     await self.save_html_on_error(page, page.url, f"Ошибка после входа: {err_text}")
                     err_lower = err_text.lower()
                     if "incorrect password" in err_lower or "incorrect username or password" in err_lower:
@@ -987,21 +1014,21 @@ class InstagramParser:
                     return None
 
             # === 2FA ===
-            print("Проверка 2FA")
+            self.logger.send("INFO", "Проверка 2FA")
             try:
                 await page.wait_for_selector('input[aria-label="Code"]', timeout=15000)
-                print("Обнаружено поле 2FA")
+                self.logger.send("INFO", "Обнаружено поле 2FA")
                 code_field = await page.query_selector('input[aria-label="Code"]')
                 if not code_field:
                     raise Exception("Поле кода не найдено")
 
                 verification_code = await self.get_2fa_code(page, two_factor_code)
                 if not verification_code:
-                    print("Не удалось получить 2FA код")
+                    self.logger.send("INFO", "Не удалось получить 2FA код")
                     return None
 
                 await code_field.fill(verification_code)
-                print(f"2FA код введён: {verification_code}")
+                self.logger.send("INFO", f"2FA код введён: {verification_code}")
 
                 continue_btn = await page.query_selector('div[role="button"][aria-label="Continue"]')
                 if continue_btn:
@@ -1012,10 +1039,10 @@ class InstagramParser:
                 trust_checkbox = await page.query_selector('div[role="checkbox"][aria-label*="Trust"]')
                 if trust_checkbox:
                     await trust_checkbox.click()
-                    print("Устройство помечено как доверенное")
+                    self.logger.send("INFO", "Устройство помечено как доверенное")
 
             except PlaywrightTimeoutError:
-                print("2FA не требуется")
+                self.logger.send("INFO", "2FA не требуется")
 
             # === КНОПКА "Not now" ===
             try:
@@ -1023,20 +1050,20 @@ class InstagramParser:
                 not_now_button = page.get_by_role("button", name="Not now")
                 if await not_now_button.is_visible(timeout=5000):
                     await not_now_button.click()
-                    print("Клик по 'Not now'")
+                    self.logger.send("INFO", "Клик по 'Not now'")
                 else:
                     # Попробуем русскую локализацию
                     not_now_button_ru = page.get_by_role("button", name="Не сейчас")
                     if await not_now_button_ru.is_visible(timeout=3000):
                         await not_now_button_ru.click()
-                        print("Клик по 'Не сейчас'")
+                        self.logger.send("INFO", "Клик по 'Не сейчас'")
             except Exception as e:
-                print(f"'Not now' не найден или не удалось нажать: {e}")
+                self.logger.send("INFO", f"'Not now' не найден или не удалось нажать: {e}")
 
             # === ФИНАЛЬНАЯ ПРОВЕРКА: УСПЕХ ===
             await page.wait_for_timeout(5000)
             if "instagram.com/accounts/login/" in page.url:
-                print("Всё ещё на странице входа — вход не удался")
+                self.logger.send("INFO", "Всё ещё на странице входа — вход не удался")
                 await self.save_html_on_error(page, page.url, "Вход не удался: остался на login-странице")
                 try:
                     page_text = await page.content()
@@ -1052,22 +1079,22 @@ class InstagramParser:
             cookies = self._extract_auth_cookies(await page.context.cookies())
 
             if "/accounts/onetap/" in page.url or "/accounts/login/" not in page.url:
-                print("Успешный вход в Instagram")
+                self.logger.send("INFO", "Успешный вход в Instagram")
                 if cookies:
                     return cookies
-                print("⚠️ Не удалось извлечь cookies после успешного входа")
+                self.logger.send("INFO", "⚠️ Не удалось извлечь cookies после успешного входа")
                 return None
 
-            print("Неясное состояние после входа — возможно, частичный успех")
+            self.logger.send("INFO", "Неясное состояние после входа — возможно, частичный успех")
             if cookies:
                 return cookies
-            print("⚠️ Не удалось извлечь cookies в неясном состоянии входа")
+            self.logger.send("INFO", "⚠️ Не удалось извлечь cookies в неясном состоянии входа")
             return None
 
         except InvalidCredentialsError:
             raise
         except Exception as e:
-            print(f"Исключение в login_to_instagram: {str(e)}")
+            self.logger.send("INFO", f"Исключение в login_to_instagram: {str(e)}")
             await self.save_html_on_error(page, page.url or "https://www.instagram.com", "Необработанная ошибка")
             return None
 
@@ -1079,7 +1106,7 @@ class InstagramParser:
         reel_data = set()
 
         for attempt in range(max_scroll_attempts):
-            print(f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
+            self.logger.send("INFO", f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
 
             while True:
                 # Собираем все элементы рилсов
@@ -1122,14 +1149,14 @@ class InstagramParser:
                 """)
                 await page.wait_for_timeout(int(delay * 1000))
                 current_count = await page.eval_on_selector_all(selector, "els => els.length")
-                print(f"Текущее количество элементов: {current_count}, URL-ов рилов: {len(reel_data)}")
+                self.logger.send("INFO", f"Текущее количество элементов: {current_count}, URL-ов рилов: {len(reel_data)}")
 
                 if current_count == prev_count:
                     idle_rounds += 1
-                    print(f"Количество элементов не изменилось, idle_rounds: {idle_rounds}")
+                    self.logger.send("INFO", f"Количество элементов не изменилось, idle_rounds: {idle_rounds}")
                     if idle_rounds >= max_idle_rounds:
-                        print(f"Достигнут конец списка рилов для профиля {url}")
-                        print(f"Собрано {len(reel_data)} пар (URL рила, URL изображения)")
+                        self.logger.send("INFO", f"Достигнут конец списка рилов для профиля {url}")
+                        self.logger.send("INFO", f"Собрано {len(reel_data)} пар (URL рила, URL изображения)")
                         break
                 else:
                     idle_rounds = 0
@@ -1141,7 +1168,7 @@ class InstagramParser:
                     }
                 """)
                 if is_at_bottom and idle_rounds >= max_idle_rounds:
-                    print(f"Достигнут конец страницы для {url}")
+                    self.logger.send("INFO", f"Достигнут конец страницы для {url}")
                     break
 
         return list(reel_data)
@@ -1222,44 +1249,48 @@ class InstagramParser:
         accounts: Optional[list[str]] = None,
         proxy_list: Optional[list[str]] = None,
     ):
-        if proxy_list is not None:
-            if proxy_list:
-                print(f"🔁 Обновляем список прокси из аргумента: {proxy_list}")
-            else:
-                print("ℹ️ Парсинг будет выполнен без прокси (передан пустой список).")
-            self.proxy_list = proxy_list or []
+        if proxy_list is None:
+            self.logger.send("INFO", "❌ proxy_list не передан в parse_channel — задача остановлена.")
+            return
+
+        normalized_proxies = self._normalize_proxy_input(proxy_list)
+        if normalized_proxies:
+            self.logger.send("INFO", f"🔁 Обновляем список прокси из аргумента: {normalized_proxies}")
+        else:
+            self.logger.send("INFO", "ℹ️ Парсинг будет выполнен без прокси (после нормализации список пуст).")
+        self.proxy_list = normalized_proxies
 
         accounts = accounts or []
         if not accounts:
-            print("⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
+            self.logger.send("INFO", "⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
             return
 
         try:
             sessions = await self.ensure_initial_cookies(accounts)
         except Exception as exc:
-            print(f"❌ Не удалось подготовить cookies: {exc}")
+            self.logger.send("INFO", f"❌ Не удалось подготовить cookies: {exc}")
             return
 
         if not sessions:
-            print("❌ Не удалось получить валидные cookies ни для одного аккаунта.")
+            self.logger.send("INFO", "❌ Не удалось получить валидные cookies ни для одного аккаунта.")
             return
 
         username = self.extract_username_from_url(url)
         if not username:
-            print(f"❌ Не удалось определить username из URL {url}")
+            self.logger.send("INFO", f"❌ Не удалось определить username из URL {url}")
             return
 
-        print(f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
+        self.logger.send("INFO", f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
         preferred_session: Optional[tuple[str, Dict[str, Any]]] = None
 
         try:
             profile_data, session_username, session_entry = await self._fetch_profile_via_api(sessions, username)
         except Exception as exc:
-            print(f"❌ Ошибка получения профиля @{username}: {exc}")
+            self.logger.send("INFO", f"❌ Ошибка получения профиля @{username}: {exc}")
             return
 
         if not profile_data:
-            print(f"⚠️ Профиль @{username} недоступен или отсутствует.")
+            self.logger.send("INFO", f"⚠️ Профиль @{username} недоступен или отсутствует.")
             return
 
         if session_username and session_entry:
@@ -1267,7 +1298,7 @@ class InstagramParser:
 
         user_id = profile_data.get("id")
         if not user_id:
-            print(f"❌ Не удалось получить ID пользователя для @{username}")
+            self.logger.send("INFO", f"❌ Не удалось получить ID пользователя для @{username}")
             return
 
         try:
@@ -1279,19 +1310,19 @@ class InstagramParser:
                 preferred_session=preferred_session,
             )
         except Exception as exc:
-            print(f"❌ Ошибка получения списка рилов для @{username}: {exc}")
+            self.logger.send("INFO", f"❌ Ошибка получения списка рилов для @{username}: {exc}")
             return
 
         if fetched_session:
             preferred_session = fetched_session
 
         if not clips_media:
-            print(f"⚠️ API не вернуло рилы для @{username}.")
+            self.logger.send("INFO", f"⚠️ API не вернуло рилы для @{username}.")
             return
 
         items_limit = max_retries if max_retries and max_retries > 0 else len(clips_media)
         reel_sequence = clips_media[:items_limit] if items_limit < len(clips_media) else clips_media
-        print(f"📹 Получено {len(clips_media)} рилов для @{username}, обрабатываем {len(reel_sequence)}")
+        self.logger.send("INFO", f"📹 Получено {len(clips_media)} рилов для @{username}, обрабатываем {len(reel_sequence)}")
 
         image_tasks: list[tuple[int, str]] = []
 
@@ -1312,9 +1343,9 @@ class InstagramParser:
                         files=files,
                     )
                     resp.raise_for_status()
-                    print(f"📸 Загружено превью для видео {video_id}")
+                    self.logger.send("INFO", f"📸 Загружено превью для видео {video_id}")
             except Exception as exc:
-                print(f"❌ Ошибка загрузки превью {video_id}: {exc}")
+                self.logger.send("INFO", f"❌ Ошибка загрузки превью {video_id}: {exc}")
 
         async def save_video_and_image(
             channel_id: int,
@@ -1371,7 +1402,7 @@ class InstagramParser:
                                 timeout=20.0,
                             )
                             update_resp.raise_for_status()
-                            # print(f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
+                            self.logger.send("INFO", f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
                         else:
                             is_new = True
                     else:
@@ -1386,14 +1417,14 @@ class InstagramParser:
                         resp.raise_for_status()
                         created_video = resp.json()
                         video_id = created_video["id"]
-                        print(f"📦 Создано видео {video_id} ({reel_url})")
+                        self.logger.send("INFO", f"📦 Создано видео {video_id} ({reel_url})")
 
                     if video_id and is_new and image_url:
                         image_tasks.append((video_id, image_url))
-                        print(f"Добавлено в очередь {video_id}: {image_url}")
+                        self.logger.send("INFO", f"Добавлено в очередь {video_id}: {image_url}")
 
             except Exception as exc:
-                print(f"❌ Ошибка сохранения видео {reel_url}: {exc}")
+                self.logger.send("INFO", f"❌ Ошибка сохранения видео {reel_url}: {exc}")
 
         processed = 0
         total_candidates = len(reel_sequence)
@@ -1405,7 +1436,7 @@ class InstagramParser:
             if not shortcode or shortcode in seen_shortcodes:
                 continue
             seen_shortcodes.add(shortcode)
-            # print(f"➡️ Обработка рила {shortcode} ({idx}/{total_candidates})")
+            self.logger.send("INFO", f"➡️ Обработка рила {shortcode} ({idx}/{total_candidates})")
             try:
                 play_count = media.get("play_count") or media.get("video_view_count") or 0
                 like_count = media.get("like_count") or 0
@@ -1451,17 +1482,17 @@ class InstagramParser:
                 processed += 1
                 await asyncio.sleep(0.5)
             except Exception as exc:
-                print(f"❌ Ошибка обработки рила {shortcode}: {exc}")
+                self.logger.send("INFO", f"❌ Ошибка обработки рила {shortcode}: {exc}")
 
         if image_tasks:
-            print(f"📸 Начинаем загрузку {len(image_tasks)} изображений...")
+            self.logger.send("INFO", f"📸 Начинаем загрузку {len(image_tasks)} изображений...")
             for idx, (video_id, img_url) in enumerate(image_tasks):
-                print(f"🖼️ Загрузка {idx + 1}/{len(image_tasks)} для видео {video_id}...")
+                self.logger.send("INFO", f"🖼️ Загрузка {idx + 1}/{len(image_tasks)} для видео {video_id}...")
                 await upload_image(video_id, img_url)
                 if idx < len(image_tasks) - 1:
                     await asyncio.sleep(2.0)
 
-        print(f"✅ Обработано {processed} рилов для @{username}")
+        self.logger.send("INFO", f"✅ Обработано {processed} рилов для @{username}")
         return
 
 

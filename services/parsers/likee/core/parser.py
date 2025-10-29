@@ -1,4 +1,5 @@
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 import httpx
 import json
@@ -17,6 +18,31 @@ class LikeeParser:
     ):
         self.logger = logger
         self.current_proxy_index = 0
+
+    def _format_proxy(self, proxy: Optional[str]) -> Optional[str]:
+        if not proxy:
+            return None
+        proxy = proxy.strip()
+        if not proxy:
+            return None
+        if proxy.startswith(("http://", "https://")):
+            return proxy
+        if "@" in proxy:
+            auth, host_port = proxy.split("@", 1)
+            host, port = host_port.split(":", 1)
+            return f"http://{auth}@{host}:{port}"
+        if ":" in proxy:
+            host, port = proxy.split(":", 1)
+            return f"http://{host}:{port}"
+        return proxy
+
+    def _select_next_proxy(self, proxies: List[Optional[str]], last_proxy: Optional[str]) -> Optional[str]:
+        if not proxies:
+            return None
+        if len(proxies) == 1:
+            return proxies[0]
+        candidates = [p for p in proxies if p != last_proxy]
+        return random.choice(candidates) if candidates else proxies[0]
 
     async def get_proxy_config(self, proxy_str: str) -> Optional[dict]:
         try:
@@ -285,9 +311,10 @@ class LikeeParser:
 
         return ",".join(found_tags) if found_tags else None
 
-    async def download_image(self, url: str, proxy: str = None) -> Union[bytes, None]:
+    async def download_image(self, url: str, proxy: Optional[str] = None) -> Union[bytes, None]:
+        formatted_proxy = self._format_proxy(proxy)
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with httpx.AsyncClient(timeout=20.0, proxy=formatted_proxy) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 self.logger.send("INFO", f"Успешно загружено изображение: {url}")
@@ -296,7 +323,7 @@ class LikeeParser:
             self.logger.send("INFO", f"❌ Ошибка загрузки {url}: {e}")
             return None
 
-    async def upload_image(self, video_id: int, image_url: str, proxy: str = None):
+    async def upload_image(self, video_id: int, image_url: str, proxy: Optional[str] = None):
         image_bytes = await self.download_image(image_url, proxy=proxy)
         if not image_bytes:
             self.logger.send("INFO", f"Не удалось скачать изображение для видео {video_id}")
@@ -480,34 +507,27 @@ class LikeeParser:
                     self.logger.send("INFO", f"Ошибка при обработке {video_data.get('link')}: {e}")
                     continue
 
-            # Загрузка изображений
-            idx = 0
-            while idx < len(image_queue):
-                if not proxy_list:
-                    proxy = None
-                else:
-                    proxy = proxy_list[self.current_proxy_index]
-                    self.current_proxy_index = (self.current_proxy_index + 1) % len(proxy_list)
+            proxy_candidates: List[Optional[str]] = list(proxy_list) if proxy_list else [None]
+            pending_images = deque((video_id, image_url, None) for video_id, image_url in image_queue)
 
-                batch = image_queue[idx: idx + 15]
-                self.logger.send("INFO", f"🌐 Прокси {proxy}: качаем {len(batch)} фото")
+            while pending_images:
+                video_id, image_url, last_proxy_used = pending_images.popleft()
+                proxy = self._select_next_proxy(proxy_candidates, last_proxy_used)
+                self.logger.send("INFO", f"🌐 Прокси {proxy or 'без прокси'}: качаем фото для видео {video_id}")
 
-                for video_id, image_url in batch:
-                    try:
-                        status, resp_text = await self.upload_image(video_id, image_url, proxy=proxy)
-                        if status == 200:
-                            self.logger.send("INFO", f"✅ Фото для видео {video_id} загружено")
-                        else:
-                            self.logger.send("INFO", f"⚠️ Фото для видео {video_id} ошибка {status}")
-                    except Exception as e:
-                        self.logger.send("INFO", f"❌ Ошибка загрузки фото для {video_id}: {e}")
-                    await asyncio.sleep(5.0)
+                try:
+                    status, resp_text = await self.upload_image(video_id, image_url, proxy=proxy)
+                    if status == 200:
+                        self.logger.send("INFO", f"✅ Фото для видео {video_id} загружено")
+                        await asyncio.sleep(5.0)
+                        continue
+                    self.logger.send("INFO", f"⚠️ Фото для видео {video_id} ошибка {status}")
+                except Exception as e:
+                    self.logger.send("INFO", f"❌ Ошибка загрузки фото для {video_id}: {e}")
 
-                idx += 15
-
-                if idx < len(image_queue) and self.current_proxy_index == 0 and proxy_list:
-                    self.logger.send("INFO", "⏳ Все прокси использованы, ждём 1 минуту...")
-                    await asyncio.sleep(60)
+                self.logger.send("INFO", f"🔄 Повторим загрузку фото для {video_id} через 1 минуту на другой прокси")
+                pending_images.append((video_id, image_url, proxy))
+                await asyncio.sleep(60.0)
 
             self.logger.send("INFO", f"✅ Успешно обработано {processed_count} видео")
 

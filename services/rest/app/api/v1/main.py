@@ -38,18 +38,18 @@ async def lifespan(app: FastAPI):
             print(f"❌ Ошибка при инициализации БД: {e}")
             raise e
     # 2. Инициализация RabbitMQ
-    try:
-        rabbit_producer.connect()
-        rabbit_producer.declare_queue("parsing", durable=True)
-        for channel_type in ChannelType:
-            queue_name = f"parsing_{channel_type.value}"
-            rabbit_producer.declare_queue(queue_name, durable=True)
-        print("✅ RabbitMQ: соединение установлено и очередь объявлена")
-    except Exception as e:
-        print(f"❌ Не удалось подключиться к RabbitMQ: {e}")
-        raise
-    await restore_scheduled_tasks()
-    scheduler.start()
+    # try:
+    #     rabbit_producer.connect()
+    #     rabbit_producer.declare_queue("parsing", durable=True)
+    #     for channel_type in ChannelType:
+    #         queue_name = f"parsing_{channel_type.value}"
+    #         rabbit_producer.declare_queue(queue_name, durable=True)
+    #     print("✅ RabbitMQ: соединение установлено и очередь объявлена")
+    # except Exception as e:
+    #     print(f"❌ Не удалось подключиться к RabbitMQ: {e}")
+    #     raise
+    # await restore_scheduled_tasks()
+    # scheduler.start()
 
     # 3. Инициализация TCPLogger
     # global logger

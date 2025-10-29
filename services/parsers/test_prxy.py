@@ -1,13 +1,13 @@
 import requests
 
 # Настройки прокси
-proxy_url = "15ObFJmCP5:a0rog6kGgT@45.150.35.113:24242"
+proxy_url = "pA7b4DkZVm:8yv1LzTa82@109.120.131.6:53046"
 proxies = {
     "http": proxy_url,
     "https": proxy_url,
 }
 
-url = "https://www.tiktok.com/@nastya.beomaa/video/7555146575194950934"
+url = "https://ya.ru/"
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",

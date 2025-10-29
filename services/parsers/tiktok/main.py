@@ -38,7 +38,7 @@ from utils.rabbit_client import RabbitMQParserClient
 if __name__ == "__main__":
     async def main():
         try:
-            print("Starting Shorts parser...", flush=True)
+            print("Starting TikTok parser...", flush=True)
             await asyncio.sleep(60)
             parser = TikTokParser(TCPLogger("tiktok_parser"))
             client = RabbitMQParserClient(

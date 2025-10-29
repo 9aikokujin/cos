@@ -40,7 +40,13 @@ class RabbitMQParserClient:
             if task_type == "channel":
                 self.logger.send("INFO", f"Начал парсить канал {url}")
                 data = await self.parser.parse_channel(
-                    url, channel_id, user_id, 3, proxy_list, accounts)
+                            url=url,
+                            channel_id=channel_id,
+                            user_id=user_id,
+                            max_retries=3,
+                            accounts=accounts,
+                            proxy_list=proxy_list,
+                        )
 
             # if task_type == "video":
             #     self.logger.send("INFO", f"Начал парсить видео {url}")

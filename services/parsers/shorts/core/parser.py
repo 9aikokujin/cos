@@ -2,6 +2,7 @@ import re
 import asyncio
 # import time
 import json
+from collections import deque
 from datetime import datetime
 from typing import Optional, Dict, List, Union, Any
 import httpx
@@ -12,6 +13,7 @@ import random
 
 from bs4 import BeautifulSoup
 from utils.logger import TCPLogger
+from urllib.parse import urlparse, urlunparse
 
 
 ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
@@ -43,6 +45,36 @@ class ShortsParser:
         self.seen_video_ids.clear()
         self.response_tasks.clear()
         self.saved_html_count = 0
+
+    def _select_next_proxy(self, proxies: List[Optional[str]], last_proxy: Optional[str]) -> Optional[str]:
+        if not proxies:
+            return None
+        if len(proxies) == 1:
+            return proxies[0]
+        candidates = [p for p in proxies if p != last_proxy]
+        return random.choice(candidates) if candidates else proxies[0]
+
+    def normalize_profile_url(self, raw_url: str) -> str:
+        cleaned = (raw_url or "").strip()
+        if not cleaned:
+            raise ValueError("Пустой URL профиля YouTube")
+        if not re.match(r"^https?://", cleaned, re.IGNORECASE):
+            cleaned = f"https://{cleaned.lstrip('/')}"
+        parsed = urlparse(cleaned)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or "youtube.com"
+        path = parsed.path or ""
+
+        segments = [segment for segment in path.split("/") if segment]
+        username_segment = next((segment for segment in segments if segment.startswith("@")), None)
+        if username_segment:
+            path = f"/{username_segment}"
+        elif segments:
+            path = f"/{segments[0]}"
+        else:
+            path = "/"
+
+        return urlunparse((scheme, netloc, path.rstrip("/"), "", "", ""))
 
     def parse_views(self, text: str) -> int:
         if not text:
@@ -826,8 +858,8 @@ class ShortsParser:
         5. Передаём данные дальше на API (ниже по функции).
         """
         self.proxy_list = proxy_list or []
-        current_proxy_index = 0
 
+        url = self.normalize_profile_url(url)
         if not url.endswith('/shorts'):
             url = url.rstrip('/') + '/shorts'
         self.logger.send("INFO", f"Переход на канал: {url}")
@@ -1101,21 +1133,27 @@ class ShortsParser:
         self.logger.send("INFO", f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
 
         # --- Загрузка изображений ---
-        idx = 0
-        while idx < len(image_queue):
-            proxy = proxy_list[current_proxy_index] if proxy_list else None
-            current_proxy_index = (current_proxy_index + 1) % len(proxy_list) if proxy_list else 0
-            batch = image_queue[idx:idx + 15]
-            self.logger.send("INFO", f"🖼️ Загружаем {len(batch)} изображений через {proxy or 'без прокси'}")
+        proxy_candidates: List[Optional[str]] = list(proxy_list) if proxy_list else [None]
+        pending_images = deque((vid, img_url, None) for vid, img_url in image_queue)
 
-            for vid, img_url in batch:
-                try:
-                    status, _ = await self.upload_image(vid, img_url, proxy=proxy)
-                    self.logger.send("INFO", f"{'✅' if status == 200 else '⚠️'} Фото для видео {vid} → статус {status}")
-                except Exception as e:
-                    self.logger.send("INFO", f"❌ Ошибка загрузки фото {vid}: {e}")
-                await asyncio.sleep(5.0)
-            idx += 15
+        while pending_images:
+            vid, img_url, last_proxy_used = pending_images.popleft()
+            proxy = self._select_next_proxy(proxy_candidates, last_proxy_used)
+            self.logger.send("INFO", f"🖼️ Загружаем изображение для {vid} через {proxy or 'без прокси'}")
+
+            try:
+                status, _ = await self.upload_image(vid, img_url, proxy=proxy)
+                if status == 200:
+                    self.logger.send("INFO", f"✅ Фото для видео {vid} загружено")
+                    await asyncio.sleep(5.0)
+                    continue
+                self.logger.send("INFO", f"⚠️ Фото для видео {vid} вернуло статус {status}")
+            except Exception as e:
+                self.logger.send("INFO", f"❌ Ошибка загрузки фото {vid}: {e}")
+
+            self.logger.send("INFO", f"🔄 Повторим загрузку фото для {vid} через 1 минуту на другой прокси")
+            pending_images.append((vid, img_url, proxy))
+            await asyncio.sleep(60.0)
 
         self.logger.send("INFO", f"🎉 Парсинг завершён: {processed_count} видео обработано.")
 
