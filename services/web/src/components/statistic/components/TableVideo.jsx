@@ -6,6 +6,8 @@ import { useDragScroll } from "@/hooks/useDragScroll";
 
 import Loader from "@/components/loader/Loader";
 
+import { getLatestVideos } from "@/shared/utils/utils";
+
 
 const TableVideo = () => {
   const { containerRef, handleMouseDown, handleMouseMove, handleMouseUp } =
@@ -48,11 +50,11 @@ const TableVideo = () => {
             </tr>
           </thead>
           <tbody>
-            {videoHistory.map((videoItem) => {
+            {getLatestVideos(videoHistory).map((videoItem) => {
               return (
                 <tr key={`${videoItem.id}-no-product`}>
                   <td data-label="Видео">
-                    <span>{videoItem.id}</span>
+                    <span>{videoItem.video_name}</span>
                   </td>
                   <td data-label="Просмотры">
                     <span className="text-muted">{videoItem.amount_views}</span>
