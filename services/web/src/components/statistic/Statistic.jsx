@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import API from "@/app/api";
 import { useFilterStore } from "@/app/store/filter/store";
-import { sumFields } from "@/shared/utils/utils";
+import { sumFields, sumVideoCounts } from "@/shared/utils/utils";
 
 import Loader from "@/components/loader/Loader";
 import Diagram from "./components/Diagram";
@@ -64,7 +64,7 @@ const Statistic = () => {
         {!filter.video_id && (
           <StatisticBlock
             title="Публикации"
-            value={sumFields(publushedVideo, ["video_count"]).video_count}
+            value={sumVideoCounts(publushedVideo, ["video_count"]).video_count}
             onClick={() => toggleMetric("video_count")}
             active={selectedMetrics.includes("video_count")}
           />
