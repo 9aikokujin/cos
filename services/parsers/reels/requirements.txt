@@ -13,6 +13,7 @@ httpx==0.28.1
 idna==3.10
 importlib_metadata==8.7.0
 multidict==6.6.3
+pyotp == 2.9.0
 pamqp==3.3.0
 playwright==1.54.0
 playwright-stealth==2.0.0
