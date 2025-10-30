@@ -111,7 +111,16 @@ def schedule_channel_task(channel_id: int, *, run_immediately: bool = False) -> 
         replace_existing=True,
     )
     immediate_dispatched = False
-    next_run = job.next_run_time
+    next_run = getattr(job, "next_run_time", None)
+    if next_run is None:
+        next_run = getattr(job, "next_fire_time", None)
+    if next_run is None:
+        # APScheduler 4.x no longer exposes next_run_time; compute manually.
+        try:
+            now = datetime.now(MOSCOW_TZ)
+            next_run = job.trigger.get_next_fire_time(None, now)
+        except Exception:
+            next_run = None
     if next_run:
         next_run_local = (
             next_run.astimezone(MOSCOW_TZ)
