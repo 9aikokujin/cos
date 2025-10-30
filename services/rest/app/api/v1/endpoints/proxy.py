@@ -20,6 +20,15 @@ async def get_all(db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/{id}", response_model=ProxyRead)
+async def get_by_id(id: int, db: AsyncSession = Depends(get_db)):
+    service = ProxyService(db)
+    proxy = await service.get_by_id(id)
+    if not proxy:
+        raise HTTPException(status_code=404, detail="Прокси не найден")
+    return proxy
+
+
 @router.post("/", response_model=ProxyRead)
 async def create_proxy(
     proxy_create: ProxyCreate, db: AsyncSession = Depends(get_db)
