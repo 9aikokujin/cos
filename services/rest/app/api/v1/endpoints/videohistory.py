@@ -102,7 +102,13 @@ async def daily_video_with_article_count(
     )
 
     return [
-        {"date": r.date.isoformat(), "video_count": r.video_count}
+        {
+            "date": r.date.isoformat() if r.date else None,
+            "video_count": (getattr(r, "video_count", 0) or 0),
+            "views": (getattr(r, "views", 0) or 0),
+            "likes": (getattr(r, "likes", 0) or 0),
+            "comments": (getattr(r, "comments", 0) or 0),
+        }
         for r in result
     ]
 

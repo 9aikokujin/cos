@@ -9,7 +9,7 @@ from app.models.channel import ChannelType
 from app.models.account import Account
 from app.models.proxy import Proxy
 from app.utils.rabbitmq_producer import rabbit_producer
-from app.utils.scheduler import scheduler, process_recurring_task
+from app.utils.scheduler import schedule_channel_task
 from fastapi import HTTPException
 
 
@@ -62,6 +62,11 @@ class ChannelService:
         if not new_channel:
             raise ValueError("Ошибка при создании канала")
 
+        type_channel = ChannelType.get_by_value(dto.type.value)
+        immediate_dispatched = schedule_channel_task(new_channel.id, run_immediately=True)
+        if immediate_dispatched:
+            return new_channel
+
         proxies_from_db = await self.repo.db.execute(select(Proxy))
         proxies = proxies_from_db.scalars().all()
         likee_proxies = [p.proxy_str for p in proxies if p.for_likee is True]
@@ -69,34 +74,9 @@ class ChannelService:
 
         accounts_from_db = await self.repo.db.execute(select(Account))
         accounts = accounts_from_db.scalars().all()
-        accounts_for_send = []
-        for account in accounts:
-            accounts_for_send.append(account.account_str)
+        accounts_for_send = [account.account_str for account in accounts]
 
-        type_channel = ChannelType.get_by_value(dto.type.value)
-        if type_channel == ChannelType.LIKEE:
-            rabbit_producer.send_task(
-                f"parsing_{dto.type.value}",
-                {
-                    "type": "channel",
-                    "user_id": user.id,
-                    "url": new_channel.link,
-                    "channel_id": new_channel.id,
-                    "accounts": accounts_for_send,
-                    "proxy_list": likee_proxies
-                }
-            )
-
-            job_id = f"task_{new_channel.id}"
-            scheduler.add_job(
-                process_recurring_task,
-                "interval",
-                hours=24,
-                args=[new_channel.id, "channel"],
-                id=job_id,
-                max_instances=1,
-            )
-            return new_channel
+        proxy_payload = likee_proxies if type_channel == ChannelType.LIKEE else proxies_for_send
 
         rabbit_producer.send_task(
             f"parsing_{dto.type.value}",
@@ -106,18 +86,8 @@ class ChannelService:
                 "url": new_channel.link,
                 "channel_id": new_channel.id,
                 "accounts": accounts_for_send,
-                "proxy_list": proxies_for_send
+                "proxy_list": proxy_payload
             }
-        )
-
-        job_id = f"task_{new_channel.id}"
-        scheduler.add_job(
-            process_recurring_task,
-            "interval",
-            hours=24,
-            args=[new_channel.id, "channel"],
-            id=job_id,
-            max_instances=1,
         )
 
         return new_channel
@@ -135,6 +105,11 @@ class ChannelService:
         if not new_channel:
             raise ValueError("Ошибка при создании канала")
 
+        type_channel = ChannelType.get_by_value(dto.type.value)
+        immediate_dispatched = schedule_channel_task(new_channel.id, run_immediately=True)
+        if immediate_dispatched:
+            return new_channel
+
         proxies_from_db = await self.repo.db.execute(select(Proxy))
         proxies = proxies_from_db.scalars().all()
         likee_proxies = [p.proxy_str for p in proxies if p.for_likee is True]
@@ -142,11 +117,9 @@ class ChannelService:
 
         accounts_from_db = await self.repo.db.execute(select(Account))
         accounts = accounts_from_db.scalars().all()
-        accounts_for_send = []
-        for account in accounts:
-            accounts_for_send.append(account.account_str)
+        accounts_for_send = [account.account_str for account in accounts]
 
-        proxy_payload = likee_proxies if dto.type == ChannelType.LIKEE else proxies_for_send
+        proxy_payload = likee_proxies if type_channel == ChannelType.LIKEE else proxies_for_send
 
         rabbit_producer.send_task(
             f"parsing_{dto.type.value}",
@@ -158,16 +131,6 @@ class ChannelService:
                 "accounts": accounts_for_send,
                 "proxy_list": proxy_payload
             }
-        )
-
-        job_id = f"task_{new_channel.id}"
-        scheduler.add_job(
-            process_recurring_task,
-            "interval",
-            hours=24,
-            args=[new_channel.id, "channel"],
-            id=job_id,
-            max_instances=1,
         )
 
         return new_channel

@@ -170,7 +170,7 @@ async def test_filtered_stats_all_accepts_multiple_users(
 
         async def get_aggregated_views_by_date_all(self, **kwargs):
             captured.update(kwargs)
-            return [{"date": "2024-01-01", "views": 100, "likes": 10, "comments": 1, "video_name": "Video 1"}]
+            return [{"date": "2024-01-01", "views": 100, "likes": 10, "comments": 1}]
 
     monkeypatch.setattr(videohistory, "VideoHistoryService", ServiceStub)
 
@@ -181,7 +181,7 @@ async def test_filtered_stats_all_accepts_multiple_users(
 
     assert response.status_code == 200
     assert response.json() == [
-        {"date": "2024-01-01", "views": 100, "likes": 10, "comments": 1, "video_name": "Video 1"}
+        {"date": "2024-01-01", "views": 100, "likes": 10, "comments": 1}
     ]
     assert captured["user"] == admin_user
     assert captured["user_ids"] == [1, 2], captured

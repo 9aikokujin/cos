@@ -2,8 +2,9 @@ import asyncio
 import json
 import random
 import re
+from collections import deque
 from datetime import datetime, timezone
-from typing import Union, Optional, Tuple, Callable, Awaitable, Dict, List
+from typing import Union, Optional, Tuple, Callable, Awaitable, Dict, List, Set
 from urllib.parse import urlparse, urlunparse, urljoin
 
 import httpx
@@ -24,7 +25,7 @@ from playwright.async_api import async_playwright, Page, Response, TimeoutError 
 #                 return
 #             await stealth.apply_stealth_async(page)  # type: ignore
 
-from utils.logger import TCPLogger
+# from utils.logger import TCPLogger
 
 
 ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
@@ -63,6 +64,8 @@ HEADERS_POOL = [
     },
 ]
 
+from utils.logger import TCPLogger
+
 
 class ProxySwitchRequired(RuntimeError):
     """Special exception to signal that we should switch to the next proxy."""
@@ -85,6 +88,33 @@ class TikTokParser:
         self.dom_video_links = {}
         self.dom_images = {}
         self.dom_order = []
+
+    @staticmethod
+    def _has_uploaded_image(image_field) -> bool:
+        """Определяем, есть ли у видео уже загруженное изображение."""
+        if image_field is None:
+            return False
+        if isinstance(image_field, str):
+            return bool(image_field.strip())
+        if isinstance(image_field, dict):
+            candidate = image_field.get("url") or image_field.get("image") or image_field.get("path")
+            if isinstance(candidate, str):
+                return bool(candidate.strip())
+            return bool(image_field)
+        if isinstance(image_field, (list, tuple, set)):
+            return any(
+                TikTokParser._has_uploaded_image(item)
+                for item in image_field
+            )
+        return bool(image_field)
+
+    def _select_next_proxy(self, proxies: List[Optional[str]], last_proxy: Optional[str]) -> Optional[str]:
+        if not proxies:
+            return None
+        if len(proxies) == 1:
+            return proxies[0]
+        candidates = [p for p in proxies if p != last_proxy]
+        return random.choice(candidates) if candidates else proxies[0]
 
     # def _log(self, level: str, message: str):
     #     if self.logger:
@@ -134,7 +164,7 @@ class TikTokParser:
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080},
-            timezone_id="America/New_York",
+            # timezone_id="America/New_York",
             proxy=proxy_config,
             locale="en-US",
         )
@@ -337,7 +367,8 @@ class TikTokParser:
                 self.logger.send("INFO", "🔁 Новых карточек нет, ждём и пробуем мини-скролл")
                 if acceptable_total is not None and current_total >= acceptable_total:
                     if target_count and current_total < target_count:
-                        self.logger.send("INFO", 
+                        self.logger.send(
+                            "INFO",
                             f"⚠️ Собрано {current_total}/{target_count}, допускаем недобор в {tolerance} видео."
                         )
                     break
@@ -421,6 +452,18 @@ class TikTokParser:
         # сохраняем порядок для детерминированности
         return ", ".join(sorted(found, key=lambda x: x.lower()))
 
+    def _select_cover_url(self, video_data: Dict) -> Optional[str]:
+        candidates = [
+            video_data.get("originCover"),
+            video_data.get("cover"),
+            video_data.get("dynamicCover"),
+            video_data.get("poster"),  # fallback if присутствует
+        ]
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.startswith(("http://", "https://")):
+                return candidate
+        return None
+
     def parse_video_html(self, html: str) -> Optional[Dict[str, Union[str, int]]]:
         data = self._extract_universal_data(html)
         if not data:
@@ -432,6 +475,9 @@ class TikTokParser:
         item_struct = item_info.get("itemStruct", {})
         if not item_struct:
             return None
+
+        video_data = item_struct.get("video") or {}
+        cover_url = self._select_cover_url(video_data if isinstance(video_data, dict) else {})
 
         stats = item_struct.get("stats", {})
         desc = item_struct.get("desc") or ""
@@ -461,6 +507,7 @@ class TikTokParser:
             "amount_comments": to_int(stats.get("commentCount")),
             "date_published": published_at,
             "articles": articles,
+            "cover_url": cover_url,
         }
 
     def generate_short_title(self, full_text: str, max_length: int = 30) -> str:
@@ -650,7 +697,8 @@ class TikTokParser:
                                 success = True
                                 break
 
-                            self.logger.send("INFO", 
+                            self.logger.send(
+                                "INFO",
                                 f"⚠️ На прокси {current_proxy or 'без прокси'} собрано только "
                                 f"{collected_now}/{effective_target if effective_target is not None else '—'} — повторяем."
                             )
@@ -720,7 +768,8 @@ class TikTokParser:
                 pass
 
         total_collected = len(self.dom_order)
-        self.logger.send("INFO", 
+        self.logger.send(
+            "INFO",
             f"🎯 Собрано {total_collected} ссылок (videoCount: {target_video_count if target_video_count is not None else '—'})",
         )
 
@@ -752,6 +801,9 @@ class TikTokParser:
             description = parsed.get("description") or ""
             title = self.generate_short_title(description or video_id)
             image_url = self.dom_images.get(video_id)
+            if not (isinstance(image_url, str) and image_url.startswith(("http://", "https://"))):
+                cover_url = parsed.get("cover_url")
+                image_url = cover_url if isinstance(cover_url, str) and cover_url.startswith(("http://", "https://")) else None
 
             all_videos_data.append(
                 {
@@ -801,6 +853,7 @@ class TikTokParser:
 
         processed_count = 0
         image_queue = []
+        queued_video_ids: Set[int] = set()
 
         for video_data in all_videos_data:
             link = video_data.get("link", "UNKNOWN_LINK")
@@ -814,12 +867,13 @@ class TikTokParser:
                         payload = check.json()
                         vids = payload.get("videos", [])
                         if vids:
-                            video_id = vids[0]["id"]
+                            existing_video = vids[0]
+                            video_id = existing_video["id"]
                             update_payload = {
                                 "amount_views": video_data.get("amount_views", 0),
                                 "amount_likes": video_data.get("amount_likes", 0),
                                 "amount_comments": video_data.get("amount_comments", 0),
-                                "date_published": video_data.get("date_published"),
+                                # "date_published": video_data.get("date_published"),
                                 "articles": video_data.get("articles"),
                                 # "description": video_data.get("description"),
                             }
@@ -828,6 +882,11 @@ class TikTokParser:
                                 json=update_payload,
                             )
                             upd.raise_for_status()
+                            existing_image = existing_video.get("image")
+                            image_missing = not self._has_uploaded_image(existing_image)
+                            if image_missing and video_data.get("image_url") and video_id not in queued_video_ids:
+                                image_queue.append((video_id, video_data["image_url"]))
+                                queued_video_ids.add(video_id)
                         else:
                             is_new = True
                     else:
@@ -842,9 +901,14 @@ class TikTokParser:
                         }
                         create = await client.post("https://cosmeya.dev-klick.cyou/api/v1/videos/", json=create_payload)
                         create.raise_for_status()
-                        video_id = create.json()["id"]
-                        if video_data.get("image_url"):
-                            image_queue.append((video_id, video_data["image_url"]))
+                        created_video = create.json()
+                        video_id = created_video["id"]
+                        created_image = created_video.get("image")
+                        image_missing = not self._has_uploaded_image(created_image)
+                        if video_data.get("image_url") and video_id not in queued_video_ids:
+                            if image_missing:
+                                image_queue.append((video_id, video_data["image_url"]))
+                                queued_video_ids.add(video_id)
 
                 processed_count += 1
 
@@ -852,34 +916,27 @@ class TikTokParser:
                 self.logger.send("INFO", f"Критическая ошибка при обработке {link}: {e}")
                 continue
 
-        last_proxy_for_images: Optional[str] = None
-        idx = 0
-        proxy_list = self.proxy_list or []
-        while idx < len(image_queue):
-            proxy = None
-            if proxy_list:
-                if len(proxy_list) == 1:
-                    proxy = proxy_list[0]
-                else:
-                    candidates = [p for p in proxy_list if p != last_proxy_for_images]
-                    proxy = random.choice(candidates) if candidates else proxy_list[0]
-            last_proxy_for_images = proxy
+        proxy_candidates: List[Optional[str]] = list(self.proxy_list) if self.proxy_list else [None]
+        pending_images = deque((video_id, image_url, None) for video_id, image_url in image_queue)
 
-            batch = image_queue[idx: idx + 15]
-            self.logger.send("INFO", f"🖼️ Прокси {proxy or 'без прокси'}: загружаем {len(batch)} фото")
+        while pending_images:
+            video_id, image_url, last_proxy_used = pending_images.popleft()
+            proxy = self._select_next_proxy(proxy_candidates, last_proxy_used)
+            self.logger.send("INFO", f"🖼️ Прокси {proxy or 'без прокси'}: загружаем фото для видео {video_id}")
 
-            for video_id, image_url in batch:
-                try:
-                    status, _ = await upload_image(video_id, image_url, proxy=proxy)
-                    if status == 200:
-                        self.logger.send("INFO", f"✅ Фото загружено для видео {video_id}")
-                    else:
-                        self.logger.send("INFO", f"⚠️ Фото: код {status} для видео {video_id}")
-                except Exception as e:
-                    self.logger.send("INFO", f"❌ Ошибка загрузки фото для {video_id}: {e}")
-                await asyncio.sleep(4.0)
+            try:
+                status, _ = await upload_image(video_id, image_url, proxy=proxy)
+                if status == 200:
+                    self.logger.send("INFO", f"✅ Фото загружено для видео {video_id}")
+                    await asyncio.sleep(4.0)
+                    continue
+                self.logger.send("INFO", f"⚠️ Фото: код {status} для видео {video_id}")
+            except Exception as e:
+                self.logger.send("INFO", f"❌ Ошибка загрузки фото для {video_id}: {e}")
 
-            idx += 15
+            self.logger.send("INFO", f"🔄 Повторим попытку для видео {video_id} через 1 минуту на другой прокси")
+            pending_images.append((video_id, image_url, proxy))
+            await asyncio.sleep(60.0)
 
         self.logger.send("INFO", f"✅ Успешно обработано {processed_count} видео")
 
@@ -888,37 +945,35 @@ class TikTokParser:
 
 # async def main():
 #     proxy_list = [
-#         # "LgSCXw:UCNpHx@138.219.120.153:9466",
-#         "g3dmsMyYST:B9BegRNRzi@45.150.35.224:28898",
-#         "Weh1oXn82b:dUYiJZ5w7T@45.150.35.129:31801",
-#         "gnmPrWSMJ4:tbHyXTwWdx@45.150.35.114:54943",
-#         "15ObFJmCP5:a0rog6kGgT@45.150.35.113:24242",
-#         "Z7mGFwrT6N:5wLFFO5v3S@109.120.131.5:34707",
-#         "HCtCUxQYnj:GM9pjQ8J8T@109.120.131.229:39202",
-#         "dBY505zGKK:8gqxiwpjvg@45.150.35.44:40281",
-#         "zhH47betn3:J8eC3qaOrs@109.120.131.175:38411",
-#         "KX32alVE51:ZVD0CsjFhJ@109.120.131.27:47449",
-#         "KTdw9aNBl7:MI45E5jVnB@45.150.35.233:57281",
-#         "7bZbeHwcNI:fFs1cUXfbN@109.120.131.219:29286",
-#         "F1Y0BvrqNo:HKPbfMGtJw@45.150.35.31:41247",
-#         "WfkB8GfYts:vXdJAVXCSI@45.150.35.133:35460",
-#         "yr3Xib8LYo:FzS9t4PGro@45.150.35.3:50283",
-#         "exOL0CR6TN:oj0BGarhAk@45.150.35.143:32354",
-#         "CbZ35SQIZb:OO4ddjBRiK@45.150.35.99:28985",
-#         "JRGI3q6Zo9:LJpcFpCgU2@45.150.35.30:32381",
-#         "NTPvsl77eN:wagp6GmWNk@109.120.131.41:55509",
-#         "SBqj98lU9c:ktxTU1ZOid@45.150.35.138:55350",
-#         "3El7Uvg1TY:1DZVyrdMPs@45.150.35.231:51842",
-#         "dBqOOqGczg:d2xKkdc3Re@45.150.35.156:38617",
-#         "fz91O4ury3:ZBCW6s8d7E@45.150.35.132:47712",
-#         "RLFUp7vicq:X1TTYhQYWs@45.150.35.34:40674",
-#         "3dQxPpHkj4:o12oWKn5Lg@45.150.35.201:42897",
-#         "iRArjOVFVr:0vXB48RsTf@45.150.35.200:42312",
+#         "PvJVn6:jr8EvS@38.148.133.33:8000",
+#         "PvJVn6:jr8EvS@38.148.142.71:8000",
+#         "PvJVn6:jr8EvS@38.148.133.69:8000",
+#         "PvJVn6:jr8EvS@38.148.138.48:8000",
+#         "msEHZ8:tYomUE@168.196.239.222:9211",
+#         "msEHZ8:tYomUE@168.196.237.44:9129",
+#         "msEHZ8:tYomUE@168.196.237.99:9160",
+#         "msEHZ8:tYomUE@138.219.122.56:9409",
+#         "msEHZ8:tYomUE@138.219.122.128:9584",
+#         "msEHZ8:tYomUE@138.219.123.22:9205",
+#         "msEHZ8:tYomUE@138.59.5.46:9559",
+#         "msEHZ8:tYomUE@152.232.68.147:9269",
+#         "msEHZ8:tYomUE@152.232.67.18:9241",
+#         "msEHZ8:tYomUE@152.232.68.149:9212",
+#         "msEHZ8:tYomUE@152.232.66.152:9388",
+#         "msEHZ8:tYomUE@152.232.65.53:9461",
+#         "msEHZ8:tYomUE@190.185.108.103:9335",
+#         "msEHZ8:tYomUE@138.99.37.16:9622",
+#         "msEHZ8:tYomUE@138.99.37.136:9248",
+#         "msEHZ8:tYomUE@152.232.72.124:9057",
+#         "msEHZ8:tYomUE@23.229.49.135:9511",
+#         "msEHZ8:tYomUE@209.127.8.189:9281",
+#         "msEHZ8:tYomUE@152.232.72.235:9966",
+#         "msEHZ8:tYomUE@152.232.74.34:9043",
 #     ]
 #     parser = TikTokParser()
-#     url = "https://www.tiktok.com/@nastya.beomaa"
-#     user_id = 1
-#     await parser.parse_channel(url, channel_id=1, user_id=user_id, proxy_list=proxy_list)
+#     url = "https://www.tiktok.com/@bestbeautydeal"
+#     user_id = 13
+#     await parser.parse_channel(url, channel_id=33, user_id=user_id, proxy_list=proxy_list)
 
 
 # if __name__ == "__main__":

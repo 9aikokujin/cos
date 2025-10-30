@@ -2,18 +2,23 @@ import re
 import asyncio
 # import time
 import json
+from collections import deque
+from datetime import datetime
 from typing import Optional, Dict, List, Union, Any
 import httpx
 import requests
 # from pathlib import Path
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 import random
-from datetime import datetime
 
 from bs4 import BeautifulSoup
-
-
 # from utils.logger import TCPLogger
+from urllib.parse import urlparse, urlunparse
+
+
+ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
+# API_BASE_URL = "https://cosmeya.dev-klick.cyou/api/v1/videos"
+API_BASE_URL = "http://127.0.0.1:8000/api/v1/videos"
 
 
 class ShortsParser:
@@ -40,6 +45,36 @@ class ShortsParser:
         self.seen_video_ids.clear()
         self.response_tasks.clear()
         self.saved_html_count = 0
+
+    def _select_next_proxy(self, proxies: List[Optional[str]], last_proxy: Optional[str]) -> Optional[str]:
+        if not proxies:
+            return None
+        if len(proxies) == 1:
+            return proxies[0]
+        candidates = [p for p in proxies if p != last_proxy]
+        return random.choice(candidates) if candidates else proxies[0]
+
+    def normalize_profile_url(self, raw_url: str) -> str:
+        cleaned = (raw_url or "").strip()
+        if not cleaned:
+            raise ValueError("Пустой URL профиля YouTube")
+        if not re.match(r"^https?://", cleaned, re.IGNORECASE):
+            cleaned = f"https://{cleaned.lstrip('/')}"
+        parsed = urlparse(cleaned)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or "youtube.com"
+        path = parsed.path or ""
+
+        segments = [segment for segment in path.split("/") if segment]
+        username_segment = next((segment for segment in segments if segment.startswith("@")), None)
+        if username_segment:
+            path = f"/{username_segment}"
+        elif segments:
+            path = f"/{segments[0]}"
+        else:
+            path = "/"
+
+        return urlunparse((scheme, netloc, path.rstrip("/"), "", "", ""))
 
     def parse_views(self, text: str) -> int:
         if not text:
@@ -74,6 +109,68 @@ class ShortsParser:
                 value *= 1_000_000_000
 
         return int(round(value))
+
+    def _looks_like_views_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "view",
+            "просмот",
+            "visualiz",
+            "vista",
+            "vues",
+            "ansehen",
+            "ansicht",
+            "bekeken",
+            "weergav",
+            "görüntülenme",
+            "المشاهدات",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
+    def _looks_like_likes_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "like",
+            "лайк",
+            "thumb",
+            "класс",
+            "me gusta",
+            "gusta",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
+    def _looks_like_comments_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "comment",
+            "коммент",
+            "coment",
+            "reactie",
+            "ответ",
+            "reply",
+        )
+        return any(keyword in normalized for keyword in keywords)
+
+    def _looks_like_publish_text(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = text.lower()
+        keywords = (
+            "publish",
+            "uploaded",
+            "опублик",
+            "вышло",
+            "premiered",
+            "премьера",
+            "дата",
+        )
+        return any(keyword in normalized for keyword in keywords)
 
     async def get_videos_count_from_header(self, page, timeout: int = 8000) -> Optional[int]:
         try:
@@ -391,10 +488,136 @@ class ShortsParser:
 
         return {"player": player_data, "initial": initial_data}
 
+    def _normalize_article(self, tag: str) -> Optional[str]:
+        if not tag:
+            return None
+        if not tag.startswith("#"):
+            tag = "#" + tag
+        lower_tag = tag.lower()
+        for prefix in ARTICLE_PREFIXES:
+            if lower_tag.startswith(prefix):
+                return tag
+        return None
+
+    def _extract_text(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            simple = value.get("simpleText") or value.get("text")
+            if isinstance(simple, str):
+                return simple
+            runs = value.get("runs")
+            if isinstance(runs, list):
+                parts = [
+                    run.get("text", "")
+                    for run in runs
+                    if isinstance(run, dict) and isinstance(run.get("text"), str)
+                ]
+                if parts:
+                    return "".join(parts)
+        return ""
+
+    def extract_date_from_text(self, text: str) -> Optional[str]:
+        if not text:
+            return None
+
+        cleaned = text.strip()
+        cleaned = re.sub(
+            r"(?i)\b(published|uploaded|опубликован[а-я]*|премьера|premiered|дата публикации|date)\b[:\-]?",
+            "",
+            cleaned,
+        ).strip()
+
+        iso_match = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", cleaned)
+        if iso_match:
+            year, month, day = iso_match.groups()
+            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+        dotted_match = re.search(r"(\d{1,2})[.](\d{1,2})[.](\d{4})", cleaned)
+        if dotted_match:
+            day, month, year = dotted_match.groups()
+            return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+        month_aliases = {
+            "january": 1, "jan": 1, "jan.": 1,
+            "february": 2, "feb": 2, "feb.": 2,
+            "march": 3, "mar": 3, "mar.": 3,
+            "april": 4, "apr": 4, "apr.": 4,
+            "may": 5,
+            "june": 6, "jun": 6, "jun.": 6,
+            "july": 7, "jul": 7, "jul.": 7,
+            "august": 8, "aug": 8, "aug.": 8,
+            "september": 9, "sep": 9, "sep.": 9, "sept": 9, "sept.": 9,
+            "october": 10, "oct": 10, "oct.": 10,
+            "november": 11, "nov": 11, "nov.": 11,
+            "december": 12, "dec": 12, "dec.": 12,
+            "января": 1, "январь": 1, "янв": 1, "янв.": 1,
+            "февраля": 2, "февраль": 2, "фев": 2, "фев.": 2,
+            "марта": 3, "март": 3, "мар": 3, "мар.": 3,
+            "апреля": 4, "апрель": 4, "апр": 4, "апр.": 4,
+            "мая": 5, "май": 5,
+            "июня": 6, "июнь": 6, "июн": 6, "июн.": 6,
+            "июля": 7, "июль": 7, "июл": 7, "июл.": 7,
+            "августа": 8, "август": 8, "авг": 8, "авг.": 8,
+            "сентября": 9, "сентябрь": 9, "сен": 9, "сен.": 9,
+            "октября": 10, "октябрь": 10, "окт": 10, "окт.": 10,
+            "ноября": 11, "ноябрь": 11, "ноя": 11, "ноя.": 11,
+            "декабря": 12, "декабрь": 12, "дек": 12, "дек.": 12,
+        }
+
+        def month_to_number(name: str) -> Optional[int]:
+            if not name:
+                return None
+            key = name.strip().lower().replace("ё", "е")
+            return month_aliases.get(key)
+
+        match_en = re.search(r"([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})", cleaned)
+        if match_en:
+            month_name, day, year = match_en.groups()
+            month_num = month_to_number(month_name)
+            if month_num:
+                return f"{int(year):04d}-{month_num:02d}-{int(day):02d}"
+
+        match_day_first = re.search(r"(\d{1,2})\s+([A-Za-zА-Яа-яё.]+)\s+(\d{4})", cleaned)
+        if match_day_first:
+            day, month_name, year = match_day_first.groups()
+            month_num = month_to_number(month_name)
+            if month_num:
+                return f"{int(year):04d}-{month_num:02d}-{int(day):02d}"
+
+        return None
+
+    def extract_articles(self, description: str, text_extra: Optional[List[dict]]) -> Optional[str]:
+        found: set[str] = set()
+
+        if description:
+            for match in re.findall(r"#[\w-]+", description):
+                normalized = self._normalize_article(match)
+                if normalized:
+                    found.add(normalized)
+
+        if isinstance(text_extra, list):
+            for block in text_extra:
+                if not isinstance(block, dict):
+                    continue
+                name = block.get("hashtagName")
+                if isinstance(name, str):
+                    normalized = self._normalize_article(name)
+                    if normalized:
+                        found.add(normalized)
+
+        if not found:
+            return None
+
+        # сохраняем порядок для детерминированности
+        return ", ".join(sorted(found, key=lambda x: x.lower()))
+
     def extract_views_from_initial_data(self, data: Any) -> Optional[int]:
         """Извлекаем количество просмотров из различных структур ytInitialData."""
 
         def parse_candidate(value: Any) -> Optional[int]:
+            if value is None:
+                return None
             if isinstance(value, str):
                 parsed = self.parse_views(value)
                 return parsed if parsed else None
@@ -479,19 +702,264 @@ class ShortsParser:
 
         return None
 
+    def _extract_metric_from_factoids(self, data: Any, label_checker) -> Optional[int]:
+        """Общий обход структур factoidRenderer для извлечения числовых метрик по подписи."""
+
+        def parse_candidate(value: Any) -> Optional[int]:
+            if value is None:
+                return None
+            if isinstance(value, (str, dict, list)):
+                text = self._extract_text(value)
+            else:
+                text = str(value)
+            if not text:
+                return None
+            parsed = self.parse_views(text)
+            return parsed if parsed else None
+
+        def extract_from_renderer(renderer: Any) -> Optional[int]:
+            if not isinstance(renderer, dict):
+                return None
+            label_text = self._extract_text(renderer.get("label"))
+            if label_text and label_checker(label_text):
+                for key in (
+                    "value",
+                    "viewCount",
+                    "accessibilityText",
+                    "simpleText",
+                    "text",
+                    "title",
+                ):
+                    candidate = renderer.get(key)
+                    parsed = parse_candidate(candidate)
+                    if parsed is not None:
+                        return parsed
+                nested = renderer.get("factoid")
+                if isinstance(nested, dict):
+                    nested_renderer = nested.get("factoidRenderer")
+                    if nested_renderer:
+                        parsed = extract_from_renderer(nested_renderer)
+                        if parsed is not None:
+                            return parsed
+            else:
+                nested = renderer.get("factoid")
+                if isinstance(nested, dict):
+                    nested_renderer = nested.get("factoidRenderer")
+                    if nested_renderer:
+                        parsed = extract_from_renderer(nested_renderer)
+                        if parsed is not None:
+                            return parsed
+            return None
+
+        if not isinstance(data, (dict, list)):
+            return None
+
+        stack = [data]
+        visited: set[int] = set()
+
+        while stack:
+            node = stack.pop()
+            node_id = id(node)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+
+            if isinstance(node, dict):
+                if "factoidRenderer" in node:
+                    result = extract_from_renderer(node["factoidRenderer"])
+                    if result is not None:
+                        return result
+
+                renderer = node.get("viewCountFactoidRenderer")
+                if isinstance(renderer, dict):
+                    result = extract_from_renderer(renderer)
+                    if result is not None:
+                        return result
+
+                factoids = node.get("factoid")
+                if isinstance(factoids, list):
+                    for fact in factoids:
+                        if isinstance(fact, (dict, list)):
+                            stack.append(fact)
+
+                for value in node.values():
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+
+            elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+
+        return None
+
+    def extract_likes_from_initial_data(self, data: Any) -> Optional[int]:
+        """Ищет количество лайков в factoidRenderer внутри ytInitialData."""
+        return self._extract_metric_from_factoids(data, self._looks_like_likes_text)
+
+    def extract_publish_date_from_initial_data(self, data: Any) -> Optional[str]:
+        """Извлекает дату публикации из factoidRenderer внутри ytInitialData."""
+
+        def try_parse_from_renderer(renderer: dict) -> Optional[str]:
+            if not isinstance(renderer, dict):
+                return None
+            candidates = [
+                renderer.get("accessibilityText"),
+                renderer.get("value"),
+                renderer.get("label"),
+            ]
+            for candidate in candidates:
+                text = self._extract_text(candidate)
+                if not text:
+                    continue
+                parsed = self.extract_date_from_text(text)
+                if parsed:
+                    return parsed
+            combined = " ".join(
+                filter(
+                    None,
+                    [
+                        self._extract_text(renderer.get("value")),
+                        self._extract_text(renderer.get("label")),
+                    ],
+                )
+            )
+            if combined:
+                parsed = self.extract_date_from_text(combined)
+                if parsed:
+                    return parsed
+            nested = renderer.get("factoid")
+            if isinstance(nested, dict):
+                nested_renderer = nested.get("factoidRenderer")
+                if nested_renderer:
+                    return try_parse_from_renderer(nested_renderer)
+            return None
+
+        if not isinstance(data, (dict, list)):
+            return None
+
+        stack = [data]
+        visited: set[int] = set()
+
+        while stack:
+            node = stack.pop()
+            node_id = id(node)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+
+            if isinstance(node, dict):
+                renderer = node.get("factoidRenderer")
+                if isinstance(renderer, dict):
+                    parsed = try_parse_from_renderer(renderer)
+                    if parsed:
+                        return parsed
+                renderer = node.get("viewCountFactoidRenderer")
+                if isinstance(renderer, dict):
+                    parsed = try_parse_from_renderer(renderer)
+                    if parsed:
+                        return parsed
+                factoids = node.get("factoid")
+                if isinstance(factoids, list):
+                    stack.extend(
+                        item for item in factoids if isinstance(item, (dict, list))
+                    )
+                for value in node.values():
+                    if isinstance(value, (dict, list)):
+                        stack.append(value)
+
+            elif isinstance(node, list):
+                for item in node:
+                    if isinstance(item, (dict, list)):
+                        stack.append(item)
+
+        return None
+
+    def extract_comment_count(self, data: Any) -> Optional[int]:
+        """Извлекаем количество комментариев из engagementPanels."""
+        if not isinstance(data, dict):
+            return None
+
+        panels = data.get("engagementPanels")
+        if not isinstance(panels, list):
+            return None
+
+        for panel in panels:
+            if not isinstance(panel, dict):
+                continue
+            renderer = panel.get("engagementPanelSectionListRenderer")
+            if not isinstance(renderer, dict):
+                continue
+            header = renderer.get("header")
+            if not isinstance(header, dict):
+                continue
+            title_renderer = header.get("engagementPanelTitleHeaderRenderer")
+            if not isinstance(title_renderer, dict):
+                continue
+            title_text = self._extract_text(title_renderer.get("title")).lower()
+            if "comment" not in title_text and "коммент" not in title_text:
+                continue
+            contextual = title_renderer.get("contextualInfo")
+            count_text = self._extract_text(contextual)
+            parsed = self.parse_views(count_text)
+            if parsed:
+                return parsed
+
+        return None
+
+    def extract_overlay_metrics(self, data: Any) -> Dict[str, Any]:
+        metrics: Dict[str, Any] = {}
+        if not isinstance(data, dict):
+            return metrics
+
+        overlay = data.get("overlay", {}).get("reelPlayerOverlayRenderer", {})
+        if not isinstance(overlay, dict):
+            return metrics
+
+        header = overlay.get("reelPlayerHeaderSupportedRenderers", {}).get("reelPlayerHeaderRenderer", {})
+        if isinstance(header, dict):
+            accessibility = header.get("accessibility") or {}
+            label_data = accessibility.get("accessibilityData", {}) if isinstance(accessibility, dict) else {}
+            label_text = self._extract_text(label_data.get("label"))
+            if label_text:
+                segments = re.split(r"[•·|•]|\s{2,}", label_text)
+                for segment in segments:
+                    cleaned = segment.strip()
+                    if not cleaned:
+                        continue
+                    if self._looks_like_views_text(cleaned):
+                        metrics.setdefault("views", self.parse_views(cleaned))
+                        continue
+                    if self._looks_like_likes_text(cleaned):
+                        metrics.setdefault("likes", self.parse_views(cleaned))
+                        continue
+                    if self._looks_like_comments_text(cleaned):
+                        metrics.setdefault("comments", self.parse_views(cleaned))
+                        continue
+                    if self._looks_like_publish_text(cleaned):
+                        date_candidate = self.extract_date_from_text(cleaned)
+                        if date_candidate:
+                            metrics.setdefault("date_published", date_candidate)
+
+        description_candidate = overlay.get("description") or overlay.get("descriptionText")
+        description_text = self._extract_text(description_candidate)
+        if description_text:
+            metrics.setdefault("description", description_text.strip())
+
+        return metrics
+
     async def fetch_video_metadata(self, video_id: str, video_url: str, proxy: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Запрашиваем страницу шорта и достаём метаданные (название, просмотры, описание)."""
         formatted_proxy = self.prepare_proxy(proxy)
-        # headers = {
-        #     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-        #     "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-        # }
+        headers = {
+            "Accept-Language": "en-US,en;q=0.9"
+        }
         proxies = {"http": formatted_proxy, "https": formatted_proxy} if formatted_proxy else None
 
         def _fetch_html() -> str:
             response = requests.get(
                 video_url,
-                # headers=headers,
+                headers=headers,
                 timeout=30.0,
                 # allow_redirects=True,
                 proxies=proxies,
@@ -532,155 +1000,8 @@ class ShortsParser:
         if not isinstance(microformat, dict):
             microformat = {}
 
-        def _extract_text(value: Any) -> str:
-            if isinstance(value, str):
-                return value
-            if isinstance(value, dict):
-                if value.get("simpleText"):
-                    return value["simpleText"]
-                runs = value.get("runs")
-                if isinstance(runs, list):
-                    return "".join(run.get("text", "") for run in runs if isinstance(run, dict))
-            return ""
-
-        def _parse_number_from_text(raw: Optional[str]) -> Optional[int]:
-            if not raw:
-                return None
-            cleaned = raw.replace("\xa0", " ").strip()
-            match = re.search(
-                r"([\d\s.,]+)\s*(тыс(?:яч[аи])?|млн|миллион(?:ов)?|млрд|миллиард(?:ов)?|k|m|b)?",
-                cleaned,
-                re.IGNORECASE,
-            )
-            if match:
-                number_part = match.group(1)
-                suffix = match.group(2)
-                if suffix:
-                    suffix = suffix.strip().lower()
-                    if suffix.startswith("тыс"):
-                        suffix = "тыс"
-                    elif suffix.startswith("миллион") or suffix == "млн":
-                        suffix = "млн"
-                    elif suffix.startswith("миллиард") or suffix == "млрд":
-                        suffix = "млрд"
-                parsed_number = self.parse_compact_number(number_part, suffix) if suffix else self.parse_views(number_part)
-                if parsed_number:
-                    return parsed_number
-            return self.parse_views(cleaned)
-
-        def _normalize_publish_date(value: Optional[str]) -> Optional[str]:
-            if not value:
-                return None
-            candidate = value.strip()
-            if candidate.endswith("Z"):
-                candidate = candidate[:-1] + "+00:00"
-            try:
-                dt = datetime.fromisoformat(candidate)
-                return dt.date().isoformat()
-            except ValueError:
-                return None
-
-        def _extract_publish_date_from_factoids(factoids: List[Any]) -> Optional[str]:
-            month_aliases = {
-                "янв": 1,
-                "январь": 1,
-                "января": 1,
-                "фев": 2,
-                "февр": 2,
-                "февраль": 2,
-                "февраля": 2,
-                "мар": 3,
-                "март": 3,
-                "марта": 3,
-                "апр": 4,
-                "апрель": 4,
-                "апреля": 4,
-                "май": 5,
-                "мая": 5,
-                "июн": 6,
-                "июнь": 6,
-                "июня": 6,
-                "июл": 7,
-                "июль": 7,
-                "июля": 7,
-                "авг": 8,
-                "август": 8,
-                "августа": 8,
-                "сен": 9,
-                "сент": 9,
-                "сентябрь": 9,
-                "сентября": 9,
-                "oct": 10,
-                "october": 10,
-                "окт": 10,
-                "октябрь": 10,
-                "октября": 10,
-                "nov": 11,
-                "november": 11,
-                "ноя": 11,
-                "ноябрь": 11,
-                "ноября": 11,
-                "dec": 12,
-                "december": 12,
-                "дек": 12,
-                "декабрь": 12,
-                "декабря": 12,
-                "aug": 8,
-                "august": 8,
-                "apr": 4,
-                "april": 4,
-                "february": 2,
-                "january": 1,
-                "jan": 1,
-                "feb": 2,
-                "mar": 3,
-                "may": 5,
-                "jun": 6,
-                "june": 6,
-                "jul": 7,
-                "july": 7,
-                "sep": 9,
-                "sept": 9,
-                "september": 9,
-            }
-            for fact in factoids:
-                if not isinstance(fact, dict):
-                    continue
-                renderer = fact.get("factoidRenderer")
-                if not renderer:
-                    renderer = fact.get("viewCountFactoidRenderer", {}).get("factoid", {}).get("factoidRenderer")
-                if not renderer:
-                    continue
-                label_text = _extract_text(renderer.get("label"))
-                value_text = _extract_text(renderer.get("value"))
-                if not label_text or not value_text:
-                    continue
-                year_match = re.search(r"(\\d{4})", label_text)
-                if not year_match:
-                    continue
-                year = int(year_match.group(1))
-                day_match = re.search(r"(\\d{1,2})", value_text)
-                month_match = re.search(r"([A-Za-zА-Яа-яёЁ]+)", value_text)
-                if not day_match or not month_match:
-                    continue
-                day = int(day_match.group(1))
-                month_key = month_match.group(1).lower().rstrip(".")
-                month = month_aliases.get(month_key)
-                if not month:
-                    continue
-                try:
-                    return datetime(year, month, day).date().isoformat()
-                except ValueError:
-                    continue
-            return None
-
         title_candidate = video_details.get("title") or microformat.get("title")
-        title = _extract_text(title_candidate)
-
-        description = video_details.get("shortDescription")
-        if not description:
-            description = _extract_text(microformat.get("description"))
-        description = description.strip() if isinstance(description, str) else ""
+        title = self._extract_text(title_candidate)
 
         view_count_raw = video_details.get("viewCount")
         views = 0
@@ -690,108 +1011,88 @@ class ShortsParser:
             views = self.parse_views(view_count_raw)
 
         if not views:
-            view_count_text = _extract_text(microformat.get("viewCount"))
+            view_count_text = self._extract_text(microformat.get("viewCount"))
             if view_count_text:
                 views = self.parse_views(view_count_text)
 
         initial_data = parsed.get("initial") or {}
-        overlay = {}
-        if isinstance(initial_data, dict):
-            overlay = initial_data.get("overlay", {}).get("reelPlayerOverlayRenderer", {}) or {}
+        overlay_metrics: Dict[str, Any] = {}
+        if initial_data:
+            overlay_metrics = self.extract_overlay_metrics(initial_data)
 
-        if not views and overlay:
-            try:
-                header = overlay.get("reelPlayerHeaderSupportedRenderers", {}).get("reelPlayerHeaderRenderer", {})
-                sub_label = header.get("accessibility", {}).get("accessibilityData", {}).get("label", "")
-                views = self.parse_views(sub_label)
-            except Exception:
-                views = views or 0
-
+        overlay_views = overlay_metrics.get("views")
+        if not views and isinstance(overlay_views, int):
+            views = overlay_views
         if not views and initial_data:
             extracted = self.extract_views_from_initial_data(initial_data)
             if extracted:
                 views = extracted
 
-        likes = None
-        microformat_like = microformat.get("likeCount")
-        if isinstance(microformat_like, str):
-            likes = self.parse_views(microformat_like)
-        elif isinstance(microformat_like, (int, float)):
-            likes = int(microformat_like)
+        description = self._extract_text(microformat.get("description")) or ""
+        if not description:
+            short_description = video_details.get("shortDescription")
+            if isinstance(short_description, str):
+                description = short_description
+        if not description:
+            overlay_description = overlay_metrics.get("description")
+            if isinstance(overlay_description, str):
+                description = overlay_description
+        description = description.strip()
 
-        published_at = None
-        for candidate in (microformat.get("publishDate"), microformat.get("uploadDate")):
-            published_at = _normalize_publish_date(candidate)
-            if published_at:
-                break
+        like_raw = microformat.get("likeCount")
+        likes = 0
+        if isinstance(like_raw, str):
+            likes = self.parse_views(like_raw) or 0
+        elif like_raw is not None:
+            likes = self.parse_views(self._extract_text(like_raw)) or 0
 
-        comments = None
-        if overlay:
-            button_bar = overlay.get("buttonBar", {}).get("reelActionBarViewModel", {})
-            button_models = button_bar.get("buttonViewModels", []) if isinstance(button_bar, dict) else []
-            for button in button_models:
-                if not isinstance(button, dict):
-                    continue
-                like_vm = button.get("likeButtonViewModel")
-                if like_vm:
-                    like_count_vm = like_vm.get("likeCountViewModel")
-                    if isinstance(like_count_vm, dict):
-                        like_count_vm = like_count_vm.get("likeCountViewModel", like_count_vm)
-                    if isinstance(like_count_vm, dict) and not likes:
-                        like_candidate = like_count_vm.get("shortText") or like_count_vm.get("accessibilityText")
-                        likes = _parse_number_from_text(like_candidate) or likes
-                    if not likes:
-                        toggle_vm = (
-                            like_vm.get("toggleButtonViewModel", {})
-                            .get("toggleButtonViewModel", {})
-                            .get("defaultButtonViewModel", {})
-                            .get("buttonViewModel", {})
-                        )
-                        like_text = toggle_vm.get("accessibilityText")
-                        likes = _parse_number_from_text(like_text) or likes
-                    continue
+        overlay_likes = overlay_metrics.get("likes")
+        if not likes and isinstance(overlay_likes, int):
+            likes = overlay_likes
+        if not likes and initial_data:
+            extracted_likes = self.extract_likes_from_initial_data(initial_data)
+            if extracted_likes:
+                likes = extracted_likes
 
-                generic_vm = button.get("buttonViewModel") or {}
-                tooltip = generic_vm.get("tooltip") or generic_vm.get("title") or generic_vm.get("accessibilityText") or ""
-                if isinstance(tooltip, str) and "коммент" in tooltip.lower():
-                    raw_comments = generic_vm.get("title") or generic_vm.get("accessibilityText")
-                    comments = _parse_number_from_text(raw_comments)
+        comments = self.extract_comment_count(initial_data) or 0
+        overlay_comments = overlay_metrics.get("comments")
+        if not comments and isinstance(overlay_comments, int):
+            comments = overlay_comments
 
-        if (published_at is None) and isinstance(initial_data, dict):
-            try:
-                panels = initial_data.get("engagementPanels", []) or []
-                for panel in panels:
-                    if not isinstance(panel, dict):
-                        continue
-                    section = panel.get("engagementPanelSectionListRenderer")
-                    if not section:
-                        continue
-                    content = section.get("content", {})
-                    structured = content.get("structuredDescriptionContentRenderer", {})
-                    if not structured:
-                        continue
-                    for item in structured.get("items", []):
-                        if not isinstance(item, dict):
-                            continue
-                        header = item.get("videoDescriptionHeaderRenderer")
-                        if header:
-                            published_at = _extract_publish_date_from_factoids(header.get("factoid", []))
-                            if published_at:
-                                break
-                    if published_at:
-                        break
-            except Exception:
-                published_at = published_at or None
+        publish_candidate = microformat.get("uploadDate") or microformat.get("publishDate")
+        date_published = None
+        if isinstance(publish_candidate, str):
+            iso_candidate = publish_candidate.strip()
+            if iso_candidate:
+                if iso_candidate.endswith("Z"):
+                    iso_candidate = iso_candidate[:-1] + "+00:00"
+                try:
+                    date_published = datetime.fromisoformat(iso_candidate).date().isoformat()
+                except ValueError:
+                    if len(iso_candidate) >= 10:
+                        date_published = iso_candidate[:10]
+
+        if not date_published:
+            overlay_date = overlay_metrics.get("date_published")
+            if isinstance(overlay_date, str):
+                date_published = overlay_date
+        if not date_published and initial_data:
+            extracted_date = self.extract_publish_date_from_initial_data(initial_data)
+            if extracted_date:
+                date_published = extracted_date
+
+        articles = self.extract_articles(description, None) if description else None
 
         return {
             "video_id": video_id,
             "link": video_url,
             "title": title,
-            "views": views or 0,
-            "likes": likes or 0,
-            "comments": comments or 0,
-            "published_at": published_at or "",
+            "views": views,
             "description": description,
+            "likes": likes,
+            "comments": comments,
+            "articles": articles,
+            "date_published": date_published,
         }
 
     async def fetch_videos_with_proxies(self, video_ids: List[str], delay: float = 5.0) -> List[Dict[str, Any]]:
@@ -799,8 +1100,11 @@ class ShortsParser:
         if not video_ids:
             return []
 
+        # video_ids = video_ids[:20]  # тестовый пример первые 20 видосов
+
         proxies = self.proxy_list if self.proxy_list else [None]
-        batch_size = len(proxies) if proxies else 1
+        total_proxies = len(proxies) if proxies else 1
+        batch_size = total_proxies or 1
         results: List[Dict[str, Any]] = []
 
         index = 0
@@ -815,9 +1119,11 @@ class ShortsParser:
                 if not video_url:
                     print(f"⚠️ Для видео {video_id} не найдена ссылка в DOM, пропускаем.")
                     continue
-                proxy = proxies[idx] if proxies else None
+                start_proxy_idx = idx % (total_proxies or 1)
                 task_video_ids.append(video_id)
-                tasks.append(asyncio.create_task(self.fetch_video_metadata(video_id, video_url, proxy)))
+                tasks.append(asyncio.create_task(
+                    self._fetch_with_proxy_rotation(video_id, video_url, proxies, start_proxy_idx)
+                ))
 
             if tasks:
                 batch_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -834,6 +1140,29 @@ class ShortsParser:
                 await asyncio.sleep(delay)
 
         return results
+
+    async def _fetch_with_proxy_rotation(
+        self,
+        video_id: str,
+        video_url: str,
+        proxies: List[Optional[str]],
+        start_index: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Пробуем получить метаданные видео, перебирая прокси по кругу."""
+        if not proxies:
+            proxies = [None]
+
+        total_proxies = len(proxies)
+        for attempt in range(total_proxies):
+            proxy = proxies[(start_index + attempt) % total_proxies]
+            if attempt > 0:
+                print(f"🔁 Повторная попытка для {video_url} через {proxy or 'без прокси'} (попытка {attempt + 1})")
+            result = await self.fetch_video_metadata(video_id, video_url, proxy)
+            if result:
+                return result
+
+        print(f"⚠️ Все прокси исчерпаны для {video_url}, видео пропущено.")
+        return None
 
     async def download_image(self, url: str, proxy: str = None) -> Union[bytes, None]:
         """Скачивает изображение с YouTube (можно с прокси)."""
@@ -862,7 +1191,7 @@ class ShortsParser:
 
         def _upload():
             response = requests.post(
-                f"http://127.0.0.1:8000/api/v1/videos/{video_id}/upload-image/",
+                f"{API_BASE_URL}/{video_id}/upload-image/",
                 files=files,
                 timeout=30.0,
             )
@@ -887,31 +1216,6 @@ class ShortsParser:
 
         return status_code, image_path or payload
 
-    def extract_article_tag(self, caption: str) -> Optional[str]:
-        """Возвращает строку со ВСЕМИ найденными артикулами (#sv, #jw и т.д.) через запятую или None."""
-        if not caption:
-            return None
-
-        allowed_tags = ["#sv", "#jw", "#qz", "#sr", "#fg"]
-        found_tags = []
-
-        caption_lower = caption.lower()
-        original_caption = caption  # сохраняем оригинальный регистр для точного извлечения
-
-        for tag in allowed_tags:
-            if tag in caption_lower:
-                # Ищем позицию в нижнем регистре
-                start = caption_lower.find(tag)
-                if start != -1:
-                    # Берём точное написание из оригинала (на случай если кто-то написал #SV)
-                    exact_tag = original_caption[start:start + len(tag)]
-                    found_tags.append(exact_tag)
-
-        # Убираем дубли и сортируем для консистентности (опционально)
-        found_tags = sorted(set(found_tags))
-
-        return ",".join(found_tags) if found_tags else None
-
     async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
         """
         Новая логика:
@@ -922,8 +1226,8 @@ class ShortsParser:
         5. Передаём данные дальше на API (ниже по функции).
         """
         self.proxy_list = proxy_list or []
-        current_proxy_index = 0
 
+        url = self.normalize_profile_url(url)
         if not url.endswith('/shorts'):
             url = url.rstrip('/') + '/shorts'
         print(f"Переход на канал: {url}")
@@ -947,7 +1251,7 @@ class ShortsParser:
             browser = await playwright.chromium.launch(
                 headless=False,
                 args=[
-                    "--headless=new",
+                    # "--headless=new",
                     "--disable-blink-features=AutomationControlled",
                     "--start-maximized"
                 ],
@@ -963,10 +1267,12 @@ class ShortsParser:
         proxy_candidates = list(self.proxy_list) if self.proxy_list else [None]
         if self.proxy_list:
             random.shuffle(proxy_candidates)
-        max_proxy_attempts = (
-            min(max_retries, len(proxy_candidates)) if self.proxy_list else max(1, max_retries)
-        )
-        max_proxy_attempts = max(1, max_proxy_attempts)
+        effective_retries = max_retries if max_retries is not None else 0
+        if self.proxy_list:
+            base_attempts = len(proxy_candidates)
+            max_proxy_attempts = max(1, max(base_attempts, effective_retries))
+        else:
+            max_proxy_attempts = max(1, effective_retries or 1)
 
         all_videos_data: List[Dict] = []
         header_videos_count: Optional[int] = None
@@ -1106,20 +1412,19 @@ class ShortsParser:
             if not video_id:
                 continue
             image_url = self.dom_images.get(video_id) or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-            description = meta.get("description") or ""
-            articles = self.extract_article_tag(description)
             all_videos_data.append(
                 {
                     "link": meta.get("link"),
                     "type": "youtube",
                     "name": meta.get("title") or "",
-                    "image": image_url,
+                    "image_url": image_url,
                     "channel_id": channel_id,
-                    "articles": articles,
+                    # "description": meta.get("description") or "",
                     "amount_views": meta.get("views") or 0,
                     "amount_likes": meta.get("likes") or 0,
                     "amount_comments": meta.get("comments") or 0,
-                    "date_published": meta.get("published_at") or "",
+                    "articles": meta.get("articles"),
+                    "date_published": meta.get("date_published"),
                 }
             )
 
@@ -1132,9 +1437,9 @@ class ShortsParser:
         queued_video_ids = set()
         for video_data in all_videos_data:
             try:
-                async with httpx.AsyncClient(timeout=20.0) as client:
+                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
                     # print(f"🔍 Проверка видео: {video_data['link']}")
-                    check_resp = await client.get(f"http://127.0.0.1:8000/api/v1/videos/?link={video_data['link']}")
+                    check_resp = await client.get(f"{API_BASE_URL}/?link={video_data['link']}")
                     is_new = False
                     video_id = None
 
@@ -1145,27 +1450,24 @@ class ShortsParser:
                             existing_video = vids[0]
                             video_id = existing_video['id']
                             update_payload = {
-                                "amount_views": video_data["amount_views"],
-                                "amount_likes": video_data["amount_likes"],
-                                "amount_comments": video_data["amount_comments"],
-                                "date_published": video_data["date_published"],
-                                "articles": video_data["articles"],
+                                "amount_views": video_data.get("amount_views", 0),
+                                "amount_likes": video_data.get("amount_likes", 0),
+                                "amount_comments": video_data.get("amount_comments", 0),
+                                "articles": video_data.get("articles"),
+                                # "description": video_data.get("description"),
+                                "date_published": video_data.get("date_published"),
                             }
+                            update_payload = {k: v for k, v in update_payload.items() if v is not None}
                             await client.patch(
-                                f"http://127.0.0.1:8000/api/v1/videos/{video_id}",
+                                f"{API_BASE_URL}/{video_id}",
                                 json=update_payload
                             )
 
                             existing_image = existing_video.get("image")
-                            image_missing = not existing_image
-                            image_needs_update = False
-                            if isinstance(existing_image, str):
-                                normalized_existing = existing_image.strip()
-                                if normalized_existing.startswith(("http://", "https://")):
-                                    image_needs_update = True
-                            if (image_missing or image_needs_update) and video_data.get("image"):
+                            image_missing = not (isinstance(existing_image, str) and existing_image.strip())
+                            if image_missing and video_data.get("image_url"):
                                 if video_id not in queued_video_ids:
-                                    image_queue.append((video_id, video_data["image"]))
+                                    image_queue.append((video_id, video_data["image_url"]))
                                     queued_video_ids.add(video_id)
                         else:
                             is_new = True
@@ -1173,12 +1475,20 @@ class ShortsParser:
                         is_new = True
 
                     if is_new:
-                        resp = await client.post("http://127.0.0.1:8000/api/v1/videos", json=video_data)
+                        create_payload = {
+                            key: value
+                            for key, value in video_data.items()
+                            if value is not None
+                        }
+                        resp = await client.post(f"{API_BASE_URL}/", json=create_payload)
                         resp.raise_for_status()
-                        video_id = resp.json()["id"]
+                        created_video = resp.json()
+                        video_id = created_video["id"]
                         # print(f"✅ Создано новое видео {video_id}")
-                        if video_data.get("image") and video_id not in queued_video_ids:
-                            image_queue.append((video_id, video_data["image"]))
+                        created_image = created_video.get("image")
+                        image_missing = not (isinstance(created_image, str) and created_image.strip())
+                        if image_missing and video_data.get("image_url") and video_id not in queued_video_ids:
+                            image_queue.append((video_id, video_data["image_url"]))
                             queued_video_ids.add(video_id)
                 processed_count += 1
             except Exception as e:
@@ -1187,21 +1497,27 @@ class ShortsParser:
         print(f"📦 Всего обработано {processed_count} видео, ожидают загрузки {len(image_queue)} обложек.")
 
         # --- Загрузка изображений ---
-        idx = 0
-        while idx < len(image_queue):
-            proxy = proxy_list[current_proxy_index] if proxy_list else None
-            current_proxy_index = (current_proxy_index + 1) % len(proxy_list) if proxy_list else 0
-            batch = image_queue[idx:idx + 15]
-            print(f"🖼️ Загружаем {len(batch)} изображений через {proxy or 'без прокси'}")
+        proxy_candidates: List[Optional[str]] = list(proxy_list) if proxy_list else [None]
+        pending_images = deque((vid, img_url, None) for vid, img_url in image_queue)
 
-            for vid, img_url in batch:
-                try:
-                    status, _ = await self.upload_image(vid, img_url, proxy=proxy)
-                    print(f"{'✅' if status == 200 else '⚠️'} Фото для видео {vid} → статус {status}")
-                except Exception as e:
-                    print(f"❌ Ошибка загрузки фото {vid}: {e}")
-                await asyncio.sleep(5.0)
-            idx += 15
+        while pending_images:
+            vid, img_url, last_proxy_used = pending_images.popleft()
+            proxy = self._select_next_proxy(proxy_candidates, last_proxy_used)
+            print(f"🖼️ Загружаем изображение для {vid} через {proxy or 'без прокси'}")
+
+            try:
+                status, _ = await self.upload_image(vid, img_url, proxy=proxy)
+                if status == 200:
+                    print(f"✅ Фото для видео {vid} загружено")
+                    await asyncio.sleep(5.0)
+                    continue
+                print(f"⚠️ Фото для видео {vid} вернуло статус {status}")
+            except Exception as e:
+                print(f"❌ Ошибка загрузки фото {vid}: {e}")
+
+            print(f"🔄 Повторим загрузку фото для {vid} через 1 минуту на другой прокси")
+            pending_images.append((vid, img_url, proxy))
+            await asyncio.sleep(60.0)
 
         print(f"🎉 Парсинг завершён: {processed_count} видео обработано.")
 
@@ -1210,24 +1526,35 @@ class ShortsParser:
 
 async def main():
     proxy_list = [
-        "6hro8o:N6A7Yn@181.177.84.234:9413",
-        "6hro8o:N6A7Yn@181.177.87.128:9966",
-        "6hro8o:N6A7Yn@181.177.84.125:9613",
-        "6hro8o:N6A7Yn@23.236.139.90:9758",
-        "6hro8o:N6A7Yn@23.236.141.118:9234",
-        "6hro8o:N6A7Yn@23.236.141.94:9893",
-        "6hro8o:N6A7Yn@23.236.138.18:9055",
-        "6hro8o:N6A7Yn@23.236.149.166:9775",
-        "6hro8o:N6A7Yn@23.236.148.87:9845",
-        "6hro8o:N6A7Yn@170.246.55.141:9663",
-        "6hro8o:N6A7Yn@191.102.172.185:9891",
-        "6hro8o:N6A7Yn@191.102.172.131:9083",
-        "6hro8o:N6A7Yn@170.246.55.97:9246",
+        "msEHZ8:tYomUE@152.232.65.53:9461",
+        "msEHZ8:tYomUE@190.185.108.103:9335",
+        "msEHZ8:tYomUE@138.99.37.16:9622",
+        "msEHZ8:tYomUE@138.99.37.136:9248",
+        "msEHZ8:tYomUE@152.232.72.124:9057",
+        "msEHZ8:tYomUE@23.229.49.135:9511",
+        "msEHZ8:tYomUE@209.127.8.189:9281",
+        "msEHZ8:tYomUE@152.232.72.235:9966",
+        "msEHZ8:tYomUE@152.232.74.34:9043",
+        "PvJVn6:jr8EvS@38.148.133.33:8000",
+        "PvJVn6:jr8EvS@38.148.142.71:8000",
+        "PvJVn6:jr8EvS@38.148.133.69:8000",
+        "PvJVn6:jr8EvS@38.148.138.48:8000",
+        "msEHZ8:tYomUE@168.196.239.222:9211",
+        "msEHZ8:tYomUE@168.196.237.44:9129",
+        "msEHZ8:tYomUE@168.196.237.99:9160",
+        "msEHZ8:tYomUE@138.219.122.56:9409",
+        "msEHZ8:tYomUE@138.219.122.128:9584",
+        "msEHZ8:tYomUE@138.219.123.22:9205",
+        "msEHZ8:tYomUE@138.59.5.46:9559",
+        "msEHZ8:tYomUE@152.232.68.147:9269",
+        "msEHZ8:tYomUE@152.232.67.18:9241",
+        "msEHZ8:tYomUE@152.232.68.149:9212",
+        "msEHZ8:tYomUE@152.232.66.152:9388",
     ]
     parser = ShortsParser()
-    url = "https://www.youtube.com/@nastya.beomaa"
+    url = "https://www.youtube.com/@sofi.beomaa"
     user_id = 1
-    await parser.parse_channel(url, channel_id=5, user_id=user_id, proxy_list=proxy_list)
+    await parser.parse_channel(url, channel_id=7, user_id=user_id, proxy_list=proxy_list)
 
 
 if __name__ == "__main__":
