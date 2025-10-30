@@ -62,7 +62,7 @@ class ChannelService:
         if not new_channel:
             raise ValueError("Ошибка при создании канала")
 
-        type_channel = ChannelType.get_by_value(dto.type.value)
+        type_channel = dto.type
         immediate_dispatched = schedule_channel_task(new_channel.id, run_immediately=True)
         if immediate_dispatched:
             return new_channel
@@ -105,7 +105,7 @@ class ChannelService:
         if not new_channel:
             raise ValueError("Ошибка при создании канала")
 
-        type_channel = ChannelType.get_by_value(dto.type.value)
+        type_channel = dto.type
         immediate_dispatched = schedule_channel_task(new_channel.id, run_immediately=True)
         if immediate_dispatched:
             return new_channel

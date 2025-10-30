@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import quote, urlparse, urlunparse
-
+import pyotp
 import httpx
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 
@@ -48,7 +48,7 @@ IMPORTANT_COOKIES = {
 }
 COOKIES_FILE_PATH = Path(__file__).with_name("instagram_cookies.json")
 REQUEST_TIMEOUT = 20.0
-MAX_PARALLEL_LOGIN_TASKS = 5
+MAX_PARALLEL_LOGIN_TASKS = 3
 HTTPX_USES_PROXY_PARAM = "proxy" in inspect.signature(httpx.AsyncClient.__init__).parameters
 
 
@@ -772,35 +772,40 @@ class InstagramParser:
         except Exception as save_error:
             print(f"Failed to save HTML: {str(save_error)}")
 
-    async def get_2fa_code(self, page, two_factor_code):
-        two_factor_page = await page.context.new_page()
-        try:
-            await two_factor_page.goto(
-                f"https://2fa.fb.rip/{two_factor_code}", timeout=60000)
-            await two_factor_page.wait_for_selector(
-                "div#verifyCode", timeout=60000)
-            two_factor_code_element = await two_factor_page.query_selector(
-                "div#verifyCode")
-            if two_factor_code_element:
-                code = await two_factor_code_element.inner_text()
-                code = re.sub(r"\D", "", code)
-                if len(code) == 6 and code.isdigit():
-                    print(f"2FA код успешно получен: {code}")
-                    return code
-                else:
-                    print(f"Неверный формат 2FA кода: {code}")
-                    return None
-            else:
-                print("Элемент 2FA кода не найден")
-                return None
-        except Exception as e:
-            await self.save_html_on_error(
-                two_factor_page,
-                f"https://2fa.fb.rip/{two_factor_code}", str(e))
-            print(f"Не удалось получить 2FA код: {e}")
-            return None
-        finally:
-            await two_factor_page.close()
+    # async def get_2fa_code(self, page, two_factor_code):
+    #     two_factor_page = await page.context.new_page()
+    #     try:
+    #         await two_factor_page.goto(
+    #             f"https://2fa.fb.rip/{two_factor_code}", timeout=60000)
+    #         await two_factor_page.wait_for_selector(
+    #             "div#verifyCode", timeout=60000)
+    #         two_factor_code_element = await two_factor_page.query_selector(
+    #             "div#verifyCode")
+    #         if two_factor_code_element:
+    #             code = await two_factor_code_element.inner_text()
+    #             code = re.sub(r"\D", "", code)
+    #             if len(code) == 6 and code.isdigit():
+    #                 print(f"2FA код успешно получен: {code}")
+    #                 return code
+    #             else:
+    #                 print(f"Неверный формат 2FA кода: {code}")
+    #                 return None
+    #         else:
+    #             print("Элемент 2FA кода не найден")
+    #             return None
+    #     except Exception as e:
+    #         await self.save_html_on_error(
+    #             two_factor_page,
+    #             f"https://2fa.fb.rip/{two_factor_code}", str(e))
+    #         print(f"Не удалось получить 2FA код: {e}")
+    #         return None
+    #     finally:
+    #         await two_factor_page.close()
+
+    async def get_2fa_code(self, two_factor_code):
+        totp = pyotp.TOTP(two_factor_code)
+        # self.logger.send("INFO", "Current OTP:", totp.now())
+        return totp.now()
 
     async def login_to_instagram(self, page, username, password, two_factor_code) -> Optional[Dict[str, str]]:
         # Сбор ошибок API
@@ -994,7 +999,10 @@ class InstagramParser:
                 if not code_field:
                     raise Exception("Поле кода не найдено")
 
-                verification_code = await self.get_2fa_code(page, two_factor_code)
+                verification_code = await self.get_2fa_code(
+                    # page,
+                    two_factor_code
+                )
                 if not verification_code:
                     print("Не удалось получить 2FA код")
                     return None
@@ -1504,24 +1512,24 @@ async def main():
         # "juliadacostabx829:payable64$!:OZITRNHYGIVKF27ZASD26JVIAE54JHLB",
         # "claricepeixotokt640:unbeliEvably4$!:ZG33OWOBMCPJ37NKIGCHDTEMTC6FPEGL",
         # "allanacaldeiract154:sipHOnic5!*:NQ6453R7RMMPZGNDQWX74KAYZUDHIFA2",
-        "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
-        "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
-        "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
-        "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
-        # "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
-        "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
-        "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
-        "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
-        "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
+        # "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
+        # "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
+        # "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
+        # "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
+        # # "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
+        # "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
+        # "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
+        # "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
+        # "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
         # "liviadamotaj814:zoophiles5:XLMIX3HUL3N3YSHK7NY6HQBTW5TOPXPC",
         # "rezendesuelizn674:TwVHHXku6p:UI6C3HO4CWX2F36KXMLYDM7YVYU5PCY2",
-        "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
-        "danielle_stafford:QbR86VfEud:YSKAUQROK633XKXT5M2GJZPGEEJSPGJ3",
-        "frasheri8498:NzPAAX5xqC:SJZ3D5XWEZYWHOIYXANTZZQTQ34BE47D",
-        "bonilla.scout:KNWKdS3Gew:J33P5656TMAH7R55WUKML3TEA7RGSFQG",
-        "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
-        "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
-        "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
+        # "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
+        # "danielle_stafford:QbR86VfEud:YSKAUQROK633XKXT5M2GJZPGEEJSPGJ3",
+        # "frasheri8498:NzPAAX5xqC:SJZ3D5XWEZYWHOIYXANTZZQTQ34BE47D",
+        # "bonilla.scout:KNWKdS3Gew:J33P5656TMAH7R55WUKML3TEA7RGSFQG",
+        # "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
+        # "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
+        # "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
         "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
         "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
         "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
