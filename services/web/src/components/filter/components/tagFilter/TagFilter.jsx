@@ -5,13 +5,16 @@ import { hasTags } from "@/shared/utils/filters";
 
 const TagFilter = () => {
   const setTags = useFilterStore((s) => s.setFilterTag);
+  const filteredTags = useFilterStore((s) => s.tag);
 
   const { selected, toggleSelect } = useMultiSelectFilter(
     "Применить",
     (tags) => {
-      setTags(tags.join(", "));
+      setTags(tags.join(","));
     },
-    true
+    true,
+    () => setTags(""),
+    filteredTags
   );
 
   return (

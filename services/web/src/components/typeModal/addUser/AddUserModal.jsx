@@ -4,12 +4,14 @@ import { useForm } from "react-hook-form";
 
 import API from "@/app/api";
 import { useModalStore } from "@/app/store/modal/store";
+import { useUsersStore } from "@/app/store/entity/store";
 
 import Input from "@/shared/ui/input/Input";
 import { Button } from "@/shared/ui/button/Button";
 
 const AppUsermodal = () => {
   const { closeModal } = useModalStore();
+  const reset  = useUsersStore((state) => state.reset);
   const {
     register,
     handleSubmit,
@@ -24,6 +26,7 @@ const AppUsermodal = () => {
       return;
     }
     await API.user.addUserByTg(data.tgId);
+    reset();
     closeModal();
   };
 

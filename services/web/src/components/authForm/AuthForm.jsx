@@ -12,6 +12,7 @@ import { socialNetworks } from "@/shared/utils/utils";
 import { validateSocialUrl } from "@/shared/utils/validate";
 
 import "./AuthForm.css";
+import user from "../../app/api/user";
 
 const AuthForm = () => {
   const { openModal } = useModalStore();
@@ -79,6 +80,7 @@ const AuthForm = () => {
       last_name: lastName,
       first_name: firstName,
       username: userTG.username,
+      user_id: userTG.id,
       socials: filledSocials.map((name) => ({
         type: name.toLowerCase(),
         link: data[name],

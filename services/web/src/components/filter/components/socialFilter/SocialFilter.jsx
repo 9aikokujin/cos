@@ -6,10 +6,17 @@ import { SOCIALS } from "@/shared/utils/socialIcon";
 
 const SocialFilter = () => {
   const setSocial = useFilterStore((s) => s.setFilterChannelType);
+  const filteredSocials = useFilterStore((s) => s.filter.channel_type);
 
-  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (social) => {
-    setSocial(social.join("").toUpperCase());
-  });
+  const { selected, toggleSelect } = useMultiSelectFilter(
+    "Применить",
+    (social) => {
+      setSocial(social.join("").toUpperCase());
+    },
+    false,
+    () => setSocial(""),
+    filteredSocials.toLowerCase()
+  );
   return (
     <div className="social_filter _flex_col_center">
       <h2>Выберите соц. сеть</h2>

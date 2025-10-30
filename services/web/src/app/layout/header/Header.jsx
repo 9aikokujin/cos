@@ -5,6 +5,7 @@ import { useAuthStore } from "@/app/store/user/store";
 import { AppRoutes } from "@/app/routes/routes";
 
 import { Button } from "@/shared/ui/button/Button";
+import { ButtonIcon } from "@/shared/ui/button/Button";
 import { ComponentIcon } from "@/shared/ui/icon/ComponentIcon";
 import { formatNameToInitials } from "@/shared/utils/formatString";
 import logo from "@/assets/img/logo.png";
@@ -42,16 +43,21 @@ const Header = () => {
             </Button>
           )}
           {showAccount && (
-            <div className="header_account _flex_center">
-              <p className="_login">{formatNameToInitials(user)}</p>
-              <Link
-                to={AppRoutes.EDITPROFILE.replace(":id", user?.id)}
-                state={{ from: location.pathname }}
-                className="header_account_btn"
-              >
-                <ComponentIcon name={"profile"} />
+            <>
+              <Link to={AppRoutes.PROXY} style={{ cursor: "pointer" }}>
+                <ButtonIcon name={"settings"} />
               </Link>
-            </div>
+              <div className="header_account _flex_center">
+                {/* <p className="_login">{formatNameToInitials(user)}</p> */}
+                <Link
+                  to={AppRoutes.EDITPROFILE.replace(":id", user?.id)}
+                  state={{ from: location.pathname }}
+                  className="header_account_btn"
+                >
+                  <ComponentIcon name={"profile"} />
+                </Link>
+              </div>
+            </>
           )}
         </div>
       </div>

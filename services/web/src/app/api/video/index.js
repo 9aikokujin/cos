@@ -1,5 +1,5 @@
 export default (instance) => ({
-  getVideos({ user_id, id, type, link, page, size = 10 }) {
+  getVideos({ user_id, id, type, link, name, page, size = 10 }) {
     return instance({
       method: "GET",
       url: "/videos/",
@@ -8,6 +8,7 @@ export default (instance) => ({
         id,
         type,
         link,
+        name,
         page,
         size: size,
       },

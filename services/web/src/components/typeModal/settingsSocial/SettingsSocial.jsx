@@ -70,7 +70,9 @@ const SettingsSocial = ({ data }) => {
     }));
 
     await API.auth.register(registerData);
-    await Promise.all(socialsArray.map((social) => API.account.createAccount(social)));
+    await Promise.all(
+      socialsArray.map((social) => API.account.createAccount(social, data.user_id))
+    );
 
     closeModal();
   };

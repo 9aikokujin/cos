@@ -1,9 +1,9 @@
 import API from "@/app/api";
 import { socialNetworks } from "@/shared/utils/utils";
-import { useNotificationStore } from "../app/store/notification/store";
+import { validateSocialUrl } from "@/shared/utils/validate";
 
-export const useUserProfileSubmit = (user, userId, initialData, socials, goBack) => {
-  // const { showNotification } = useNotificationStore();
+
+export const useUserProfileSubmit = (user, userId, initialData, socials, goBack, setError, showNotification) => {
   return async (data) => {
     const updates = [];
 
@@ -14,6 +14,16 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack)
     if (fullNameChanged || tgChanged) {
       const [lastName, firstName, ...rest] = data.fullName.split(" ");
       const fullname = rest.join(" ");
+
+      if (!data.fullName) {
+        setError("fullName", { message: "Заполните поле ФИО" });
+        return;
+      }
+
+      if (!data.tgId) {
+        setError("tgId", { message: "Заполните поле Телеграм ID" });
+        return;
+      }
       updates.push(
         API.user.updateUser(userId, {
           tg_id: user.role === "admin" ? data.tgId : undefined,
@@ -33,24 +43,49 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack)
         if (!fieldValue && existing.link) {
           updates.push(API.account.deleteAccount(existing.id)); // удаление
         } else if (fieldValue && fieldValue !== existing.link) {
-          updates.push(API.account.updateAccount(existing.id, { link: fieldValue })); // обновление
+          const result = validateSocialUrl(fieldValue, network.toLowerCase());
+          if (result !== true) {
+            setError("socials", { message: result });
+            return;
+          }
+          updates.push(API.account.deleteAccount(existing.id));
+          updates.push(
+            API.account.createAccount(
+              {
+                type: network.toLowerCase(),
+                link: fieldValue,
+                start_views: 0,
+                start_likes: 0,
+                start_comments: 0,
+              },
+              userId
+            )
+          );
         }
       } else if (fieldValue) {
+        const result = validateSocialUrl(fieldValue, network.toLowerCase());
+        if (result !== true) {
+          setError("socials", { message: result });
+          return;
+        }
         updates.push(
-          API.account.createAccount({
-            type: network.toLowerCase(),
-            link: fieldValue,
-            start_views: 0,
-            start_likes: 0,
-            start_comments: 0,
-          })
+          API.account.createAccount(
+            {
+              type: network.toLowerCase(),
+              link: fieldValue,
+              start_views: 0,
+              start_likes: 0,
+              start_comments: 0,
+            },
+            userId
+          )
         ); // создание
       }
     }
 
     if (updates.length > 0) {
       await Promise.all(updates);
-      // showNotification("Профиль обновлен");
+      showNotification("Профиль обновлен");
     } else {
       console.log("Нет изменений");
     }

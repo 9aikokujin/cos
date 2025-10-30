@@ -186,6 +186,23 @@
   gap: 10px;
 }
 
+.account_social_pic {
+  width: 25px;
+  height: 25px;
+  padding: 5px;
+  box-shadow: 0px 1px 4px 0px #0000001a;
+  border-radius: 50%;
+  background-color: var(--color-white);
+}
+
+.account_social_pic img {
+  object-fit: scale-down;
+}
+
+.account_social_pic._tiktok {
+  background-color: var(--color-black);
+}
+
 /* --------------------- теги --------------------- */
 
 .tag_filter {

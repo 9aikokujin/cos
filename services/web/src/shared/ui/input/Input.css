@@ -13,42 +13,51 @@
   transition: all 0.2s ease-in-out;
 }
 
+.textarea {
+  height: auto;
+  max-height: 350px;
+  min-height: 200px;
+  max-width: 450px;
+  min-width: 300px;
+  resize: none;
+}
+
 .input::placeholder {
   color: var(--color-placeholder);
 }
 
 .input:focus {
-    border-color: var(--color-orange);
-    box-shadow: 0 0 6px var(--color-orange);
-    outline: none;
+  border-color: var(--color-orange);
+  box-shadow: 0 0 6px var(--color-orange);
+  outline: none;
+}
+
+.input._error {
+  border-color: var(--color-red);
+  box-shadow: 0 0 8px var(--color-error);
+  animation: shake 0.25s ease;
+}
+
+/* 🔁 эффект "покачивания" при ошибке */
+@keyframes shake {
+  0% {
+    transform: translateX(0);
   }
-  
-  .input._error {
-    border-color: var(--color-red);
-    box-shadow: 0 0 8px var(--color-error);
-    animation: shake 0.25s ease;
+  25% {
+    transform: translateX(-3px);
   }
-  
-  /* 🔁 эффект "покачивания" при ошибке */
-  @keyframes shake {
-    0% {
-      transform: translateX(0);
-    }
-    25% {
-      transform: translateX(-3px);
-    }
-    50% {
-      transform: translateX(3px);
-    }
-    75% {
-      transform: translateX(-2px);
-    }
-    100% {
-      transform: translateX(0);
-    }
+  50% {
+    transform: translateX(3px);
   }
-  
-  /* плавный переход от ошибки обратно */
-  .input:not(._error) {
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+  75% {
+    transform: translateX(-2px);
   }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+/* плавный переход от ошибки обратно */
+.input:not(._error) {
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+}

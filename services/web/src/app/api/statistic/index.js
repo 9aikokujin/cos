@@ -6,7 +6,7 @@ export default (instance) => ({
     video_id,
     channel_id,
     channel_type,
-    user_id,
+    user_ids,
     date_published_to,
     date_published_from,
   }) {
@@ -20,9 +20,12 @@ export default (instance) => ({
         video_id,
         channel_id,
         channel_type,
-        user_id,
+        user_ids,
         date_published_to,
         date_published_from,
+      },
+      paramsSerializer: {
+        indexes: null,
       },
     }).then((response) => response.data);
   },
@@ -34,7 +37,7 @@ export default (instance) => ({
     video_id,
     channel_id,
     channel_type,
-    user_id,
+    user_ids,
     date_published_to,
     date_published_from,
   }) {
@@ -49,14 +52,17 @@ export default (instance) => ({
         video_id,
         channel_id,
         channel_type,
-        user_id,
+        user_ids,
         date_published_to,
         date_published_from,
+      },
+      paramsSerializer: {
+        indexes: null,
       },
     }).then((response) => response.data);
   },
   getCountPublishedVideo(params) {
-    const allowedKeys = ["date_to", "date_from", "channel_id", "channel_type", "user_id"];
+    const allowedKeys = ["date_to", "date_from", "channel_id", "channel_type", "user_ids"];
     const cleanParams = Object.fromEntries(
       Object.entries(params).filter(
         ([key, v]) => allowedKeys.includes(key) && v !== "" && v !== null && v !== undefined
@@ -66,10 +72,13 @@ export default (instance) => ({
       method: "GET",
       url: "/videohistory/daily_count_all",
       params: cleanParams,
+      paramsSerializer: {
+        indexes: null,
+      },
     }).then((response) => response.data);
   },
-  getCountPublishedVideoWithTags(params) {
-    const allowedKeys = ["date_to", "date_from", "channel_id", "channel_type", "user_id"];
+  getCountPublishedVideoWithTags(params, tags) {
+    const allowedKeys = ["date_to", "date_from", "channel_id", "channel_type", "user_ids"];
     const cleanParams = Object.fromEntries(
       Object.entries(params).filter(
         ([key, v]) => allowedKeys.includes(key) && v !== "" && v !== null && v !== undefined
@@ -78,7 +87,10 @@ export default (instance) => ({
     return instance({
       method: "GET",
       url: "/videohistory/daily_article_count",
-      params: cleanParams,
+      params: {...cleanParams, articles: tags},
+      paramsSerializer: {
+        indexes: null,
+      },
     }).then((response) => response.data);
   },
   getVideoHistory(params) {
@@ -89,7 +101,7 @@ export default (instance) => ({
       "video_id",
       "channel_id",
       "channel_type",
-      "user_id",
+      "user_ids",
     ];
     const cleanParams = Object.fromEntries(
       Object.entries(params).filter(
@@ -100,10 +112,13 @@ export default (instance) => ({
       method: "GET",
       url: "/videohistory/",
       params: cleanParams,
+      paramsSerializer: {
+        indexes: null,
+      },
     }).then((response) => response.data);
   },
   downloadReport(params) {
-    const allowedKeys = ["date_to", "date_from", "channel_type", "user_id"];
+    const allowedKeys = ["date_to", "date_from", "channel_type", "user_ids"];
     const cleanParams = Object.fromEntries(
       Object.entries(params).filter(
         ([key, v]) => allowedKeys.includes(key) && v !== "" && v !== null && v !== undefined
@@ -113,6 +128,9 @@ export default (instance) => ({
       method: "GET",
       url: "/videohistory/download_stats_csv",
       params: cleanParams,
+      paramsSerializer: {
+        indexes: null,
+      },
     }).then((response) => response.data);
   },
 });

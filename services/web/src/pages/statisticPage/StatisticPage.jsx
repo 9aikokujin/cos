@@ -14,6 +14,7 @@ const StatisticPage = () => {
   const { filter, setFilterUserId, setFilterChannelId, setFilterVideoId } = useFilterStore();
   const [isReport, setIsReport] = useState(false);
   const { filterKey, value } = location.state || {};
+  const [isLoading, setIsLoading] = useState(true);
 
   const { id } = useParams();
   const setUserId = useFilterStore((state) => state.setFilterUserId);
@@ -32,15 +33,17 @@ const StatisticPage = () => {
       };
       actionMap[filterKey](value);
     }
+    setIsLoading(false);
   }, [filterKey, value]);
 
-  console.log(filter);
   useResetFiltersOnLeave();
 
   const handleReport = () => {
     setIsReport((prev) => !prev);
   };
-  return (
+  return isLoading ? (
+    <></>
+  ) : (
     <div className="container" style={{ overflow: "auto" }}>
       <div className="_flex_sb" style={{ gap: 11, marginBottom: 12 }}>
         <Filter />

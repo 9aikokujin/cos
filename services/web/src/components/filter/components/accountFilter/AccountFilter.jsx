@@ -18,21 +18,31 @@ const fetchAccounts = async (page, term, filter) => {
   if (filter?.channel_type) {
     params.type = filter.channel_type.toLowerCase();
   }
+
   const response = await API.account.getAccounts(params);
   return response;
 };
 
 const AccountFilter = () => {
   const setAccountId = useFilterStore((s) => s.setFilterChannelId);
+  const filteredAccounts = useFilterStore((s) => s.filter.channel_id);
 
   const { items, isLoading, lastItemRef } = useInfiniteScroll(
     useAccountStore,
     fetchAccounts,
     "channels"
   );
-  const { selected, toggleSelect } = useMultiSelectFilter("Применить", (account) => {
-    setAccountId(account.join(""));
-  });
+  const { selected, toggleSelect } = useMultiSelectFilter(
+    "Применить",
+    (account) => {
+      setAccountId(account.join(""));
+    },
+    false,
+    () => {
+      setAccountId("");
+    },
+    filteredAccounts
+  );
   return (
     <div className="account_filter _flex_col_center">
       <h2>Аккаунты</h2>
@@ -47,7 +57,7 @@ const AccountFilter = () => {
             className={`filter_item _flex_center ${selected.includes(account.id) ? "_active" : ""}`}
             onClick={() => toggleSelect(account.id)}
           >
-            <div className="account_social_pic " style={{ marginRight: 10 }}>
+            <div className="account_social_pic" style={{ marginRight: 10 }}>
               <img src={getSocialIcon(account?.type)} alt="insta" />
             </div>
             <p className="_name">{account.name_channel}</p>

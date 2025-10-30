@@ -12,6 +12,7 @@ import "./Statistic.css";
 
 const Statistic = () => {
   const { filter, withTags, isLoading, tag } = useFilterStore();
+  console.log(filter);
   const [statistic, setStatistic] = useState([]);
   const [publushedVideo, setPublishedVideo] = useState([]);
   const [selectedMetrics, setSelectedMetrics] = useState([]);
@@ -25,11 +26,11 @@ const Statistic = () => {
     const getStatistic = async () => {
       if (withTags) {
         const data = await API.statistic.getStatisticWithTags({
-          articles: clean(tag),
+          articles: tag,
           ...clean(filter),
         });
         const published = await API.statistic.getCountPublishedVideoWithTags({
-          ...clean(filter),
+          ...clean(filter), articles: tag,
         });
         setPublishedVideo(published);
         setStatistic(data);
@@ -43,7 +44,7 @@ const Statistic = () => {
       }
     };
     getStatistic();
-  }, [filter, withTags]);
+  }, [filter, withTags, tag]);
 
   const toggleMetric = (metric) => {
     setSelectedMetrics((prev) =>
@@ -60,12 +61,14 @@ const Statistic = () => {
           onClick={() => toggleMetric("views")}
           active={selectedMetrics.includes("views")}
         />
-        <StatisticBlock
-          title="Публикации"
-          value={sumFields(publushedVideo, ["video_count"]).video_count}
-          onClick={() => toggleMetric("video_count")}
-          active={selectedMetrics.includes("video_count")}
-        />
+        {!filter.video_id && (
+          <StatisticBlock
+            title="Публикации"
+            value={sumFields(publushedVideo, ["video_count"]).video_count}
+            onClick={() => toggleMetric("video_count")}
+            active={selectedMetrics.includes("video_count")}
+          />
+        )}
         <StatisticBlock
           title="Комментарии"
           value={sumFields(statistic, ["comments"]).comments}

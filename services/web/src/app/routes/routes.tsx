@@ -7,6 +7,7 @@ import AppUsermodal from "@/components/typeModal/addUser/AddUserModal";
 
 // Импорт страниц
 const AuthPage = lazy(() => import("@/pages/authPage/AuthPage"));
+const ProxyPage = lazy(() => import("@/pages/proxyPage/ProxyPage"));
 const UserPage = lazy(() => import("@/pages/userPage/UserPage"));
 const EditProfilePage = lazy(() => import("@/pages/editProfilePage/EditProfilePage"));
 const AccountsPage = lazy(() => import("@/pages/accountsPage/AccountsPage"));
@@ -17,6 +18,7 @@ const NotFoundPage = lazy(() => import("@/pages/notFoundPage/NotFoundPage"));
 export enum AppRoutes {
   AUTH = "/auth",
   EDITPROFILE = "/edit-profile/:id",
+  PROXY = "/proxy",
   USER = "/user",
   ACCOUNTS = "/accounts",
   VIDEOS = "/videos",
@@ -61,6 +63,10 @@ const adminRoutes = [
     },
   },
   { path: AppRoutes.EDITPROFILE, element: <EditProfilePage /> },
+  {
+    path: AppRoutes.PROXY,
+    element: <ProxyPage />,
+  },
   {
     path: AppRoutes.ACCOUNTS,
     element: <AccountsPage />,
