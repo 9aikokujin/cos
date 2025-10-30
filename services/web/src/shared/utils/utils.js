@@ -15,10 +15,6 @@ export const footerAdminLinks = [
 ];
 
 export function sumFields(array, fields) {
-  // return fields.reduce((result, field) => {
-  //   result[field] = array.reduce((sum, item) => sum + (item[field] || 0), 0);
-  //   return result;
-  // }, {});
   if (!array?.length) {
     return Object.fromEntries(fields.map((f) => [f, 0]));
   }
@@ -26,9 +22,7 @@ export function sumFields(array, fields) {
   // Находим элемент с самой поздней датой
   const latestItem = array.reduce((latest, item) => {
     const itemDate = new Date(item.date ?? item.date_published ?? item.date_published_from);
-    const latestDate = new Date(
-      latest.date ?? latest.date_published ?? latest.date_published_from
-    );
+    const latestDate = new Date(latest.date ?? latest.date_published ?? latest.date_published_from);
     return itemDate > latestDate ? item : latest;
   });
 
@@ -38,6 +32,13 @@ export function sumFields(array, fields) {
     return result;
   }, {});
 }
+
+export const sumVideoCounts = (array, fields) => {
+  return fields.reduce((result, field) => {
+    result[field] = array.reduce((sum, item) => sum + (item[field] || 0), 0);
+    return result;
+  }, {});
+};
 
 export const getLatestVideos = (videos) => {
   const latestByVideo = {};
@@ -59,4 +60,3 @@ export const getLatestVideos = (videos) => {
 
   return Object.values(latestByVideo);
 };
-
