@@ -833,7 +833,7 @@ class InstagramParser:
 
     async def get_2fa_code(self, two_factor_code):
         totp = pyotp.TOTP(two_factor_code)
-        self.logger.send("INFO", "Current OTP:", totp.now())
+        # self.logger.send("INFO", "Current OTP:", totp.now())
         return totp.now()
 
     async def login_to_instagram(self, page, username, password, two_factor_code) -> Optional[Dict[str, str]]:
