@@ -11,6 +11,7 @@ from urllib.parse import quote, urlparse
 import httpx
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
 from utils.logger import TCPLogger
+import pyotp
 
 # try:  # поддержка новых версий playwright-stealth
 #     from playwright_stealth import stealth_async as apply_stealth
@@ -800,35 +801,40 @@ class InstagramParser:
         except Exception as save_error:
             self.logger.send("INFO", f"Failed to save HTML: {str(save_error)}")
 
-    async def get_2fa_code(self, page, two_factor_code):
-        two_factor_page = await page.context.new_page()
-        try:
-            await two_factor_page.goto(
-                f"https://2fa.fb.rip/{two_factor_code}", timeout=60000)
-            await two_factor_page.wait_for_selector(
-                "div#verifyCode", timeout=60000)
-            two_factor_code_element = await two_factor_page.query_selector(
-                "div#verifyCode")
-            if two_factor_code_element:
-                code = await two_factor_code_element.inner_text()
-                code = re.sub(r"\D", "", code)
-                if len(code) == 6 and code.isdigit():
-                    self.logger.send("INFO", f"2FA код успешно получен: {code}")
-                    return code
-                else:
-                    self.logger.send("INFO", f"Неверный формат 2FA кода: {code}")
-                    return None
-            else:
-                self.logger.send("INFO", "Элемент 2FA кода не найден")
-                return None
-        except Exception as e:
-            await self.save_html_on_error(
-                two_factor_page,
-                f"https://2fa.fb.rip/{two_factor_code}", str(e))
-            self.logger.send("INFO", f"Не удалось получить 2FA код: {e}")
-            return None
-        finally:
-            await two_factor_page.close()
+    # async def get_2fa_code(self, page, two_factor_code):
+    #     two_factor_page = await page.context.new_page()
+    #     try:
+    #         await two_factor_page.goto(
+    #             f"https://2fa.fb.rip/{two_factor_code}", timeout=60000)
+    #         await two_factor_page.wait_for_selector(
+    #             "div#verifyCode", timeout=60000)
+    #         two_factor_code_element = await two_factor_page.query_selector(
+    #             "div#verifyCode")
+    #         if two_factor_code_element:
+    #             code = await two_factor_code_element.inner_text()
+    #             code = re.sub(r"\D", "", code)
+    #             if len(code) == 6 and code.isdigit():
+    #                 self.logger.send("INFO", f"2FA код успешно получен: {code}")
+    #                 return code
+    #             else:
+    #                 self.logger.send("INFO", f"Неверный формат 2FA кода: {code}")
+    #                 return None
+    #         else:
+    #             self.logger.send("INFO", "Элемент 2FA кода не найден")
+    #             return None
+    #     except Exception as e:
+    #         await self.save_html_on_error(
+    #             two_factor_page,
+    #             f"https://2fa.fb.rip/{two_factor_code}", str(e))
+    #         self.logger.send("INFO", f"Не удалось получить 2FA код: {e}")
+    #         return None
+    #     finally:
+    #         await two_factor_page.close()
+
+    async def get_2fa_code(self, two_factor_code):
+        totp = pyotp.TOTP(two_factor_code)
+        self.logger.send("INFO", "Current OTP:", totp.now())
+        return totp.now()
 
     async def login_to_instagram(self, page, username, password, two_factor_code) -> Optional[Dict[str, str]]:
         # Сбор ошибок API
@@ -1022,7 +1028,10 @@ class InstagramParser:
                 if not code_field:
                     raise Exception("Поле кода не найдено")
 
-                verification_code = await self.get_2fa_code(page, two_factor_code)
+                verification_code = await self.get_2fa_code(
+                    # page,
+                    two_factor_code
+                )
                 if not verification_code:
                     self.logger.send("INFO", "Не удалось получить 2FA код")
                     return None
@@ -1547,18 +1556,18 @@ class InstagramParser:
 #         "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
 #         # "liviadamotaj814:zoophiles5:XLMIX3HUL3N3YSHK7NY6HQBTW5TOPXPC",
 #         # "rezendesuelizn674:TwVHHXku6p:UI6C3HO4CWX2F36KXMLYDM7YVYU5PCY2",
-#         "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
-#         "danielle_stafford:QbR86VfEud:YSKAUQROK633XKXT5M2GJZPGEEJSPGJ3",
-#         "frasheri8498:NzPAAX5xqC:SJZ3D5XWEZYWHOIYXANTZZQTQ34BE47D",
-#         "bonilla.scout:KNWKdS3Gew:J33P5656TMAH7R55WUKML3TEA7RGSFQG",
-#         "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
-#         "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
-#         "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
-#         "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
-#         "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
-#         "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
-#         "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
-#         "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
+        # "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
+        # "danielle_stafford:QbR86VfEud:YSKAUQROK633XKXT5M2GJZPGEEJSPGJ3",
+        # "frasheri8498:NzPAAX5xqC:SJZ3D5XWEZYWHOIYXANTZZQTQ34BE47D",
+        # "bonilla.scout:KNWKdS3Gew:J33P5656TMAH7R55WUKML3TEA7RGSFQG",
+        # "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
+        # "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
+        # "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
+        # "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
+        # "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
+        # "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
+        # "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
+        # "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
 #     ]
 #     await parser.parse_channel(url, channel_id=32,
 #                                user_id=user_id, accounts=accounts)
