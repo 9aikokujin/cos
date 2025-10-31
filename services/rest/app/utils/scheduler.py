@@ -118,11 +118,12 @@ def schedule_channel_task(
     offset_minutes: int = 0,
 ) -> bool:
     hours, minute = _compute_time_slots(offset_minutes)
+    hour_expr = ",".join(str(h) for h in hours)
     job_id = f"task_{channel_id}"
     job = scheduler.add_job(
         func=process_recurring_task,
         trigger="cron",
-        hour=hours,
+        hour=hour_expr,
         minute=minute,
         args=[channel_id, "channel"],
         id=job_id,
@@ -142,6 +143,8 @@ def schedule_channel_task(
             next_run = job.trigger.get_next_fire_time(None, now)
         except Exception:
             next_run = None
+    slots_display = ", ".join(f"{h:02d}:{minute:02d}" for h in hours)
+
     if next_run:
         next_run_local = (
             next_run.astimezone(MOSCOW_TZ)
@@ -150,13 +153,11 @@ def schedule_channel_task(
         )
         print(
             f"✅ Задача {channel_id} запланирована: следующий запуск "
-            f"{next_run_local.strftime('%d.%m %H:%M')} (мск), далее ежедневно по слотам "
-            f"{', '.join(f'{h:02d}:{minute:02d}' for h in hours)}"
+            f"{next_run_local.strftime('%d.%m %H:%M')} (мск), далее ежедневно по слотам {slots_display}"
         )
     else:
         print(
-            f"✅ Задача {channel_id} запланирована ежедневно по слотам "
-            f"{', '.join(f'{h:02d}:{minute:02d}' for h in hours)} (мск)"
+            f"✅ Задача {channel_id} запланирована ежедневно по слотам {slots_display} (мск)"
         )
 
     if run_immediately:
