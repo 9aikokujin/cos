@@ -18,6 +18,7 @@ import { useChartData } from "@/hooks/useChartData";
 import { options } from "@/shared/utils/chartsSettings";
 import Checkbox from "@/shared/ui/checkbox/Checkbox";
 import { AGGREGATION_OPTIONS } from "@/shared/utils/chartsSettings";
+import dayjs from "dayjs";
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -25,6 +26,9 @@ const Diagram = ({ data, selectedMetrics }) => {
   const { statistic, publushedVideo } = data;
   const setWithTags = useFilterStore((s) => s.setWithTags);
   const withTags = useFilterStore((s) => s.withTags);
+  const filter = useFilterStore((s) => s.filter);
+
+  const userFromDate = dayjs(filter.date_from).format("YYYY-MM-DD");
 
   const [aggregation, setAggregation] = useState("day");
 
@@ -32,7 +36,8 @@ const Diagram = ({ data, selectedMetrics }) => {
     statistic,
     publushedVideo,
     selectedMetrics,
-    aggregation
+    aggregation,
+    userFromDate
   );
 
   const chartData = { labels, datasets };

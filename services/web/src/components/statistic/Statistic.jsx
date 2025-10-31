@@ -2,17 +2,17 @@ import { useEffect, useState } from "react";
 
 import API from "@/app/api";
 import { useFilterStore } from "@/app/store/filter/store";
-import { sumFields } from "@/shared/utils/utils";
+import { sumFields, sumVideoCounts } from "@/shared/utils/utils";
 
 import Loader from "@/components/loader/Loader";
 import Diagram from "./components/Diagram";
 import StatisticBlock from "./components/StatisticBlock";
 
 import "./Statistic.css";
+import dayjs from "dayjs";
 
 const Statistic = () => {
   const { filter, withTags, isLoading, tag } = useFilterStore();
-  console.log(filter);
   const [statistic, setStatistic] = useState([]);
   const [publushedVideo, setPublishedVideo] = useState([]);
   const [selectedMetrics, setSelectedMetrics] = useState([]);
@@ -24,10 +24,18 @@ const Statistic = () => {
       );
 
     const getStatistic = async () => {
+      const patchedFilter = {
+        ...clean(filter),
+        date_from: filter.date_from
+          ? dayjs(filter.date_from).subtract(1, "day").format("YYYY-MM-DD")
+          : undefined,
+      };
+      console.log(patchedFilter);
+
       if (withTags) {
         const data = await API.statistic.getStatisticWithTags({
+          ...patchedFilter,
           articles: tag,
-          ...clean(filter),
         });
         const published = await API.statistic.getCountPublishedVideoWithTags({
           ...clean(filter), articles: tag,
@@ -35,7 +43,7 @@ const Statistic = () => {
         setPublishedVideo(published);
         setStatistic(data);
       } else {
-        const data = await API.statistic.getStatistic(clean(filter));
+        const data = await API.statistic.getStatistic(patchedFilter);
         const published = await API.statistic.getCountPublishedVideo({
           ...clean(filter),
         });
@@ -45,6 +53,8 @@ const Statistic = () => {
     };
     getStatistic();
   }, [filter, withTags, tag]);
+
+  
 
   const toggleMetric = (metric) => {
     setSelectedMetrics((prev) =>
@@ -64,7 +74,7 @@ const Statistic = () => {
         {!filter.video_id && (
           <StatisticBlock
             title="Публикации"
-            value={sumFields(publushedVideo, ["video_count"]).video_count}
+            value={sumVideoCounts(publushedVideo, ["video_count"]).video_count}
             onClick={() => toggleMetric("video_count")}
             active={selectedMetrics.includes("video_count")}
           />

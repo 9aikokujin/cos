@@ -19,7 +19,7 @@ const ProxySettings = () => {
   const handleSaveProxy = async () => {
     const data = { proxy_str: proxy, for_likee: forLikee };
     console.log(data);
-    // await API.proxy.setProxy(data);
+    await API.proxy.setProxy(data);
     showNotification("Прокси успешно сохранено");
     setProxy("");
     setForLikee(false);
@@ -29,10 +29,10 @@ const ProxySettings = () => {
     const requests = [];
     const wordsArray = parser.split(/\s+/).filter((word) => word.trim() !== "");
     console.log(wordsArray);
-    // wordsArray.forEach((word) => {
-    //   requests.push(API.proxy.setParserAccounts(word));
-    // });
-    // await Promise.all(requests);
+    wordsArray.forEach((word) => {
+      requests.push(API.proxy.setParserAccounts(word));
+    });
+    await Promise.all(requests);
     showNotification("Аккаунты успешно сохранены");
     setParser("");
   };

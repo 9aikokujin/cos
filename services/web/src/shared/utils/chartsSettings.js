@@ -18,6 +18,33 @@ export const AGGREGATION_OPTIONS = [
   { label: "Месяц", value: "month" },
 ];
 
+// export const options = {
+//   responsive: true,
+//   maintainAspectRatio: false,
+//   plugins: {
+//     legend: {
+//       display: true,
+//       position: "bottom",
+//       align: "start",
+//       labels: {
+//         pointStyle: "circle",
+//         boxWidth: 10,
+//         boxHeight: 9,
+//         padding: 20,
+//         usePointStyle: true,
+//         font: { size: 13 },
+//       },
+//     },
+//     tooltip: {
+//       mode: "index",
+//       intersect: false,
+//     },
+//   },
+//   layout: {
+//     padding: { bottom: 20 },
+//   },
+// };
+
 export const options = {
   responsive: true,
   maintainAspectRatio: false,
@@ -38,6 +65,19 @@ export const options = {
     tooltip: {
       mode: "index",
       intersect: false,
+      callbacks: {
+        // Здесь формируем tooltip с двумя строками: прирост и абсолютное значение
+        label: function (context) {
+          const dataset = context.dataset;
+          const growth = dataset.data[context.dataIndex];
+          const total = dataset.originalTotals[context.dataIndex];
+          // Если video_count, показываем только абсолютное значение
+          if (dataset.label === LABELS["video_count"]) {
+            return `${dataset.label}: ${total}`;
+          }
+          return [`Прирост: ${growth}`, `${dataset.label}: ${total}`];
+        },
+      },
     },
   },
   layout: {

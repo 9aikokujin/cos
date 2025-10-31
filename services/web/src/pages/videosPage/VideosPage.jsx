@@ -11,6 +11,7 @@ import SearchInput from "@/components/searchInput/SearchInput";
 
 const VideosPage = () => {
   const { id } = useParams();
+  console.log(id);
   const { pathname } = useLocation();
   const setUsertId = useFilterStore((state) => state.setFilterUserId);
   const [isLoading, setIsLoading] = useState(true);
@@ -19,7 +20,7 @@ const VideosPage = () => {
     if (!id) {
       setIsLoading(false);
     } else {
-      setUsertId(id);
+      setUsertId([id]);
       setIsLoading(false);
     }
   }, [id, pathname]);
