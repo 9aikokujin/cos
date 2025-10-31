@@ -19,7 +19,7 @@ const Header = () => {
   const { user } = useAuthStore();
 
   const currentHandle = matches.find((m) => m.handle?.header)?.handle.header || {};
-  const { showAddButton, showAccount, modal } = currentHandle;
+  const { showAddButton, showAccount, showProxySettings, modal } = currentHandle;
 
   const handleModal = () => {
     openModal(modal.content, { height: modal.height });
@@ -44,9 +44,11 @@ const Header = () => {
           )}
           {showAccount && (
             <>
-              <Link to={AppRoutes.PROXY} style={{ cursor: "pointer" }}>
-                <ButtonIcon name={"settings"} />
-              </Link>
+              {showProxySettings && (
+                <Link to={AppRoutes.PROXY} style={{ cursor: "pointer" }}>
+                  <ButtonIcon name={"settings"} />
+                </Link>
+              )}
               <div className="header_account _flex_center">
                 {/* <p className="_login">{formatNameToInitials(user)}</p> */}
                 <Link
