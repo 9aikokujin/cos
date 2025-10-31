@@ -1254,7 +1254,7 @@ class InstagramParser:
         url: str,
         channel_id: int,
         user_id: int,
-        max_retries: int = 0,
+        max_retries: Optional[int] = None,
         accounts: Optional[list[str]] = None,
         proxy_list: Optional[list[str]] = None,
     ):
@@ -1411,7 +1411,7 @@ class InstagramParser:
                                 timeout=20.0,
                             )
                             update_resp.raise_for_status()
-                            self.logger.send("INFO", f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
+                            # self.logger.send("INFO", f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
                         else:
                             is_new = True
                     else:

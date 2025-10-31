@@ -69,32 +69,35 @@ def test_all_proxies(proxy_list, test_url, timeout=10, max_workers=10):
 # Пример использования:
 if __name__ == "__main__":
     proxies = [
-        "2p9UY4YAxP:O9Mru1m26m@109.120.131.161:34945",
-        "pA7b4DkZVm:8yv1LzTa82@109.120.131.6:53046",
-        "fPdEeT67zF:AkrSIiWZRN@109.120.131.124:61827",
+        # "2p9UY4YAxP:O9Mru1m26m@109.120.131.161:34945",
+        # "pA7b4DkZVm:8yv1LzTa82@109.120.131.6:53046",
+        # "fPdEeT67zF:AkrSIiWZRN@109.120.131.124:61827",
+        # "iYvNraz4Qo:CtXfUQFIm6@109.120.131.25:36592",
+        # "XAQrpqMDWw:IokI8mYSKf@109.120.131.129:43852",
+        # "CCgYrPgXPY:KA3apNGhbN@109.120.131.229:27100",
+        # "7ImUgttUz5:PlcstoApnp@109.120.131.196:56618",
+        # "glyxP8tEya:HPhM9wjQGM@109.120.131.114:31838",
+        # "Pujlnq340D:lZXechQsfm@109.120.131.40:56974",
+        # "F0AIJxsjsK:0KaDLg5uES@109.120.131.169:31162",
+
         "d8mAnk3QEW:mJCDjUZQXt@45.150.35.133:20894",
         "quUqYxfzsN:IVsnELV4fT@45.150.35.246:46257",
-        "iYvNraz4Qo:CtXfUQFIm6@109.120.131.25:36592",
-        "XAQrpqMDWw:IokI8mYSKf@109.120.131.129:43852",
         "RfbRo1W0gz:Rk5fwJnepP@45.150.35.131:63024",
         "jcB7GBuBdw:wnOUcC6uC2@45.150.35.40:52284",
         "rJexYOOn6O:tjd4Q4SgTN@45.150.35.194:57330",
-        "CCgYrPgXPY:KA3apNGhbN@109.120.131.229:27100",
         "ZoA3aDjewp:lgRGWxPzR5@45.150.35.117:35941",
         "PSKbldOuol:YRinsMQpQB@45.150.35.74:42121",
         "aNpriSRLmG:RVEBaYMSnq@45.150.35.145:27900",
-        "7ImUgttUz5:PlcstoApnp@109.120.131.196:56618",
         "um2y7QWzne:3NVuS7S93n@45.150.35.180:58611",
         "gkmSRIalTf:xGROjfA2LF@45.150.35.154:39073",
-        "glyxP8tEya:HPhM9wjQGM@109.120.131.114:31838",
         "hejdZusT4h:BJYdsmEZKI@45.150.35.10:36612",
         "nbyr75VACh:I5WWfT2oLt@45.150.35.215:48124",
         "fgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557",
-        "Pujlnq340D:lZXechQsfm@109.120.131.40:56974",
-        "F0AIJxsjsK:0KaDLg5uES@109.120.131.169:31162"
     ]
 
-    working = test_all_proxies(proxies, test_url="https://ya.ru/", timeout=10)
-    print(f"Всего рабочих прокси: {len(working)}")
+# F0AIJxsjsK:0KaDLg5uES@109.120.131.169:31162\nd8mAnk3QEW:mJCDjUZQXt@45.150.35.133:2089\nquUqYxfzsN:IVsnELV4fT@45.150.35.246:4625\nRfbRo1W0gz:Rk5fwJnepP@45.150.35.131:6302\njcB7GBuBdw:wnOUcC6uC2@45.150.35.40:5228\nrJexYOOn6O:tjd4Q4SgTN@45.150.35.194:5733\nZoA3aDjewp:lgRGWxPzR5@45.150.35.117:3594\nPSKbldOuol:YRinsMQpQB@45.150.35.74:4212\naNpriSRLmG:RVEBaYMSnq@45.150.35.145:2790\num2y7QWzne:3NVuS7S93n@45.150.35.180:5861\ngkmSRIalTf:xGROjfA2LF@45.150.35.154:3907\nhejdZusT4h:BJYdsmEZKI@45.150.35.10:3661\nnbyr75VACh:I5WWfT2oLt@45.150.35.215:4812\nfgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557
+
+    # working = test_all_proxies(proxies, test_url="https://ya.ru/", timeout=10)
+    # print(f"Всего рабочих прокси: {len(working)}")
     working = test_all_proxies(proxies, test_url="https://www.tiktok.com/", timeout=10)
     print(f"Всего рабочих прокси: {len(working)}")

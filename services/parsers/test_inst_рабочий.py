@@ -1225,7 +1225,7 @@ class InstagramParser:
         url: str,
         channel_id: int,
         user_id: int,
-        max_retries: int = 0,
+        max_retries: Optional[int] = None,
         accounts: Optional[list[str]] = None,
         proxy_list: Optional[list[str]] = None,
     ):

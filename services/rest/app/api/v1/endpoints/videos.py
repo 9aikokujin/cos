@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, Query, File, UploadFile
-from typing import Optional
+from typing import Optional, List
 
 from sqlalchemy.ext.asyncio.session import AsyncSession
 
@@ -31,11 +31,16 @@ async def get_videos(
     size: Optional[int] = Query(None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     user_id: Optional[int] = Query(None),
+    user_ids: Optional[List[int]] = Query(
+        None,
+        description="Можно передавать несколько ID: user_ids=1&user_ids=2"
+    ),
 ):
     history_service = VideoHistoryService(db)
     service = VideosService(db, history_service)
     result = await service.get_all_filtered_paginated(
         user_id=user_id,
+        user_ids=user_ids,
         id=id,
         type=type,
         link=link,

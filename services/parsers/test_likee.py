@@ -59,10 +59,9 @@ class LikeeParser:
                     args=[
                         "--disable-gpu",
                         "--no-sandbox",
-                        "--window-size=1280,720"
+                        "--window-size=1280,720",
                         "--headless=new",
                     ]
-
                 )  # headless=True в продакшене
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
@@ -88,6 +87,18 @@ class LikeeParser:
                 if not video_request:
                     print("⚠️ Не поймали запрос getUserVideo")
                     continue
+
+                request_uid: Optional[Union[str, int]] = None
+                if payload_data:
+                    try:
+                        payload_json = json.loads(payload_data)
+                    except json.JSONDecodeError as je:
+                        print(f"Не удалось распарсить тело запроса getUserVideo: {je}")
+                    else:
+                        request_uid = payload_json.get("uid") or payload_json.get("posterUid")
+                        if request_uid:
+                            print(f"✅ Найден uid в теле запроса: {request_uid}")
+                            return str(request_uid)
 
                 # Повторяем запрос вручную
                 print(f"Дублируем запрос вручную: {video_request}")
@@ -249,7 +260,7 @@ class LikeeParser:
             return truncated[:last_space]
         return truncated
 
-    def extract_article_tag(self, caption: str) -> str | None:
+    def extract_article_tag(self, caption: str) -> Optional[str]:
         """Возвращает строку со ВСЕМИ найденными артикулами (#sv, #jw и т.д.) через запятую или None."""
         if not caption:
             return None
@@ -296,7 +307,7 @@ class LikeeParser:
             files = {"file": (file_name, image_bytes, "image/jpeg")}
             try:
                 resp = await client.post(
-                    f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/{video_id}/upload-image/",
+                    f"http://127.0.0.1:8000/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -413,7 +424,7 @@ class LikeeParser:
                 try:
                     async with httpx.AsyncClient(timeout=20.0) as client:
                         check_resp = await client.get(
-                            f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={video_data['link']}"
+                            f"http://127.0.0.1:8000/api/v1/videos/?link={video_data['link']}"
                         )
                         video_id = None
                         is_new = False
@@ -424,7 +435,7 @@ class LikeeParser:
                             if videos_api:
                                 video_id = videos_api[0]['id']
                                 update_resp = await client.patch(
-                                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
+                                    f"http://127.0.0.1:8000/api/v1/videos/{video_id}",
                                     json={
                                         "amount_views": video_data["amount_views"],
                                         "amount_likes": video_data["amount_likes"],
@@ -439,7 +450,7 @@ class LikeeParser:
 
                         if is_new:
                             create_resp = await client.post(
-                                "https://cosmeya.dev-klick.cyou/api/v1/videos/",
+                                "http://127.0.0.1:8000/api/v1/videos/",
                                 json=video_data
                             )
                             create_resp.raise_for_status()
@@ -507,9 +518,9 @@ async def main():
         "qI6mCjoRDV:aArrfm6cGH@109.120.147.208:32907",
     ]
     parser = LikeeParser()
-    url = "https://l.likee.video/p/IVOeZT"
+    url = "https://l.likee.video/p/IAF9JW"
     user_id = 1
-    await parser.parse_channel(url, channel_id=4,
+    await parser.parse_channel(url, channel_id=8,
                                proxy_list=proxy_list, user_id=user_id)
 
 if __name__ == "__main__":
