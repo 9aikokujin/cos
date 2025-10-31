@@ -949,7 +949,7 @@ class TikTokParser:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 files = {"file": (file_name, img, "image/jpeg")}
                 resp = await client.post(
-                    f"http://127.0.0.1:8000/api/v1/videos/{video_id}/upload-image/",
+                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -963,7 +963,7 @@ class TikTokParser:
             link = video_data.get("link", "UNKNOWN_LINK")
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
-                    check = await client.get(f"http://127.0.0.1:8000/api/v1/videos/?link={link}")
+                    check = await client.get(f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={link}")
                     video_id = None
                     is_new = False
 
@@ -982,7 +982,7 @@ class TikTokParser:
                                 # "description": video_data.get("description"),
                             }
                             upd = await client.patch(
-                                f"http://127.0.0.1:8000/api/v1/videos/{video_id}",
+                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                 json=update_payload,
                             )
                             upd.raise_for_status()
@@ -1008,7 +1008,7 @@ class TikTokParser:
                             for key, value in video_data.items()
                             if key not in {"video_id", "image_candidates"} and value is not None
                         }
-                        create = await client.post("http://127.0.0.1:8000/api/v1/videos/", json=create_payload)
+                        create = await client.post("https://cosmeya.dev-klick.cyou/api/v1/videos/", json=create_payload)
                         create.raise_for_status()
                         created_video = create.json()
                         video_id = created_video["id"]
@@ -1134,9 +1134,9 @@ async def main():
         "fgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557",
     ]
     parser = TikTokParser()
-    url = "https://www.tiktok.com/@sofi.beoma"
-    user_id = 1
-    await parser.parse_channel(url, channel_id=9, user_id=user_id, proxy_list=proxy_list)
+    url = "https://www.tiktok.com/@bestbeautydeal"
+    user_id = 13
+    await parser.parse_channel(url, channel_id=33, user_id=user_id, proxy_list=proxy_list)
 
 
 if __name__ == "__main__":
