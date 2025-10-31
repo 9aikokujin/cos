@@ -1,7 +1,7 @@
 # from app.utils.scheduler import scheduler, process_recurring_task
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
+from typing import Optional, List
 from app.repositories.videos import VideosRepository
 # from app.utils.rabbitmq_producer import rabbit_producer
 from app.schemas.videos import VideosCreate, VideosUpdate
@@ -20,9 +20,29 @@ class VideosService:
         self.repo = VideosRepository(db)
         self.history_service = history_service
 
+    @staticmethod
+    def _normalize_user_ids(
+        user_id: Optional[int],
+        user_ids: Optional[List[int]]
+    ) -> Optional[List[int]]:
+        """
+        Собирает список user_id из одиночного параметра и списка,
+        отбрасывая None и дубликаты.
+        """
+        combined: List[int] = []
+        if user_id is not None:
+            combined.append(user_id)
+        if user_ids:
+            for uid in user_ids:
+                if uid is None or uid in combined:
+                    continue
+                combined.append(uid)
+        return combined or None
+
     async def get_all_filtered_paginated(
         self,
         user_id: Optional[int],
+        user_ids: Optional[List[int]] = None,
         id: Optional[int] = None,
         type: Optional[VideoType] = None,
         link: Optional[str] = None,
@@ -30,8 +50,9 @@ class VideosService:
         page: Optional[int] = None,
         size: Optional[int] = None
     ):
+        normalized_user_ids = self._normalize_user_ids(user_id, user_ids)
         return await self.repo.get_all_filtered_paginated(
-            user_id=user_id,
+            user_ids=normalized_user_ids,
             id=id,
             type=type,
             link=link,

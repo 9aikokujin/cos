@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from app.schemas.videos import VideosCreate, VideosUpdate
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -17,7 +17,7 @@ class VideosRepository:
 
     async def get_all_filtered_paginated(
         self,
-        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         id: Optional[int] = None,
         type: Optional[VideoType] = None,
         channel_id: Optional[int] = None,
@@ -29,9 +29,9 @@ class VideosRepository:
     ) -> dict:
         query = select(Videos).order_by(Videos.created_at.desc())
 
-        if user_id is not None:
-            # Все видео из каналов, принадлежащих пользователю
-            query = query.join(Channel).filter(Channel.user_id == user_id)
+        if user_ids:
+            # Все видео из каналов, принадлежащих указанным пользователям
+            query = query.join(Channel).filter(Channel.user_id.in_(user_ids))
 
         # Фильтрация
         if id is not None:
@@ -53,14 +53,14 @@ class VideosRepository:
         # Пагинация
         if page is not None and size is not None:
             offset = (page - 1) * size
-            query = query.offset(offset).limit(size)
-            result = await self.db.execute(query)
+            count_query = select(func.count()).select_from(query.subquery())
+            paginated_query = query.offset(offset).limit(size)
+            result = await self.db.execute(paginated_query)
             videos = result.scalars().all()
 
             # Подсчет общего количества для пагинации
-            count_query = select(func.count()).select_from(query.subquery())
             total_result = await self.db.execute(count_query)
-            total = total_result.scalar()
+            total = total_result.scalar() or 0
 
             return {
                 "videos": videos,
@@ -68,7 +68,7 @@ class VideosRepository:
                     "page": page,
                     "size": size,
                     "total": total,
-                    "pages": (total + size - 1) // size
+                    "pages": (total + size - 1) // size if size else 0
                 }
             }
         else:
