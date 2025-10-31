@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -5,7 +7,7 @@ from typing import Optional
 from app.repositories.channel import ChannelRepository
 from app.schemas.channel import ChannelCreate, ChannelUpdate
 from app.models.user import User, UserRole
-from app.models.channel import ChannelType
+from app.models.channel import ChannelType, Channel
 from app.models.account import Account
 from app.models.proxy import Proxy
 from app.utils.rabbitmq_producer import rabbit_producer
@@ -54,6 +56,23 @@ class ChannelService:
     async def get_by_link(self, link: str):
         return await self.repo.get_by_link(link)
 
+    async def _calculate_offset_for_channel(self, channel_id: int) -> int:
+        result = await self.repo.db.execute(select(Channel))
+        channels = result.scalars().all()
+        channels = sorted(
+            channels,
+            key=lambda ch: (
+                ch.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                ch.id,
+            ),
+        )
+        channel_ids = [ch.id for ch in channels]
+        try:
+            position = channel_ids.index(channel_id)
+        except ValueError:
+            position = len(channel_ids) - 1
+        return position * 5
+
     async def create(self, dto: ChannelCreate, user: User):
         existing_channel = await self.repo.get_by_link(str(dto.link))
         if existing_channel:
@@ -63,7 +82,12 @@ class ChannelService:
             raise ValueError("Ошибка при создании канала")
 
         type_channel = dto.type
-        immediate_dispatched = schedule_channel_task(new_channel.id, run_immediately=True)
+        offset = await self._calculate_offset_for_channel(new_channel.id)
+        immediate_dispatched = schedule_channel_task(
+            new_channel.id,
+            run_immediately=True,
+            offset_minutes=offset,
+        )
         if immediate_dispatched:
             return new_channel
 
@@ -106,7 +130,12 @@ class ChannelService:
             raise ValueError("Ошибка при создании канала")
 
         type_channel = dto.type
-        immediate_dispatched = schedule_channel_task(new_channel.id, run_immediately=True)
+        offset = await self._calculate_offset_for_channel(new_channel.id)
+        immediate_dispatched = schedule_channel_task(
+            new_channel.id,
+            run_immediately=True,
+            offset_minutes=offset,
+        )
         if immediate_dispatched:
             return new_channel
 

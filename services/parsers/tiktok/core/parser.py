@@ -396,6 +396,8 @@ class TikTokParser:
         """
         prev_total = len(self.dom_order)
         start_total = prev_total
+        wait_without_start_growth = 0
+        max_wait_without_start_growth = 2
 
         acceptable_total: Optional[int] = None
         if target_count is not None:
@@ -463,20 +465,31 @@ class TikTokParser:
                     break
 
                 if len(self.dom_order) == start_total:
+                    if max_wait_without_start_growth > 0 and wait_without_start_growth < max_wait_without_start_growth:
+                        wait_without_start_growth += 1
+                        self.logger.send(
+                            "INFO",
+                            f"   ⌛️ Пока нет новых уникальных карточек по сравнению с началом прохода — продолжаем основной скролл ({wait_without_start_growth}/{max_wait_without_start_growth})."
+                        )
+                        continue
+
                     self.logger.send(
                         "INFO",
-                        "   ⌛️ Пока нет новых уникальных карточек по сравнению с началом прохода — продолжаем основной скролл."
+                        "   ⌛️ Лимит ожидания достигнут, пробуем мини-скроллы для получения новых карточек."
                     )
-                    continue
 
                 adjusted = await self._shake_scroll(page, delay)
                 if adjusted:
                     prev_total = len(self.dom_order)
+                    if prev_total > start_total:
+                        wait_without_start_growth = 0
                     continue
 
                 raise ProxySwitchRequired("Нет прогресса после 3 дополнительных прокруток — переключаем прокси.")
             else:
                 prev_total = current_total
+                if current_total > start_total:
+                    wait_without_start_growth = 0
 
         await self.extract_videos_from_dom(page)
         return len(self.dom_order)
