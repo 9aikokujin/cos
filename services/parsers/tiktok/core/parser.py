@@ -25,7 +25,7 @@ from playwright.async_api import async_playwright, Page, Response, TimeoutError 
 #                 return
 #             await stealth.apply_stealth_async(page)  # type: ignore
 
-# from utils.logger import TCPLogger
+from utils.logger import TCPLogger
 
 
 ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
@@ -72,9 +72,9 @@ class ProxySwitchRequired(RuntimeError):
 class TikTokParser:
     def __init__(
             self,
-            # logger: TCPLogger
+            logger: TCPLogger
     ):
-        # self.logger = logger
+        self.logger = logger
         self.dom_video_links: Dict[str, str] = {}
         self.dom_images: Dict[str, List[str]] = {}
         self.dom_order: List[str] = []
