@@ -96,7 +96,7 @@ class LikeeParser:
                     args=[
                         "--disable-gpu",
                         "--no-sandbox",
-                        "--window-size=1280,720"
+                        "--window-size=1280,720",
                         "--headless=new",
                     ]
 
@@ -125,6 +125,21 @@ class LikeeParser:
                 if not video_request:
                     self.logger.send("INFO", "⚠️ Не поймали запрос getUserVideo")
                     continue
+
+                request_uid: Optional[Union[str, int]] = None
+                if payload_data:
+                    try:
+                        payload_json = json.loads(payload_data)
+                    except json.JSONDecodeError as je:
+                        self.logger.send(
+                            "INFO",
+                            f"Не удалось распарсить тело запроса getUserVideo: {je}",
+                        )
+                    else:
+                        request_uid = payload_json.get("uid") or payload_json.get("posterUid")
+                        if request_uid:
+                            self.logger.send("INFO", f"✅ Найден uid в теле запроса: {request_uid}")
+                            return str(request_uid)
 
                 # Повторяем запрос вручную
                 self.logger.send("INFO", f"Дублируем запрос вручную: {video_request}")
@@ -286,7 +301,7 @@ class LikeeParser:
             return truncated[:last_space]
         return truncated
 
-    def extract_article_tag(self, caption: str) -> str | None:
+    def extract_article_tag(self, caption: str) -> Optional[str]:
         """Возвращает строку со ВСЕМИ найденными артикулами (#sv, #jw и т.д.) через запятую или None."""
         if not caption:
             return None
@@ -334,7 +349,7 @@ class LikeeParser:
             files = {"file": (file_name, image_bytes, "image/jpeg")}
             try:
                 resp = await client.post(
-                    f"http://{os.environ['PROD_DOMEN']}/api/v1/videos/{video_id}/upload-image/",
+                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()

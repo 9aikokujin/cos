@@ -1508,12 +1508,12 @@ class ShortsParser:
         while pending_images:
             vid, img_url, last_proxy_used = pending_images.popleft()
             proxy = self._select_next_proxy(proxy_candidates, last_proxy_used)
-            self.logger.send("INFO", f"🖼️ Загружаем изображение для {vid} через {proxy or 'без прокси'}")
+            # self.logger.send("INFO", f"🖼️ Загружаем изображение для {vid} через {proxy or 'без прокси'}")
 
             try:
                 status, _ = await self.upload_image(vid, img_url, proxy=proxy)
                 if status == 200:
-                    self.logger.send("INFO", f"✅ Фото для видео {vid} загружено")
+                    # self.logger.send("INFO", f"✅ Фото для видео {vid} загружено")
                     await asyncio.sleep(5.0)
                     continue
                 self.logger.send("INFO", f"⚠️ Фото для видео {vid} вернуло статус {status}")

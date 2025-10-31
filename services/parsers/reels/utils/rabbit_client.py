@@ -43,7 +43,7 @@ class RabbitMQParserClient:
                             url=url,
                             channel_id=channel_id,
                             user_id=user_id,
-                            max_retries=3,
+                            max_retries=None,
                             accounts=accounts,
                             proxy_list=proxy_list,
                         )

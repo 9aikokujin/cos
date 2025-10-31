@@ -949,7 +949,7 @@ class TikTokParser:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 files = {"file": (file_name, img, "image/jpeg")}
                 resp = await client.post(
-                    f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}/upload-image/",
+                    f"http://127.0.0.1:8000/api/v1/videos/{video_id}/upload-image/",
                     files=files,
                 )
                 resp.raise_for_status()
@@ -963,7 +963,7 @@ class TikTokParser:
             link = video_data.get("link", "UNKNOWN_LINK")
             try:
                 async with httpx.AsyncClient(timeout=20.0) as client:
-                    check = await client.get(f"https://cosmeya.dev-klick.cyou/api/v1/videos/?link={link}")
+                    check = await client.get(f"http://127.0.0.1:8000/api/v1/videos/?link={link}")
                     video_id = None
                     is_new = False
 
@@ -982,7 +982,7 @@ class TikTokParser:
                                 # "description": video_data.get("description"),
                             }
                             upd = await client.patch(
-                                f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
+                                f"http://127.0.0.1:8000/api/v1/videos/{video_id}",
                                 json=update_payload,
                             )
                             upd.raise_for_status()
@@ -1008,7 +1008,7 @@ class TikTokParser:
                             for key, value in video_data.items()
                             if key not in {"video_id", "image_candidates"} and value is not None
                         }
-                        create = await client.post("https://cosmeya.dev-klick.cyou/api/v1/videos/", json=create_payload)
+                        create = await client.post("http://127.0.0.1:8000/api/v1/videos/", json=create_payload)
                         create.raise_for_status()
                         created_video = create.json()
                         video_id = created_video["id"]
@@ -1082,35 +1082,61 @@ class TikTokParser:
 
 async def main():
     proxy_list = [
-        "msEHZ8:tYomUE@138.219.122.128:9584",
-        "msEHZ8:tYomUE@138.219.123.22:9205",
-        "msEHZ8:tYomUE@138.59.5.46:9559",
-        "msEHZ8:tYomUE@152.232.68.147:9269",
-        "msEHZ8:tYomUE@152.232.67.18:9241",
-        "msEHZ8:tYomUE@152.232.68.149:9212",
-        "msEHZ8:tYomUE@152.232.66.152:9388",
-        "msEHZ8:tYomUE@152.232.65.53:9461",
-        "msEHZ8:tYomUE@190.185.108.103:9335",
-        "PvJVn6:jr8EvS@38.148.133.33:8000",
-        "PvJVn6:jr8EvS@38.148.142.71:8000",
-        "PvJVn6:jr8EvS@38.148.133.69:8000",
-        "PvJVn6:jr8EvS@38.148.138.48:8000",
-        "msEHZ8:tYomUE@168.196.239.222:9211",
-        "msEHZ8:tYomUE@168.196.237.44:9129",
-        "msEHZ8:tYomUE@168.196.237.99:9160",
-        "msEHZ8:tYomUE@138.219.122.56:9409",
-        "msEHZ8:tYomUE@138.99.37.16:9622",
-        "msEHZ8:tYomUE@138.99.37.136:9248",
-        "msEHZ8:tYomUE@152.232.72.124:9057",
-        "msEHZ8:tYomUE@23.229.49.135:9511",
-        "msEHZ8:tYomUE@209.127.8.189:9281",
-        "msEHZ8:tYomUE@152.232.72.235:9966",
-        "msEHZ8:tYomUE@152.232.74.34:9043",
+        # "msEHZ8:tYomUE@138.219.122.128:9584",
+        # "msEHZ8:tYomUE@138.219.123.22:9205",
+        # "msEHZ8:tYomUE@138.59.5.46:9559",
+        # "msEHZ8:tYomUE@152.232.68.147:9269",
+        # "msEHZ8:tYomUE@152.232.67.18:9241",
+        # "msEHZ8:tYomUE@152.232.68.149:9212",
+        # "msEHZ8:tYomUE@152.232.66.152:9388",
+        # "msEHZ8:tYomUE@152.232.65.53:9461",
+        # "msEHZ8:tYomUE@190.185.108.103:9335",
+        # "PvJVn6:jr8EvS@38.148.133.33:8000",
+        # "PvJVn6:jr8EvS@38.148.142.71:8000",
+        # "PvJVn6:jr8EvS@38.148.133.69:8000",
+        # "PvJVn6:jr8EvS@38.148.138.48:8000",
+        # "msEHZ8:tYomUE@168.196.239.222:9211",
+        # "msEHZ8:tYomUE@168.196.237.44:9129",
+        # "msEHZ8:tYomUE@168.196.237.99:9160",
+        # "msEHZ8:tYomUE@138.219.122.56:9409",
+        # "msEHZ8:tYomUE@138.99.37.16:9622",
+        # "msEHZ8:tYomUE@138.99.37.136:9248",
+        # "msEHZ8:tYomUE@152.232.72.124:9057",
+        # "msEHZ8:tYomUE@23.229.49.135:9511",
+        # "msEHZ8:tYomUE@209.127.8.189:9281",
+        # "msEHZ8:tYomUE@152.232.72.235:9966",
+        # "msEHZ8:tYomUE@152.232.74.34:9043",
+
+
+        # "2p9UY4YAxP:O9Mru1m26m@109.120.131.161:34945",
+        # "pA7b4DkZVm:8yv1LzTa82@109.120.131.6:53046",
+        # "fPdEeT67zF:AkrSIiWZRN@109.120.131.124:61827",
+        # "Pujlnq340D:lZXechQsfm@109.120.131.40:56974",
+        # "F0AIJxsjsK:0KaDLg5uES@109.120.131.169:31162",
+        # "iYvNraz4Qo:CtXfUQFIm6@109.120.131.25:36592",
+        # "XAQrpqMDWw:IokI8mYSKf@109.120.131.129:43852",
+        # "CCgYrPgXPY:KA3apNGhbN@109.120.131.229:27100",
+        # "7ImUgttUz5:PlcstoApnp@109.120.131.196:56618",
+        # "glyxP8tEya:HPhM9wjQGM@109.120.131.114:31838",
+
+        "d8mAnk3QEW:mJCDjUZQXt@45.150.35.133:20894",
+        "quUqYxfzsN:IVsnELV4fT@45.150.35.246:46257",
+        "RfbRo1W0gz:Rk5fwJnepP@45.150.35.131:63024",
+        "jcB7GBuBdw:wnOUcC6uC2@45.150.35.40:52284",
+        "rJexYOOn6O:tjd4Q4SgTN@45.150.35.194:57330",
+        "ZoA3aDjewp:lgRGWxPzR5@45.150.35.117:35941",
+        "PSKbldOuol:YRinsMQpQB@45.150.35.74:42121",
+        "aNpriSRLmG:RVEBaYMSnq@45.150.35.145:27900",
+        "um2y7QWzne:3NVuS7S93n@45.150.35.180:58611",
+        "gkmSRIalTf:xGROjfA2LF@45.150.35.154:39073",
+        "hejdZusT4h:BJYdsmEZKI@45.150.35.10:36612",
+        "nbyr75VACh:I5WWfT2oLt@45.150.35.215:48124",
+        "fgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557",
     ]
     parser = TikTokParser()
-    url = "https://www.tiktok.com/@bestbeautydeal"
-    user_id = 13
-    await parser.parse_channel(url, channel_id=33, user_id=user_id, proxy_list=proxy_list)
+    url = "https://www.tiktok.com/@sofi.beoma"
+    user_id = 1
+    await parser.parse_channel(url, channel_id=9, user_id=user_id, proxy_list=proxy_list)
 
 
 if __name__ == "__main__":
