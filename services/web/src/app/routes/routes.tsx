@@ -54,6 +54,7 @@ const adminRoutes = [
     handle: {
       header: {
         showAddButton: true,
+        showProxySettings: true,
         showAccount: true,
         modal: {
           height: "40vh",
@@ -73,6 +74,7 @@ const adminRoutes = [
     handle: {
       header: {
         showAddButton: false,
+        showProxySettings: true,
         showAccount: true,
         modal: {
           title: "Добавить канал",
@@ -87,6 +89,7 @@ const adminRoutes = [
     handle: {
       header: {
         showAddButton: false,
+        showProxySettings: true,
         showAccount: true,
         modal: {
           title: "Добавить видео",
@@ -105,7 +108,8 @@ const userRoutes = [
     element: <VideosPage />,
     handle: {
       header: {
-        showAddButton: true,
+        showAddButton: false,
+        showProxySettings: false,
         showAccount: true,
         modal: {
           title: "Добавить видео",

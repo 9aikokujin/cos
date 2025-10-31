@@ -2,8 +2,15 @@ import API from "@/app/api";
 import { socialNetworks } from "@/shared/utils/utils";
 import { validateSocialUrl } from "@/shared/utils/validate";
 
-
-export const useUserProfileSubmit = (user, userId, initialData, socials, goBack, setError, showNotification) => {
+export const useUserProfileSubmit = (
+  user,
+  userId,
+  initialData,
+  socials,
+  goBack,
+  setError,
+  showNotification
+) => {
   return async (data) => {
     const updates = [];
 
@@ -48,12 +55,18 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack,
             setError("socials", { message: result });
             return;
           }
+
+          let cleanValue = fieldValue;
+          if (network.toLowerCase() === "tiktok") {
+            cleanValue = sanitizeTikTokUrl(cleanValue);
+          }
+
           updates.push(API.account.deleteAccount(existing.id));
           updates.push(
             API.account.createAccount(
               {
                 type: network.toLowerCase(),
-                link: fieldValue,
+                link: cleanValue,
                 start_views: 0,
                 start_likes: 0,
                 start_comments: 0,
@@ -68,11 +81,17 @@ export const useUserProfileSubmit = (user, userId, initialData, socials, goBack,
           setError("socials", { message: result });
           return;
         }
+
+        let cleanValue = fieldValue;
+        if (network.toLowerCase() === "tiktok") {
+          cleanValue = sanitizeTikTokUrl(cleanValue);
+        }
+
         updates.push(
           API.account.createAccount(
             {
               type: network.toLowerCase(),
-              link: fieldValue,
+              link: cleanValue,
               start_views: 0,
               start_likes: 0,
               start_comments: 0,
