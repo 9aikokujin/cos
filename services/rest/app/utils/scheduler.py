@@ -78,7 +78,8 @@
 #             print(f"❌ Ошибка в задаче {task_id}: {e}")
 
 import asyncio
-from datetime import datetime, timezone
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -145,6 +146,35 @@ def schedule_channel_task(channel_id: int, *, run_immediately: bool = False) -> 
     return immediate_dispatched
 
 
+def _schedule_initial_channel_run(channel_id: int, run_at: datetime) -> None:
+    """Plan a one-off run for a channel with the provided datetime."""
+    if run_at.tzinfo is None:
+        run_at = run_at.replace(tzinfo=MOSCOW_TZ)
+    else:
+        run_at = run_at.astimezone(MOSCOW_TZ)
+
+    now = datetime.now(MOSCOW_TZ)
+    if run_at <= now:
+        run_at = now + timedelta(seconds=5)
+
+    job_id = f"initial_task_{channel_id}"
+    scheduler.add_job(
+        func=process_recurring_task,
+        trigger="date",
+        run_date=run_at,
+        args=[channel_id, "channel"],
+        id=job_id,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+        replace_existing=True,
+    )
+    print(
+        f"🕐 Первый запуск для канала {channel_id} запланирован на "
+        f"{run_at.strftime('%d.%m %H:%M')} (мск)"
+    )
+
+
 async def restore_scheduled_tasks():
     """При старте восстанавливает ежедневное расписание (05:00 и 23:00 мск) для всех каналов."""
     async with SessionLocal() as session:
@@ -159,8 +189,46 @@ async def restore_scheduled_tasks():
         ),
     )
 
+    if not tasks:
+        return
+
+    channels_by_type = {channel_type: deque() for channel_type in ChannelType}
     for task in tasks:
-        schedule_channel_task(task.id)
+        channels_by_type.setdefault(task.type, deque()).append(task)
+
+    preferred_order = [
+        ChannelType.INSTAGRAM,
+        ChannelType.YOUTUBE,
+        ChannelType.TIKTOK,
+        ChannelType.LIKEE,
+    ]
+    additional_types = [
+        channel_type
+        for channel_type in ChannelType
+        if channel_type not in preferred_order and channels_by_type.get(channel_type)
+    ]
+    rotation = [t for t in preferred_order if channels_by_type.get(t)] + additional_types
+    if not rotation:
+        rotation = [task.type for task in tasks]
+
+    base_time = datetime.now(MOSCOW_TZ) + timedelta(seconds=5)
+    interval = timedelta(minutes=5)
+    total_channels = len(tasks)
+    scheduled_count = 0
+    rotation_index = 0
+
+    while scheduled_count < total_channels:
+        channel_type = rotation[rotation_index % len(rotation)]
+        rotation_index += 1
+        queue = channels_by_type.get(channel_type)
+        if not queue:
+            continue
+
+        channel = queue.popleft()
+        schedule_channel_task(channel.id)
+        run_at = base_time + (interval * scheduled_count)
+        _schedule_initial_channel_run(channel.id, run_at)
+        scheduled_count += 1
 
 
 async def process_recurring_task(task_id: int, type: str):

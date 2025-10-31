@@ -20,7 +20,7 @@ const fetchVideos = async (page, term, filter) => {
   }
 
   if (filter?.user_ids) {
-    params.user_id = filter.user_ids;
+    params.user_ids = filter.user_ids;
   }
 
   const response = await API.video.getVideos(params);
