@@ -395,6 +395,7 @@ class TikTokParser:
         Если прогресс останавливается, пробуем короткие скроллы и при неудаче, не покрытой допуском, сигнализируем о смене прокси.
         """
         prev_total = len(self.dom_order)
+        start_total = prev_total
 
         acceptable_total: Optional[int] = None
         if target_count is not None:
@@ -460,6 +461,13 @@ class TikTokParser:
                             f"⚠️ Собрано {current_total}/{target_count}, допускаем недобор в {tolerance} видео."
                         )
                     break
+
+                if len(self.dom_order) == start_total:
+                    self.logger.send(
+                        "INFO",
+                        "   ⌛️ Пока нет новых уникальных карточек по сравнению с началом прохода — продолжаем основной скролл."
+                    )
+                    continue
 
                 adjusted = await self._shake_scroll(page, delay)
                 if adjusted:
