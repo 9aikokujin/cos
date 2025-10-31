@@ -78,8 +78,7 @@
 #             print(f"❌ Ошибка в задаче {task_id}: {e}")
 
 import asyncio
-from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -89,7 +88,6 @@ from app.core.db import SessionLocal
 from app.models.account import Account
 from app.models.channel import Channel, ChannelType
 from app.models.proxy import Proxy
-from app.models.videos import Videos
 from app.utils.rabbitmq_producer import rabbit_producer
 
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
@@ -97,13 +95,35 @@ MOSCOW_TZ = ZoneInfo("Europe/Moscow")
 scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)
 
 
-def schedule_channel_task(channel_id: int, *, run_immediately: bool = False) -> bool:
+def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
+    """Calculate 24h-based hours for morning/evening slots and shared minute."""
+    if offset_minutes < 0:
+        offset_minutes = 0
+
+    morning_total = 5 * 60 + offset_minutes
+    morning_hour = (morning_total // 60) % 24
+    minute = morning_total % 60
+
+    evening_total = 23 * 60 + offset_minutes
+    evening_hour = (evening_total // 60) % 24
+
+    hours = sorted({morning_hour, evening_hour})
+    return hours, minute
+
+
+def schedule_channel_task(
+    channel_id: int,
+    *,
+    run_immediately: bool = False,
+    offset_minutes: int = 0,
+) -> bool:
+    hours, minute = _compute_time_slots(offset_minutes)
     job_id = f"task_{channel_id}"
     job = scheduler.add_job(
         func=process_recurring_task,
         trigger="cron",
-        hour="5,23",
-        minute=0,
+        hour=hours,
+        minute=minute,
         args=[channel_id, "channel"],
         id=job_id,
         max_instances=1,
@@ -130,10 +150,14 @@ def schedule_channel_task(channel_id: int, *, run_immediately: bool = False) -> 
         )
         print(
             f"✅ Задача {channel_id} запланирована: следующий запуск "
-            f"{next_run_local.strftime('%d.%m %H:%M')} (мск), далее ежедневно в 05:00 и 23:00"
+            f"{next_run_local.strftime('%d.%m %H:%M')} (мск), далее ежедневно по слотам "
+            f"{', '.join(f'{h:02d}:{minute:02d}' for h in hours)}"
         )
     else:
-        print(f"✅ Задача {channel_id} запланирована ежедневно в 05:00 и 23:00 (мск)")
+        print(
+            f"✅ Задача {channel_id} запланирована ежедневно по слотам "
+            f"{', '.join(f'{h:02d}:{minute:02d}' for h in hours)} (мск)"
+        )
 
     if run_immediately:
         try:
@@ -146,89 +170,26 @@ def schedule_channel_task(channel_id: int, *, run_immediately: bool = False) -> 
     return immediate_dispatched
 
 
-def _schedule_initial_channel_run(channel_id: int, run_at: datetime) -> None:
-    """Plan a one-off run for a channel with the provided datetime."""
-    if run_at.tzinfo is None:
-        run_at = run_at.replace(tzinfo=MOSCOW_TZ)
-    else:
-        run_at = run_at.astimezone(MOSCOW_TZ)
-
-    now = datetime.now(MOSCOW_TZ)
-    if run_at <= now:
-        run_at = now + timedelta(seconds=5)
-
-    job_id = f"initial_task_{channel_id}"
-    scheduler.add_job(
-        func=process_recurring_task,
-        trigger="date",
-        run_date=run_at,
-        args=[channel_id, "channel"],
-        id=job_id,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
-        replace_existing=True,
-    )
-    print(
-        f"🕐 Первый запуск для канала {channel_id} запланирован на "
-        f"{run_at.strftime('%d.%m %H:%M')} (мск)"
-    )
-
-
 async def restore_scheduled_tasks():
     """При старте восстанавливает ежедневное расписание (05:00 и 23:00 мск) для всех каналов."""
     async with SessionLocal() as session:
         result = await session.execute(select(Channel))
-        tasks = result.scalars().all()
+        channels = result.scalars().all()
 
-    tasks = sorted(
-        tasks,
+    channels = sorted(
+        channels,
         key=lambda task: (
             task.created_at or datetime.min.replace(tzinfo=timezone.utc),
             task.id,
         ),
     )
 
-    if not tasks:
+    if not channels:
         return
 
-    channels_by_type = {channel_type: deque() for channel_type in ChannelType}
-    for task in tasks:
-        channels_by_type.setdefault(task.type, deque()).append(task)
-
-    preferred_order = [
-        ChannelType.INSTAGRAM,
-        ChannelType.YOUTUBE,
-        ChannelType.TIKTOK,
-        ChannelType.LIKEE,
-    ]
-    additional_types = [
-        channel_type
-        for channel_type in ChannelType
-        if channel_type not in preferred_order and channels_by_type.get(channel_type)
-    ]
-    rotation = [t for t in preferred_order if channels_by_type.get(t)] + additional_types
-    if not rotation:
-        rotation = [task.type for task in tasks]
-
-    base_time = datetime.now(MOSCOW_TZ) + timedelta(seconds=5)
-    interval = timedelta(minutes=5)
-    total_channels = len(tasks)
-    scheduled_count = 0
-    rotation_index = 0
-
-    while scheduled_count < total_channels:
-        channel_type = rotation[rotation_index % len(rotation)]
-        rotation_index += 1
-        queue = channels_by_type.get(channel_type)
-        if not queue:
-            continue
-
-        channel = queue.popleft()
-        schedule_channel_task(channel.id)
-        run_at = base_time + (interval * scheduled_count)
-        _schedule_initial_channel_run(channel.id, run_at)
-        scheduled_count += 1
+    for index, channel in enumerate(channels):
+        offset = index * 5
+        schedule_channel_task(channel.id, offset_minutes=offset)
 
 
 async def process_recurring_task(task_id: int, type: str):
