@@ -148,7 +148,7 @@ class TikTokParser:
     async def _create_browser_with_proxy(self, playwright, proxy_str: Optional[str]):
         proxy_config = await self._get_proxy_config(proxy_str)
         browser = await playwright.chromium.launch(
-            headless=True,
+            headless=False,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--start-maximized",
@@ -157,12 +157,13 @@ class TikTokParser:
                 "--disable-infobars",
                 "--lang=en-US,en;q=0.9",
                 "--window-size=1920,1080",
+                "--headless=new"
             ],
         )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
             viewport={"width": 1920, "height": 1080},
-            # timezone_id="America/New_York",
+            timezone_id="America/New_York",
             proxy=proxy_config,
             locale="en-US",
         )
@@ -215,6 +216,26 @@ class TikTokParser:
 
         page.on("response", on_response)
         return future, on_response, timeout_s
+
+    async def _click_refresh_button(self, page: Page) -> bool:
+        """
+        Пытаемся нажать кнопку Refresh и ждём 5 секунд, чтобы страницы успела обновиться.
+        Возвращает True, если клик выполнен и ожидание прошло.
+        """
+        try:
+            refresh_locator = page.locator('button:has-text("Refresh")')
+            if await refresh_locator.count() == 0:
+                self.logger.send("INFO", "🔄 Кнопка Refresh не найдена на странице профиля")
+                return False
+
+            self.logger.send("INFO", "🔄 Нажимаем кнопку Refresh и ждём ответ")
+            await refresh_locator.first.scroll_into_view_if_needed()
+            await refresh_locator.first.click(timeout=5000)
+            await page.wait_for_timeout(5000)
+            return True
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Не удалось нажать кнопку Refresh: {exc}")
+            return False
 
     # ----------------------- СБОР DOM -----------------------
 
@@ -706,6 +727,7 @@ class TikTokParser:
                         try:
                             browser, context, page = await self._create_browser_with_proxy(playwright, current_proxy)
                             feed_future, response_handler, timeout_s = self.attach_video_count_listener(page)
+                            refresh_attempted = False
 
                             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                             self.logger.send("INFO", f"🔎 Открыт профиль {url}")
@@ -721,11 +743,29 @@ class TikTokParser:
                                 pass
 
                             try:
-                                video_count_current = await asyncio.wait_for(feed_future, timeout=timeout_s)
+                                video_count_current = await asyncio.wait_for(
+                                    asyncio.shield(feed_future),
+                                    timeout=timeout_s,
+                                )
                                 self.logger.send("INFO", f"📥 Получен videoCount: {video_count_current}")
                             except asyncio.TimeoutError:
                                 self.logger.send("INFO", "⏱️ Не получили videoCount в отведённое время")
                                 video_count_current = None
+                                if not refresh_attempted:
+                                    refresh_attempted = True
+                                    clicked = await self._click_refresh_button(page)
+                                    if clicked:
+                                        if feed_future.done() and not feed_future.cancelled():
+                                            try:
+                                                video_count_current = feed_future.result()
+                                                self.logger.send("INFO", f"📥 Получен videoCount после Refresh: {video_count_current}")
+                                            except Exception as result_exc:
+                                                self.logger.send("INFO", f"⚠️ Ошибка при получении videoCount после Refresh: {result_exc}")
+                                                video_count_current = None
+                                        else:
+                                            self.logger.send("INFO", "⏱️ Ответ от API не пришёл после Refresh")
+                                    else:
+                                        self.logger.send("INFO", "🔄 Пропускаем Refresh-попытку")
 
                             await self.extract_videos_from_dom(page)
                             await self.scroll_and_collect(
@@ -1083,7 +1123,7 @@ class TikTokParser:
         self.logger.send("INFO", f"✅ Успешно обработано {processed_count} видео")
 
 
-# # ----------------------- Пример запуска -----------------------
+# ----------------------- Пример запуска -----------------------
 
 # async def main():
 #     proxy_list = [
