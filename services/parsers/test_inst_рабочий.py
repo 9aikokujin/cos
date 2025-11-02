@@ -25,8 +25,9 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_p
 INSTAGRAM_APP_ID = "936619743392459"
 DEFAULT_DOC_ID_REEL = "25981206651899035"
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 11_2_6 like Mac OS X) "
+    "AppleWebKit/604.5.6 (KHTML, like Gecko) Mobile/15D100 "
+    "Instagram 37.0.0.9.96 (iPhone7,2; iOS 11_2_6; en_US; en)"
 )
 BASE_REQUEST_HEADERS = {
     "x-ig-app-id": INSTAGRAM_APP_ID,
@@ -34,6 +35,8 @@ BASE_REQUEST_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Accept": "*/*",
     "Referer": "https://www.instagram.com/",
+    "x-asbd-id": "129477",
+    "x-ig-www-claim": "0",
 }
 IMPORTANT_COOKIES = {
     "sessionid",
@@ -1474,6 +1477,20 @@ class InstagramParser:
 
 async def main():
     proxy_list = [
+        "d8mAnk3QEW:mJCDjUZQXt@45.150.35.133:20894",
+        "quUqYxfzsN:IVsnELV4fT@45.150.35.246:46257",
+        "RfbRo1W0gz:Rk5fwJnepP@45.150.35.131:63024",
+        "jcB7GBuBdw:wnOUcC6uC2@45.150.35.40:52284",
+        "rJexYOOn6O:tjd4Q4SgTN@45.150.35.194:57330",
+        "ZoA3aDjewp:lgRGWxPzR5@45.150.35.117:35941",
+        "PSKbldOuol:YRinsMQpQB@45.150.35.74:42121",
+        "aNpriSRLmG:RVEBaYMSnq@45.150.35.145:27900",
+        "um2y7QWzne:3NVuS7S93n@45.150.35.180:58611",
+        "gkmSRIalTf:xGROjfA2LF@45.150.35.154:39073",
+        "hejdZusT4h:BJYdsmEZKI@45.150.35.10:36612",
+        "nbyr75VACh:I5WWfT2oLt@45.150.35.215:48124",
+        "fgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557",
+        "um2y7QWzne:3NVuS7S93n@45.150.35.180:5861",
         "msEHZ8:tYomUE@152.232.65.53:9461",
         "msEHZ8:tYomUE@190.185.108.103:9335",
         "msEHZ8:tYomUE@138.99.37.16:9622",
@@ -1511,16 +1528,16 @@ async def main():
         # "jolenemccoy650:KQ9GsFqzHy:GI2NPPGSYMTFZD4F75XMOVIAB4GFWSP4",
         # "juliadacostabx829:payable64$!:OZITRNHYGIVKF27ZASD26JVIAE54JHLB",
         # "claricepeixotokt640:unbeliEvably4$!:ZG33OWOBMCPJ37NKIGCHDTEMTC6FPEGL",
-        # "allanacaldeiract154:sipHOnic5!*:NQ6453R7RMMPZGNDQWX74KAYZUDHIFA2",
-        # "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
-        # "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
-        # "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
-        # "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
-        # # "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
-        # "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
-        # "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
-        # "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
-        # "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
+        "allanacaldeiract154:sipHOnic5!*:NQ6453R7RMMPZGNDQWX74KAYZUDHIFA2",
+        "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
+        "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
+        "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
+        "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
+        # "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
+        "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
+        "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
+        "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
+        "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
         # "liviadamotaj814:zoophiles5:XLMIX3HUL3N3YSHK7NY6HQBTW5TOPXPC",
         # "rezendesuelizn674:TwVHHXku6p:UI6C3HO4CWX2F36KXMLYDM7YVYU5PCY2",
         # "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
@@ -1530,11 +1547,11 @@ async def main():
         # "lizamarks974:cEprBdwR:4LAJODJX6QBH3UGMTINIIATEV5LIMALH",
         # "ednastamm889:h5JrHw8j:SHMSJZULXUBEY2DXSY35MTVHBEN4QNDN",
         # "ihaldare381:c22BC6cY:6CHNKT2Z5VC2IWPHDLP2KP5CEOM5PVNQ",
-        "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
-        "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
-        "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
-        "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
-        "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
+        # "gerrylind948:AZYGpACe:IQZC4GVAAL66CIRSNGLK22OSELQ5BZ33",
+        # "kanekutch913:v5yprTC5:63FWYHZHIYUD7YVTPDO3LJV5TYX2PX7L",
+        # "alecryan795:T7xJ6euZ:3W4224N56AO7K5LBXKLPLUWHQZJZRRMB",
+        # "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
+        # "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
     ]
     await parser.parse_channel(url, channel_id=32,
                                user_id=user_id, accounts=accounts)

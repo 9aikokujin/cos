@@ -104,7 +104,7 @@ def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
     morning_hour = (morning_total // 60) % 24
     minute = morning_total % 60
 
-    evening_total = 23 * 60 + offset_minutes
+    evening_total = 20 * 60 + offset_minutes
     evening_hour = (evening_total // 60) % 24
 
     hours = sorted({morning_hour, evening_hour})

@@ -157,7 +157,7 @@ class TikTokParser:
                 "--disable-infobars",
                 "--lang=en-US,en;q=0.9",
                 "--window-size=1920,1080",
-                "--headless=new"
+                # "--headless=new"
             ],
         )
         context = await browser.new_context(
