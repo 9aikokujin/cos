@@ -25,7 +25,7 @@ from playwright.async_api import async_playwright, Page, Response, TimeoutError 
 #                 return
 #             await stealth.apply_stealth_async(page)  # type: ignore
 
-from utils.logger import TCPLogger
+# from utils.logger import TCPLogger
 
 
 ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
@@ -72,13 +72,14 @@ class ProxySwitchRequired(RuntimeError):
 class TikTokParser:
     def __init__(
             self,
-            logger: TCPLogger
+            # logger: TCPLogger
     ):
-        self.logger = logger
+        # self.logger = logger
         self.dom_video_links: Dict[str, str] = {}
         self.dom_images: Dict[str, List[str]] = {}
         self.dom_order: List[str] = []
         self.proxy_list: List[Optional[str]] = []
+        self.dom_settle_delay: float = 0.7  # доп. пауза, чтобы DOM успевал дорисоваться
 
     # ----------------------- УТИЛИТЫ -----------------------
 
@@ -120,7 +121,7 @@ class TikTokParser:
     #             self.logger.send(level, message)
     #         except Exception:
     #             pass
-    #     self.logger.send("INFO", message)
+    #     print(message)
 
     def clean_tiktok_profile_url(self, url: str) -> str:
         parsed = urlparse(url)
@@ -142,7 +143,7 @@ class TikTokParser:
             host, port = proxy_str.split(":", 1)
             return {"server": f"http://{host}:{port}"}
         except Exception as e:
-            self.logger.send("INFO", f"Неверный формат прокси '{proxy_str}': {e}")
+            print(f"Неверный формат прокси '{proxy_str}': {e}")
             return None
 
     async def _create_browser_with_proxy(self, playwright, proxy_str: Optional[str]):
@@ -225,16 +226,16 @@ class TikTokParser:
         try:
             refresh_locator = page.locator('button:has-text("Refresh")')
             if await refresh_locator.count() == 0:
-                self.logger.send("INFO", "🔄 Кнопка Refresh не найдена на странице профиля")
+                print("🔄 Кнопка Refresh не найдена на странице профиля")
                 return False
 
-            self.logger.send("INFO", "🔄 Нажимаем кнопку Refresh и ждём ответ")
+            print("🔄 Нажимаем кнопку Refresh и ждём ответ")
             await refresh_locator.first.scroll_into_view_if_needed()
             await refresh_locator.first.click(timeout=5000)
             await page.wait_for_timeout(5000)
             return True
         except Exception as exc:
-            self.logger.send("INFO", f"⚠️ Не удалось нажать кнопку Refresh: {exc}")
+            print(f"⚠️ Не удалось нажать кнопку Refresh: {exc}")
             return False
 
     # ----------------------- СБОР DOM -----------------------
@@ -348,10 +349,10 @@ class TikTokParser:
         Возвращает True, если число собранных карточек увеличилось.
         """
         baseline = len(self.dom_order)
-        self.logger.send("INFO", "↕️  Нет прогресса — пробуем короткие скроллы")
+        print("↕️  Нет прогресса — пробуем короткие скроллы")
 
         for jiggle in range(1, 4):
-            self.logger.send("INFO", f"   ↕️ Попытка мини-скролла {jiggle}/3")
+            print(f"   ↕️ Попытка мини-скролла {jiggle}/3")
             try:
                 await page.evaluate("() => window.scrollBy({ top: -window.innerHeight * 0.5, behavior: 'instant' })")
             except Exception:
@@ -370,10 +371,10 @@ class TikTokParser:
                 except Exception:
                     pass
 
-            await page.wait_for_timeout(int((delay + 0.4) * 1000))
+            await page.wait_for_timeout(int((delay + 0.4 + self.dom_settle_delay) * 1000))
             await self.extract_videos_from_dom(page)
             current_total = len(self.dom_order)
-            self.logger.send("INFO", f"   🔄 После мини-скролла собрано {current_total} карточек")
+            print(f"   🔄 После мини-скролла собрано {current_total} карточек")
 
             if current_total > baseline:
                 return True
@@ -407,7 +408,7 @@ class TikTokParser:
             if target_count and len(self.dom_order) >= target_count:
                 break
 
-            self.logger.send("INFO", f"Прокрутка страницы, цикл {cycle}/{max_cycles}")
+            print(f"Прокрутка страницы, цикл {cycle}/{max_cycles}")
 
             try:
                 await page.evaluate(
@@ -428,55 +429,43 @@ class TikTokParser:
                 except Exception:
                     pass
 
-            await page.wait_for_timeout(int(delay * 1000))
+            await page.wait_for_timeout(int((delay + self.dom_settle_delay) * 1000))
 
             await self.extract_videos_from_dom(page)
 
             current_total = len(self.dom_order)
             target_info = target_count if target_count is not None else "?"
-            self.logger.send("INFO", f"🔢 Собрано {current_total} уникальных видео (цель: {target_info})")
+            print(f"🔢 Собрано {current_total} уникальных видео (цель: {target_info})")
 
             if acceptable_total is not None and current_total >= acceptable_total:
                 if target_count and current_total < target_count:
-                    self.logger.send(
-                        "INFO",
-                        f"⚠️ Собрано {current_total}/{target_count}, допускаем недобор в {tolerance} видео."
-                    )
+                    print(f"⚠️ Собрано {current_total}/{target_count}, допускаем недобор в {tolerance} видео.")
                 else:
-                    self.logger.send("INFO", "🎯 Достигнуто требуемое количество видео из шапки.")
+                    print("🎯 Достигнуто требуемое количество видео из шапки.")
                 break
 
             try:
                 current_count = await page.eval_on_selector_all(selector, "els => els.length")
-                self.logger.send("INFO", f"Текущее количество элементов по селектору '{selector}': {current_count}")
+                print(f"Текущее количество элементов по селектору '{selector}': {current_count}")
             except PlaywrightTimeoutError:
-                self.logger.send("INFO", "Timeout при оценке элементов, продолжаем...")
+                print("Timeout при оценке элементов, продолжаем...")
             except Exception:
                 pass
 
             if current_total == prev_total:
-                self.logger.send("INFO", "🔁 Новых карточек нет, ждём и пробуем мини-скролл")
+                print("🔁 Новых карточек нет, ждём и пробуем мини-скролл")
                 if acceptable_total is not None and current_total >= acceptable_total:
                     if target_count and current_total < target_count:
-                        self.logger.send(
-                            "INFO",
-                            f"⚠️ Собрано {current_total}/{target_count}, допускаем недобор в {tolerance} видео."
-                        )
+                        print(f"⚠️ Собрано {current_total}/{target_count}, допускаем недобор в {tolerance} видео.")
                     break
 
                 if len(self.dom_order) == start_total:
                     if max_wait_without_start_growth > 0 and wait_without_start_growth < max_wait_without_start_growth:
                         wait_without_start_growth += 1
-                        self.logger.send(
-                            "INFO",
-                            f"   ⌛️ Пока нет новых уникальных карточек по сравнению с началом прохода — продолжаем основной скролл ({wait_without_start_growth}/{max_wait_without_start_growth})."
-                        )
+                        print(f"   ⌛️ Пока нет новых уникальных карточек по сравнению с началом прохода — продолжаем основной скролл ({wait_without_start_growth}/{max_wait_without_start_growth}).")
                         continue
 
-                    self.logger.send(
-                        "INFO",
-                        "   ⌛️ Лимит ожидания достигнут, пробуем мини-скроллы для получения новых карточек."
-                    )
+                    print("   ⌛️ Лимит ожидания достигнут, пробуем мини-скроллы для получения новых карточек.")
 
                 adjusted = await self._shake_scroll(page, delay)
                 if adjusted:
@@ -649,8 +638,7 @@ class TikTokParser:
                 response.raise_for_status()
                 return response.text
             except Exception as exc:
-                self.logger.send(
-                    "INFO",
+                print(
                     f"⚠️ Ошибка при запросе {video_url} через {proxy or 'без прокси'} "
                     f"(попытка {attempt}/{max_retries}): {exc}",
                 )
@@ -665,40 +653,70 @@ class TikTokParser:
         max_retries: int = 3,
     ) -> Dict[str, Dict[str, Union[str, int]]]:
         results: Dict[str, Dict[str, Union[str, int]]] = {}
-        attempts_per_id: Dict[str, int] = {vid: 0 for vid in video_ids}
-        queue = list(video_ids)
+        if not video_ids:
+            return results
+
         proxy_cycle = proxies if proxies else [None]
+        max_retries = max(1, max_retries)
+        max_total_attempts = max_retries * len(proxy_cycle)
 
-        while queue:
-            for proxy in proxy_cycle:
-                if not queue:
-                    break
+        pending: deque[str] = deque(video_ids)
+        states: Dict[str, Dict[str, int]] = {
+            vid: {
+                "proxy_index": 0,
+                "attempt_on_proxy": 0,
+                "total_attempts": 0,
+            }
+            for vid in video_ids
+        }
 
-                video_id = queue.pop(0)
-                video_url = self.dom_video_links.get(video_id)
-                attempts_per_id[video_id] += 1
+        while pending:
+            video_id = pending.popleft()
+            if video_id in results:
+                continue
 
-                if not video_url:
-                    self.logger.send("INFO", f"⚠️ Для видео {video_id} нет URL, пропускаем")
+            video_url = self.dom_video_links.get(video_id)
+            if not video_url:
+                print(f"⚠️ Для видео {video_id} нет URL, пропускаем")
+                continue
+
+            state = states[video_id]
+            proxy = proxy_cycle[state["proxy_index"]]
+            proxy_label = proxy or "без прокси"
+
+            state["attempt_on_proxy"] += 1
+            state["total_attempts"] += 1
+
+            html = await self.fetch_video_html(video_url, proxy, max_retries=1)
+            if html:
+                parsed = self.parse_video_html(html)
+                if parsed:
+                    results[video_id] = parsed
+                    state["attempt_on_proxy"] = 0
                     continue
 
-                html = await self.fetch_video_html(video_url, proxy, max_retries=1)
-                if html:
-                    parsed = self.parse_video_html(html)
-                    if parsed:
-                        results[video_id] = parsed
-                        continue
-
-                if attempts_per_id[video_id] < max_retries:
-                    self.logger.send("INFO", f"🔁 Повторим видео {video_id} через 5 секунд (попытка {attempts_per_id[video_id]}/{max_retries})",)
-                    await asyncio.sleep(5)
-                    queue.append(video_id)
-                else:
-                    self.logger.send("INFO", f"⛔️ Не удалось получить данные видео {video_id} после {max_retries} попыток",)
-
-            if queue:
-                self.logger.send("INFO", "⏳ Пауза 5 секунд перед следующим проходом по прокси")
+            if state["attempt_on_proxy"] < max_retries:
+                next_attempt = state["attempt_on_proxy"] + 1
+                print(
+                    f"🔁 Повторим видео {video_id} через 5 секунд на прокси {proxy_label} "
+                    f"(попытка {next_attempt}/{max_retries})",
+                )
+                pending.append(video_id)
                 await asyncio.sleep(5)
+                continue
+
+            if len(proxy_cycle) > 1 and state["total_attempts"] < max_total_attempts:
+                prev_proxy_label = proxy_label
+                state["proxy_index"] = (state["proxy_index"] + 1) % len(proxy_cycle)
+                state["attempt_on_proxy"] = 0
+                next_proxy = proxy_cycle[state["proxy_index"]]
+                next_proxy_label = next_proxy or "без прокси"
+                print(f"🌐 Сменим прокси для видео {video_id}: {prev_proxy_label} → {next_proxy_label}",)
+                pending.append(video_id)
+                await asyncio.sleep(5)
+                continue
+
+            print(f"⛔️ Не удалось получить данные видео {video_id} после {state['total_attempts']} попыток",)
 
         return results
 
@@ -731,7 +749,7 @@ class TikTokParser:
 
             max_attempts_per_proxy = 3
             for idx, current_proxy in enumerate(proxies_for_browser, start=1):
-                self.logger.send("INFO", f"🌐 Прокси {idx}/{len(proxies_for_browser)}: {current_proxy or 'без прокси'}")
+                print(f"🌐 Прокси {idx}/{len(proxies_for_browser)}: {current_proxy or 'без прокси'}")
 
                 success_on_proxy = False
                 switch_proxy = False
@@ -740,7 +758,7 @@ class TikTokParser:
 
                 try:
                     for attempt in range(1, max_attempts_per_proxy + 1):
-                        self.logger.send("INFO", f"   Попытка {attempt}/{max_attempts_per_proxy} на этой прокси")
+                        print(f"   Попытка {attempt}/{max_attempts_per_proxy} на этой прокси")
                         browser = context = page = None
                         response_handler = None
                         video_count_current: Optional[int] = None
@@ -751,7 +769,7 @@ class TikTokParser:
                             refresh_attempted = False
 
                             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                            self.logger.send("INFO", f"🔎 Открыт профиль {url}")
+                            print(f"🔎 Открыт профиль {url}")
 
                             current_url = page.url or ""
                             lowered_url = current_url.lower()
@@ -768,9 +786,9 @@ class TikTokParser:
                                     asyncio.shield(feed_future),
                                     timeout=timeout_s,
                                 )
-                                self.logger.send("INFO", f"📥 Получен videoCount: {video_count_current}")
+                                print(f"📥 Получен videoCount: {video_count_current}")
                             except asyncio.TimeoutError:
-                                self.logger.send("INFO", "⏱️ Не получили videoCount в отведённое время")
+                                print("⏱️ Не получили videoCount в отведённое время")
                                 video_count_current = None
                                 if not refresh_attempted:
                                     refresh_attempted = True
@@ -779,15 +797,16 @@ class TikTokParser:
                                         if feed_future.done() and not feed_future.cancelled():
                                             try:
                                                 video_count_current = feed_future.result()
-                                                self.logger.send("INFO", f"📥 Получен videoCount после Refresh: {video_count_current}")
+                                                print(f"📥 Получен videoCount после Refresh: {video_count_current}")
                                             except Exception as result_exc:
-                                                self.logger.send("INFO", f"⚠️ Ошибка при получении videoCount после Refresh: {result_exc}")
+                                                print(f"⚠️ Ошибка при получении videoCount после Refresh: {result_exc}")
                                                 video_count_current = None
                                         else:
-                                            self.logger.send("INFO", "⏱️ Ответ от API не пришёл после Refresh")
+                                            print("⏱️ Ответ от API не пришёл после Refresh")
                                     else:
-                                        self.logger.send("INFO", "🔄 Пропускаем Refresh-попытку")
+                                        print("🔄 Пропускаем Refresh-попытку")
 
+                            await page.wait_for_timeout(int(self.dom_settle_delay * 1000))
                             await self.extract_videos_from_dom(page)
                             await self.scroll_and_collect(
                                 page,
@@ -821,23 +840,22 @@ class TikTokParser:
 
                             if enough_cards:
                                 if effective_target and collected_now < effective_target:
-                                    self.logger.send("INFO", f"⚠️ Собрано {collected_now}/{effective_target}, принимаем результат с допуском {tolerance}.")
+                                    print(f"⚠️ Собрано {collected_now}/{effective_target}, принимаем результат с допуском {tolerance}.")
                                 success = True
                                 break
 
-                            self.logger.send(
-                                "INFO",
+                            print(
                                 f"⚠️ На прокси {current_proxy or 'без прокси'} собрано только "
                                 f"{collected_now}/{effective_target if effective_target is not None else '—'} — повторяем."
                             )
                             await asyncio.sleep(3)
                         except ProxySwitchRequired as switch_exc:
-                            self.logger.send("INFO", f"   {switch_exc}")
+                            print(f"   {switch_exc}")
                             switch_proxy = True
                             success_on_proxy = False
                             break
                         except Exception as inner_exc:
-                            self.logger.send("INFO", f"   Ошибка попытки {attempt}/{max_attempts_per_proxy}: {inner_exc}")
+                            print(f"   Ошибка попытки {attempt}/{max_attempts_per_proxy}: {inner_exc}")
                             await asyncio.sleep(3)
                         finally:
                             if response_handler and page:
@@ -859,17 +877,17 @@ class TikTokParser:
                         break
 
                     if switch_proxy:
-                        self.logger.send("INFO", "   Переходим к следующей прокси — нет прогресса по скроллу")
+                        print("   Переходим к следующей прокси — нет прогресса по скроллу")
                         await asyncio.sleep(3)
                         continue
 
                     if not success_on_proxy:
-                        self.logger.send("INFO", "   Переходим к следующей прокси")
+                        print("   Переходим к следующей прокси")
                         await asyncio.sleep(5)
                         continue
 
                 except Exception as e:
-                    self.logger.send("INFO", f"🚫 Ошибка на прокси {current_proxy or 'без прокси'}: {e}")
+                    print(f"🚫 Ошибка на прокси {current_proxy or 'без прокси'}: {e}")
                     try:
                         last_html_snapshot = await page.content() if page else last_html_snapshot
                     except Exception:
@@ -896,19 +914,16 @@ class TikTokParser:
                 pass
 
         total_collected = len(self.dom_order)
-        self.logger.send(
-            "INFO",
-            f"🎯 Собрано {total_collected} ссылок (videoCount: {target_video_count if target_video_count is not None else '—'})",
-        )
+        print(f"🎯 Собрано {total_collected} ссылок (videoCount: {target_video_count if target_video_count is not None else '—'})",)
 
         if not success:
             fname = f"tiktok_profile_{username}_{datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}.html"
             try:
                 with open(fname, "w", encoding="utf-8") as f:
                     f.write(last_html_snapshot or "<!-- empty -->")
-                self.logger.send("INFO", f"📄 Не удалось собрать видео — HTML сохранён: {fname}")
+                print(f"📄 Не удалось собрать видео — HTML сохранён: {fname}")
             except Exception as e:
-                self.logger.send("INFO", f"⚠️ Не удалось сохранить HTML: {e}")
+                print(f"⚠️ Не удалось сохранить HTML: {e}")
             return
 
         video_ids = self.dom_order[: target_video_count] if target_video_count else self.dom_order
@@ -918,12 +933,12 @@ class TikTokParser:
         for video_id in video_ids:
             link = self.dom_video_links.get(video_id)
             if not link:
-                self.logger.send("INFO", f"⚠️ Нет ссылки для видео {video_id}, пропускаем")
+                print(f"⚠️ Нет ссылки для видео {video_id}, пропускаем")
                 continue
 
             parsed = metadata.get(video_id)
             if not parsed:
-                self.logger.send("INFO", f"⚠️ Нет данных по запросу для {video_id}, пропускаем")
+                print(f"⚠️ Нет данных по запросу для {video_id}, пропускаем")
                 continue
 
             description = parsed.get("description") or ""
@@ -974,7 +989,7 @@ class TikTokParser:
             )
 
         if not all_videos_data:
-            self.logger.send("INFO", "⚠️ После запросов не осталось данных для отправки")
+            print("⚠️ После запросов не осталось данных для отправки")
             return
 
         async def download_image(img_url: str, proxy: Optional[str] = None) -> Union[bytes, None]:
@@ -1000,11 +1015,11 @@ class TikTokParser:
             except httpx.HTTPStatusError as exc:
                 status = exc.response.status_code
                 reason = exc.response.reason_phrase or ""
-                self.logger.send("INFO", f"❌ Ошибка загрузки {img_url}: HTTP {status} {reason}".rstrip())
+                print(f"❌ Ошибка загрузки {img_url}: HTTP {status} {reason}".rstrip())
             except httpx.RequestError as exc:
-                self.logger.send("INFO", f"❌ Ошибка загрузки {img_url}: {type(exc).__name__}: {exc}")
+                print(f"❌ Ошибка загрузки {img_url}: {type(exc).__name__}: {exc}")
             except Exception as exc:
-                self.logger.send("INFO", f"❌ Ошибка загрузки {img_url}: {exc}")
+                print(f"❌ Ошибка загрузки {img_url}: {exc}")
             return None
 
         async def upload_image(video_id: int, image_url: str, proxy: Optional[str] = None):
@@ -1065,7 +1080,7 @@ class TikTokParser:
                         else:
                             is_new = True
                     else:
-                        self.logger.send("INFO", f"Проверка существования не удалась ({check.status_code}): {check.text}")
+                        print(f"Проверка существования не удалась ({check.status_code}): {check.text}")
                         is_new = True
 
                     if is_new:
@@ -1092,7 +1107,7 @@ class TikTokParser:
                 processed_count += 1
 
             except Exception as e:
-                self.logger.send("INFO", f"Критическая ошибка при обработке {link}: {e}")
+                print(f"Критическая ошибка при обработке {link}: {e}")
                 continue
 
         proxy_candidates: List[Optional[str]] = list(self.proxy_list) if self.proxy_list else [None]
@@ -1103,7 +1118,7 @@ class TikTokParser:
             video_id, urls, last_proxy_used, url_index, attempts = pending_images.popleft()
 
             if not urls:
-                self.logger.send("INFO", f"⚠️ Нет ссылок на обложки для видео {video_id}, пропускаем загрузку")
+                print(f"⚠️ Нет ссылок на обложки для видео {video_id}, пропускаем загрузку")
                 continue
 
             if url_index >= len(urls):
@@ -1112,42 +1127,42 @@ class TikTokParser:
             proxy = self._select_next_proxy(proxy_candidates, last_proxy_used)
             candidate_url = urls[url_index]
             candidate_position = f"{url_index + 1}/{len(urls)}"
-            self.logger.send("INFO", f"🖼️ Прокси {proxy or 'без прокси'}: загружаем фото для видео {video_id} ({candidate_position})")
+            print(f"🖼️ Прокси {proxy or 'без прокси'}: загружаем фото для видео {video_id} ({candidate_position})")
 
             try:
                 status, _ = await upload_image(video_id, candidate_url, proxy=proxy)
                 if status == 200:
-                    self.logger.send("INFO", f"✅ Фото загружено для видео {video_id}")
+                    print(f"✅ Фото загружено для видео {video_id}")
                     await asyncio.sleep(4.0)
                     continue
-                self.logger.send("INFO", f"⚠️ Фото: код {status} для видео {video_id} ({candidate_position})")
+                print(f"⚠️ Фото: код {status} для видео {video_id} ({candidate_position})")
             except Exception as exc:
-                self.logger.send("INFO", f"❌ Ошибка загрузки фото для {video_id} ({candidate_position}): {exc}")
+                print(f"❌ Ошибка загрузки фото для {video_id} ({candidate_position}): {exc}")
 
             attempts += 1
             if attempts >= max_attempts_per_video:
-                self.logger.send("INFO", f"⛔️ Превышено число попыток загрузки фото для видео {video_id}, пропускаем")
+                print(f"⛔️ Превышено число попыток загрузки фото для видео {video_id}, пропускаем")
                 continue
 
             if len(urls) > 1:
                 next_index = (url_index + 1) % len(urls)
                 if next_index != url_index:
-                    self.logger.send("INFO", f"🔄 Попробуем альтернативный URL для видео {video_id} ({next_index + 1}/{len(urls)})")
+                    print(f"🔄 Попробуем альтернативный URL для видео {video_id} ({next_index + 1}/{len(urls)})")
                     pending_images.append((video_id, urls, None, next_index, attempts))
                     await asyncio.sleep(5.0)
                     continue
 
-            self.logger.send("INFO", f"🔄 Повторим попытку для видео {video_id} через 30 секунд на другой прокси")
+            print(f"🔄 Повторим попытку для видео {video_id} через 30 секунд на другой прокси")
             pending_images.append((video_id, urls, proxy, url_index, attempts))
             await asyncio.sleep(30.0)
 
-        self.logger.send("INFO", f"✅ Успешно обработано {processed_count} видео")
+        print(f"✅ Успешно обработано {processed_count} видео")
 
 
 # ----------------------- Пример запуска -----------------------
 
-# async def main():
-#     proxy_list = [
+async def main():
+    proxy_list = [
         # "msEHZ8:tYomUE@138.219.122.128:9584",
         # "msEHZ8:tYomUE@138.219.123.22:9205",
         # "msEHZ8:tYomUE@138.59.5.46:9559",
@@ -1173,6 +1188,7 @@ class TikTokParser:
         # "msEHZ8:tYomUE@152.232.72.235:9966",
         # "msEHZ8:tYomUE@152.232.74.34:9043",
 
+
         # "2p9UY4YAxP:O9Mru1m26m@109.120.131.161:34945",
         # "pA7b4DkZVm:8yv1LzTa82@109.120.131.6:53046",
         # "fPdEeT67zF:AkrSIiWZRN@109.120.131.124:61827",
@@ -1184,25 +1200,25 @@ class TikTokParser:
         # "7ImUgttUz5:PlcstoApnp@109.120.131.196:56618",
         # "glyxP8tEya:HPhM9wjQGM@109.120.131.114:31838",
 
-#         "d8mAnk3QEW:mJCDjUZQXt@45.150.35.133:20894",
-#         "quUqYxfzsN:IVsnELV4fT@45.150.35.246:46257",
-#         "RfbRo1W0gz:Rk5fwJnepP@45.150.35.131:63024",
-#         "jcB7GBuBdw:wnOUcC6uC2@45.150.35.40:52284",
-#         "rJexYOOn6O:tjd4Q4SgTN@45.150.35.194:57330",
-#         "ZoA3aDjewp:lgRGWxPzR5@45.150.35.117:35941",
-#         "PSKbldOuol:YRinsMQpQB@45.150.35.74:42121",
-#         "aNpriSRLmG:RVEBaYMSnq@45.150.35.145:27900",
-#         "um2y7QWzne:3NVuS7S93n@45.150.35.180:58611",
-#         "gkmSRIalTf:xGROjfA2LF@45.150.35.154:39073",
-#         "hejdZusT4h:BJYdsmEZKI@45.150.35.10:36612",
-#         "nbyr75VACh:I5WWfT2oLt@45.150.35.215:48124",
-#         "fgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557",
-#     ]
-#     parser = TikTokParser()
-#     url = "https://www.tiktok.com/@bestbeautydeal"
-#     user_id = 13
-#     await parser.parse_channel(url, channel_id=33, user_id=user_id, proxy_list=proxy_list)
+        "d8mAnk3QEW:mJCDjUZQXt@45.150.35.133:20894",
+        "quUqYxfzsN:IVsnELV4fT@45.150.35.246:46257",
+        "RfbRo1W0gz:Rk5fwJnepP@45.150.35.131:63024",
+        "jcB7GBuBdw:wnOUcC6uC2@45.150.35.40:52284",
+        "rJexYOOn6O:tjd4Q4SgTN@45.150.35.194:57330",
+        "ZoA3aDjewp:lgRGWxPzR5@45.150.35.117:35941",
+        "PSKbldOuol:YRinsMQpQB@45.150.35.74:42121",
+        "aNpriSRLmG:RVEBaYMSnq@45.150.35.145:27900",
+        "um2y7QWzne:3NVuS7S93n@45.150.35.180:58611",
+        "gkmSRIalTf:xGROjfA2LF@45.150.35.154:39073",
+        "hejdZusT4h:BJYdsmEZKI@45.150.35.10:36612",
+        "nbyr75VACh:I5WWfT2oLt@45.150.35.215:48124",
+        "fgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557",
+    ]
+    parser = TikTokParser()
+    url = "https://www.tiktok.com/@bestbeautydeal"
+    user_id = 13
+    await parser.parse_channel(url, channel_id=33, user_id=user_id, proxy_list=proxy_list)
 
 
-# if __name__ == "__main__":
-#     asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

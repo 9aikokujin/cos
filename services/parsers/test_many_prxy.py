@@ -80,6 +80,27 @@ if __name__ == "__main__":
         # "Pujlnq340D:lZXechQsfm@109.120.131.40:56974",
         # "F0AIJxsjsK:0KaDLg5uES@109.120.131.169:31162",
 
+        "msEHZ8:tYomUE@168.196.239.222:9211",
+        "msEHZ8:tYomUE@168.196.237.44:9129",
+        "msEHZ8:tYomUE@168.196.237.99:9160",
+        "msEHZ8:tYomUE@138.219.122.56:9409",
+        "msEHZ8:tYomUE@138.219.122.128:9584",
+        "msEHZ8:tYomUE@138.219.123.22:9205",
+        "msEHZ8:tYomUE@138.59.5.46:9559",
+        "msEHZ8:tYomUE@152.232.68.147:9269",
+        "msEHZ8:tYomUE@152.232.67.18:9241",
+        "msEHZ8:tYomUE@152.232.68.149:9212",
+        "msEHZ8:tYomUE@152.232.66.152:9388",
+        "msEHZ8:tYomUE@152.232.65.53:9461",
+        "msEHZ8:tYomUE@190.185.108.103:9335",
+        "msEHZ8:tYomUE@138.99.37.16:9622",
+        "msEHZ8:tYomUE@138.99.37.136:9248",
+        "msEHZ8:tYomUE@152.232.72.124:9057",
+        "msEHZ8:tYomUE@23.229.49.135:9511",
+        "msEHZ8:tYomUE@209.127.8.189:9281",
+        "msEHZ8:tYomUE@152.232.72.235:9966",
+        "msEHZ8:tYomUE@152.232.74.34:9043",
+
         "d8mAnk3QEW:mJCDjUZQXt@45.150.35.133:20894",
         "quUqYxfzsN:IVsnELV4fT@45.150.35.246:46257",
         "RfbRo1W0gz:Rk5fwJnepP@45.150.35.131:63024",
@@ -100,5 +121,5 @@ if __name__ == "__main__":
 
     # working = test_all_proxies(proxies, test_url="https://ya.ru/", timeout=10)
     # print(f"Всего рабочих прокси: {len(working)}")
-    working = test_all_proxies(proxies, test_url="https://www.tiktok.com/", timeout=10)
+    working = test_all_proxies(proxies, test_url="https://www.youtube.com/shorts/fStb9Ge0c88", timeout=10)
     print(f"Всего рабочих прокси: {len(working)}")
