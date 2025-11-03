@@ -121,5 +121,5 @@ if __name__ == "__main__":
 
     # working = test_all_proxies(proxies, test_url="https://ya.ru/", timeout=10)
     # print(f"Всего рабочих прокси: {len(working)}")
-    working = test_all_proxies(proxies, test_url="https://www.youtube.com/shorts/fStb9Ge0c88", timeout=10)
+    working = test_all_proxies(proxies, test_url="https://www.tiktok.com/", timeout=10)
     print(f"Всего рабочих прокси: {len(working)}")
