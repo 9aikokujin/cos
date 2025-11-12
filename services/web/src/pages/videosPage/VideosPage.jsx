@@ -20,7 +20,7 @@ const VideosPage = () => {
     if (!id) {
       setIsLoading(false);
     } else {
-      setUsertId([id]);
+      setUsertId(id);
       setIsLoading(false);
     }
   }, [id, pathname]);
