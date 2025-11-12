@@ -11,6 +11,7 @@ import { useNotificationStore } from "@/app/store/notification/store";
 import Input from "@/shared/ui/input/Input";
 import { socialNetworks } from "@/shared/utils/utils";
 import { Button, ButtonIcon } from "@/shared/ui/button/Button";
+import { validateSocialUrl } from "@/shared/utils/validate";
 
 import "./EditProfileForm.css";
 
