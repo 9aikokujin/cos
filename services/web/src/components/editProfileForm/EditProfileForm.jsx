@@ -1,4 +1,5 @@
-import { useForm } from "react-hook-form";
+import { useForm, useFieldArray } from "react-hook-form";
+import { motion, AnimatePresence } from "framer-motion";
 import { useParams } from "react-router-dom";
 
 import { useBack } from "@/hooks/useBack";
@@ -8,9 +9,8 @@ import { useUserProfileSubmit } from "@/hooks/useUserProfileSubmit";
 import { useNotificationStore } from "@/app/store/notification/store";
 
 import Input from "@/shared/ui/input/Input";
-// import Checkbox from "@/shared/ui/checkbox/Checkbox";
 import { socialNetworks } from "@/shared/utils/utils";
-import { Button } from "@/shared/ui/button/Button";
+import { Button, ButtonIcon } from "@/shared/ui/button/Button";
 
 import "./EditProfileForm.css";
 
@@ -24,13 +24,38 @@ const EditProfileForm = () => {
     register,
     handleSubmit,
     setValue,
+    control,
+    reset,
     clearErrors,
     setError,
     formState: { errors },
-  } = useForm();
+  } = useForm({
+    defaultValues: {
+      fullName: "",
+      tgId: "",
+      socials: [],
+    },
+  });
 
-  const { initialData, socials, loading } = useUserProfileData(userId, setValue);
-  const onSubmit = useUserProfileSubmit(user, userId, initialData, socials, goBack, setError, showNotification);
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "socials",
+  });
+
+  const addSocialInput = (network) => {
+    append({ type: network, link: "" });
+  };
+
+  const { initialData, socials, loading } = useUserProfileData(userId, setValue, reset);
+  const onSubmit = useUserProfileSubmit(
+    user,
+    userId,
+    initialData,
+    socials,
+    goBack,
+    setError,
+    showNotification
+  );
 
   return (
     <form className="edit_form" action="" onSubmit={handleSubmit(onSubmit)}>
@@ -60,30 +85,49 @@ const EditProfileForm = () => {
           </>
         )}
         <div className="edit_social _flex_col">
-          {/* <div className="_flex_sb">
+          <div className="_flex_sb social_add_btn">
             {socialNetworks.map((network) => (
-              <Checkbox
-                key={network}
-                label={network}
-                checked={true}
-                disabled
-                // onChange={() => handleCheckboxChange(network)}
-              />
+              <Button className="_orange" type="button" onClick={() => addSocialInput(network)}>
+                + {network}
+              </Button>
             ))}
-          </div> */}
+          </div>
           {errors.socials && <span className="error_text">{errors.socials.message}</span>}
-          {socialNetworks.map((network) => (
-            <Input
-              key={network}
-              placeholder={network}
-              type="text"
-              error={errors.socials}
-              {...register(network)}
-              onChange={(e) => {
-                if (e.target.value.trim() !== "") clearErrors("socials");
-              }}
-            />
-          ))}
+          <AnimatePresence>
+            {fields.map((field, index) => (
+              <motion.div
+                key={field.id}
+                initial={{ opacity: 0, y: -10, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: "auto" }}
+                exit={{ opacity: 0, y: -10, height: 0 }}
+                transition={{ duration: 0.25 }}
+                className="social-input-wrapper visible"
+              >
+                <Input
+                  placeholder={`${field.type}`}
+                  type="text"
+                  error={errors.socials?.[index]?.link}
+                  {...register(`socials.${index}.link`, {
+                    validate: (value) => {
+                      const trimmed = value.trim();
+                      if (!trimmed) return true; // пустое — значит "удалить"
+                      const result = validateSocialUrl(trimmed, field.type.toLowerCase());
+                      return result === true || result;
+                    },
+                  })}
+                  onChange={(e) => {
+                    if (e.target.value.trim() !== "") clearErrors(`socials.${index}.link`);
+                  }}
+                />
+                  <ButtonIcon
+                    className={"_social_close_btn"}
+                    name={"close"}
+                    type="button"
+                    onClick={() => remove(index)}
+                  />
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
         <Button
           className={"_orange edit_form_btn"}
