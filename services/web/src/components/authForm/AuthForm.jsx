@@ -1,13 +1,12 @@
-import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useFieldArray, useForm } from "react-hook-form";
+import { motion, AnimatePresence } from "framer-motion";
 
 import { useModalStore } from "@/app/store/modal/store";
 import { useAuthStore } from "@/app/store/user/store";
 
 import SettingsSocial from "@/components/typeModal/settingsSocial/SettingsSocial";
 import Input from "@/shared/ui/input/Input";
-import Checkbox from "@/shared/ui/checkbox/Checkbox";
-import { Button } from "@/shared/ui/button/Button";
+import { Button, ButtonIcon } from "@/shared/ui/button/Button";
 import { socialNetworks } from "@/shared/utils/utils";
 import { validateSocialUrl } from "@/shared/utils/validate";
 
@@ -20,55 +19,39 @@ const AuthForm = () => {
   const {
     register,
     handleSubmit,
-    watch,
     setError,
     clearErrors,
+    control,
     formState: { errors },
   } = useForm({
     defaultValues: {
       fullName: "",
-      Instagram: "",
-      YouTube: "",
-      Likee: "",
-      TikTok: "",
+      socials: [],
     },
   });
 
-  const [checkedSocials, setCheckedSocials] = useState({
-    Instagram: true,
-    YouTube: false,
-    Likee: false,
-    TikTok: false,
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: "socials",
   });
 
-  const handleCheckboxChange = (name) => {
-    setCheckedSocials((prev) => ({
-      ...prev,
-      [name]: !prev[name],
-    }));
+  const addSocialInput = (network) => {
+    clearErrors("socials");
+    append({ type: network, link: "" });
   };
+
 
   const onSubmit = (data) => {
     const fullName = data.fullName.trim();
-    const filledSocials = socialNetworks.filter((network) => data[network]?.trim() !== "");
 
     if (!fullName) {
       setError("fullName", { message: "Заполните поле ФИО" });
       return;
     }
 
-    if (filledSocials.length === 0) {
+    if (data.socials.length === 0) {
       setError("socials", { message: "Выберите хотя бы одну соцсеть" });
       return;
-    }
-
-    for (const network of filledSocials) {
-      const value = data[network];
-      const result = validateSocialUrl(value, network.toLowerCase());
-      if (result !== true) {
-        setError("socials", { message: result });
-        return;
-      }
     }
 
     const nameParts = fullName.split(" ");
@@ -80,9 +63,9 @@ const AuthForm = () => {
       first_name: firstName,
       username: userTG.username,
       user_id: user.id,
-      socials: filledSocials.map((name) => ({
-        type: name.toLowerCase(),
-        link: data[name],
+      socials: data.socials.map((item) => ({
+        type: item.type.toLowerCase(),
+        link: item.link,
         start_views: 0,
         start_likes: 0,
         start_comments: 0,
@@ -107,34 +90,47 @@ const AuthForm = () => {
           }}
         />
         <div className="social_form _flex_col">
-          <div className="_flex_sb">
+          <div className="_flex_sb social_add_btn">
             {socialNetworks.map((network) => (
-              <Checkbox
-                key={network}
-                label={network}
-                checked={checkedSocials[network]}
-                onChange={() => handleCheckboxChange(network)}
-              />
+              <Button className="_orange" type="button" onClick={() => addSocialInput(network)}>
+                + {network}
+              </Button>
             ))}
           </div>
           {errors.socials && <span className="error_text">{errors.socials.message}</span>}
           <div className="social_field">
-            {socialNetworks.map((network) => (
-              <div
-                key={network + "_input"}
-                className={`social-input-wrapper ${checkedSocials[network] ? "visible" : ""}`}
-              >
-                <Input
-                  placeholder={network}
-                  type="text"
-                  error={errors.socials}
-                  {...register(network)}
-                  onChange={(e) => {
-                    if (e.target.value.trim() !== "") clearErrors("socials");
-                  }}
-                />
-              </div>
-            ))}
+            <AnimatePresence>
+              {fields.map((field, index) => (
+                <motion.div
+                  key={field.id}
+                  initial={{ opacity: 0, y: -10, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: "auto" }}
+                  exit={{ opacity: 0, y: -10, height: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="social-input-wrapper"
+                >
+                  <Input
+                    placeholder={`${field.type}`}
+                    type="text"
+                    error={errors.socials?.[index]?.link}
+                    {...register(`socials.${index}.link`, {
+                      validate: (value) => {
+                        if (!value.trim()) return "Введите ссылку";
+                        const result = validateSocialUrl(value, field.type.toLowerCase());
+                        return result === true || result;
+                      },
+                    })}
+                    className={"_social_input"}
+                  />
+                  <ButtonIcon
+                    className={"_social_close_btn"}
+                    name={"close"}
+                    type="button"
+                    onClick={() => remove(index)}
+                  />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
         </div>
         <Button className={"_orange auth_form_btn"} type="submit">
