@@ -238,6 +238,7 @@ const SettingsSocial = ({ data }) => {
       );
 
       closeModal();
+       window.location.reload();
     } catch (err) {
       console.error("Ошибка при отправке данных:", err);
     }
