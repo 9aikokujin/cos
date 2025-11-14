@@ -2,21 +2,33 @@ import asyncio
 import inspect
 import json
 import random
-import re
+# import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import quote, urlparse, urlunparse
-import pyotp
+from urllib.parse import quote, urlparse
+
 import httpx
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError, async_playwright
+# from utils.logger import TCPLogger
+import pyotp
+
+# try:  # поддержка новых версий playwright-stealth
+#     from playwright_stealth import stealth_async as apply_stealth
+# except ImportError:  # fallback на старый API
+#     try:
+#         from playwright_stealth import Stealth  # type: ignore
+
+#         async def apply_stealth(page):
+#             await Stealth().apply_stealth_async(page)
+#     except Exception:  # если stealth не установлен/сломался
+#         apply_stealth = None  # type: ignore
 
 INSTAGRAM_APP_ID = "936619743392459"
 DEFAULT_DOC_ID_REEL = "25981206651899035"
 DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 11_2_6 like Mac OS X) "
-    "AppleWebKit/604.5.6 (KHTML, like Gecko) Mobile/15D100 "
-    "Instagram 37.0.0.9.96 (iPhone7,2; iOS 11_2_6; en_US; en)"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
 )
 BASE_REQUEST_HEADERS = {
     "x-ig-app-id": INSTAGRAM_APP_ID,
@@ -24,8 +36,6 @@ BASE_REQUEST_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
     "Accept": "*/*",
     "Referer": "https://www.instagram.com/",
-    "x-asbd-id": "129477",
-    "x-ig-www-claim": "0",
 }
 IMPORTANT_COOKIES = {
     "sessionid",
@@ -49,12 +59,41 @@ class InvalidCredentialsError(Exception):
 
 
 class InstagramParser:
-    def __init__(self, proxy_list: list = None):
-        self.proxy_list = proxy_list or []
+    def __init__(
+            self,
+            # logger: TCPLogger,
+    ):
+        # self.logger = logger
+        self.proxy_list: list[str] = []
         self.cookie_file_path = COOKIES_FILE_PATH
         self.session_cache: Dict[str, Dict[str, Any]] = self._load_cookie_store()
         self.account_credentials: Dict[str, Dict[str, str]] = {}
         self.invalid_accounts: set[str] = set()
+
+    async def _start_playwright(self):
+        try:
+            return await async_playwright().start()
+        except Exception as exc:
+            print(f"❌ Не удалось запустить Playwright: {exc}")
+            return None
+
+    async def _safe_close(self, obj, label: str, method: str = "close"):
+        if not obj:
+            return
+        closer = getattr(obj, method, None)
+        if not closer:
+            return
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            print(f"⚠️ Ошибка закрытия {label}: {exc}")
+
+    async def _cleanup_browser_stack(self, page=None, context=None, browser=None):
+        await self._safe_close(page, "page")
+        await self._safe_close(context, "context")
+        await self._safe_close(browser, "browser")
 
     def _load_cookie_store(self) -> Dict[str, Dict[str, Any]]:
         if self.cookie_file_path.exists():
@@ -76,29 +115,14 @@ class InstagramParser:
         except Exception as exc:
             print(f"⚠️ Не удалось сохранить cookies в {self.cookie_file_path}: {exc}")
 
-    def _build_headers(
-        self,
-        user_agent: Optional[str] = None,
-        csrf_token: Optional[str] = None,
-        www_claim: Optional[str] = None,
-    ) -> Dict[str, str]:
+    def _build_headers(self, user_agent: Optional[str] = None, csrf_token: Optional[str] = None) -> Dict[str, str]:
         headers = dict(BASE_REQUEST_HEADERS)
         if user_agent:
             headers["User-Agent"] = user_agent
         if csrf_token:
             headers["x-csrftoken"] = csrf_token
-        if www_claim:
-            headers["x-ig-www-claim"] = www_claim
         headers.setdefault("X-Requested-With", "XMLHttpRequest")
         return headers
-
-    @staticmethod
-    def _extract_www_claim_from_response(resp: httpx.Response) -> Optional[str]:
-        for k in ("x-ig-set-www-claim", "x-ig-www-claim", "ig-set-www-claim"):
-            v = resp.headers.get(k)
-            if v:
-                return v
-        return None
 
     @staticmethod
     def _parse_proxy(proxy_str: Optional[str]) -> Optional[Dict[str, str]]:
@@ -117,18 +141,39 @@ class InstagramParser:
             host, port = proxy_str.split(":", 1)
             return {"server": f"http://{host}:{port}"}
         except Exception as exc:
-            print(f"⚠️ Неверный формат прокси '{proxy_str}': {exc}")
+            # print(f"⚠️ Неверный формат прокси '{proxy_str}': {exc}")
             return None
 
     @staticmethod
-    def _dedupe_proxy(proxy: list[Optional[str]]) -> list[Optional[str]]:
+    def _dedupe_proxies(proxies: list[Optional[str]]) -> list[Optional[str]]:
         seen: set[Optional[str]] = set()
         ordered: list[Optional[str]] = []
-        for proxy in proxy:
+        for proxy in proxies:
             if proxy not in seen:
                 ordered.append(proxy)
                 seen.add(proxy)
         return ordered
+
+    @staticmethod
+    def _normalize_proxy_input(proxy_list: Optional[Any]) -> list[str]:
+        if proxy_list is None:
+            return []
+        if isinstance(proxy_list, str):
+            text = proxy_list.strip()
+            if not text:
+                return []
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                proxy_list = [item.strip() for item in text.replace("\r", "\n").split("\n") if item.strip()]
+            else:
+                proxy_list = parsed
+        normalized: list[str] = []
+        for proxy in proxy_list:
+            if not proxy:
+                continue
+            normalized.append(str(proxy).strip())
+        return normalized
 
     @staticmethod
     def _extract_auth_cookies(raw_cookies: list[Dict[str, Any]]) -> Dict[str, str]:
@@ -151,14 +196,12 @@ class InstagramParser:
         cookies: Dict[str, str],
         user_agent: Optional[str],
         proxy: Optional[str],
-        www_claim: Optional[str] = None,
     ) -> Dict[str, Any]:
         entry = {
             "cookies": cookies,
             "user_agent": user_agent or DEFAULT_USER_AGENT,
             "updated_at": datetime.utcnow().isoformat() + "Z",
             "proxy": proxy,
-            "www_claim": (www_claim or "0"),
         }
         self.session_cache[username] = entry
         self._persist_cookie_store()
@@ -191,6 +234,40 @@ class InstagramParser:
             return f"http://{auth}@{host_port}"
         return f"http://{proxy_str}"
 
+    def _iter_proxy_candidates(self, entry: Dict[str, Any]) -> list[Optional[str]]:
+        assigned_proxy = entry.get("proxy")
+        candidates: list[Optional[str]] = []
+
+        def add_candidate(value: Optional[str]) -> None:
+            if value not in candidates:
+                candidates.append(value)
+
+        if assigned_proxy:
+            add_candidate(str(assigned_proxy))
+        else:
+            add_candidate(None)
+
+        for proxy in self._dedupe_proxies(self.proxy_list or []):
+            add_candidate(proxy)
+
+        add_candidate(None)
+        return candidates
+
+    def _record_successful_proxy(
+        self,
+        username: str,
+        entry: Dict[str, Any],
+        proxy: Optional[str],
+    ) -> None:
+        current_proxy = entry.get("proxy")
+        if current_proxy == proxy:
+            return
+
+        entry["proxy"] = proxy
+        if username in self.session_cache:
+            self.session_cache[username]["proxy"] = proxy
+            self._persist_cookie_store()
+
     async def _validate_cookies(
         self,
         entry: Optional[Dict[str, Any]],
@@ -202,17 +279,24 @@ class InstagramParser:
         cookies = entry.get("cookies") or {}
         if not cookies.get("sessionid"):
             return False, None
-        headers = self._build_headers(entry.get("user_agent"), cookies.get("csrftoken"), entry.get("www_claim"))
+        headers = self._build_headers(entry.get("user_agent"), cookies.get("csrftoken"))
         proxy_for_httpx = self._format_proxy_for_httpx(proxy)
-        client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT, "headers": headers, "cookies": cookies}
+        client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT}
         if proxy_for_httpx:
             if HTTPX_USES_PROXY_PARAM:
                 client_kwargs["proxy"] = proxy_for_httpx
             else:
-                client_kwargs["proxy"] = {"http": proxy_for_httpx, "https": proxy_for_httpx}
+                client_kwargs["proxies"] = {
+                    "http": proxy_for_httpx,
+                    "https": proxy_for_httpx,
+                }
         try:
             async with httpx.AsyncClient(**client_kwargs) as client:
-                resp = await client.get("https://i.instagram.com/api/v1/accounts/current_user/")
+                resp = await client.get(
+                    "https://i.instagram.com/api/v1/accounts/current_user/",
+                    headers=headers,
+                    cookies=cookies,
+                )
                 status = resp.status_code
                 if status == 200:
                     return True, status
@@ -232,7 +316,7 @@ class InstagramParser:
 
         self.invalid_accounts.clear()
 
-        proxy_pool = self._dedupe_proxy(self.proxy_list or [])
+        proxy_pool = self._dedupe_proxies(self.proxy_list or [])
         if proxy_pool:
             if None not in proxy_pool:
                 proxy_pool.append(None)
@@ -240,10 +324,10 @@ class InstagramParser:
             proxy_pool = [None]
 
         proxy_pool = list(proxy_pool)
-        total_unique_proxy = len(proxy_pool)
+        total_unique_proxies = len(proxy_pool)
 
         proxy_condition = asyncio.Condition()
-        in_use_proxy: set[Optional[str]] = set()
+        in_use_proxies: set[Optional[str]] = set()
 
         async def acquire_specific_proxy(
             proxy: Optional[str],
@@ -252,9 +336,9 @@ class InstagramParser:
             async with proxy_condition:
                 if proxy not in proxy_pool or proxy in tried:
                     return False
-                if proxy in in_use_proxy:
+                if proxy in in_use_proxies:
                     return False
-                in_use_proxy.add(proxy)
+                in_use_proxies.add(proxy)
                 return True
 
         async def acquire_proxy(
@@ -263,20 +347,21 @@ class InstagramParser:
             async with proxy_condition:
                 while True:
                     for proxy in proxy_pool:
-                        if proxy not in in_use_proxy and proxy not in tried:
-                            in_use_proxy.add(proxy)
+                        if proxy not in in_use_proxies and proxy not in tried:
+                            in_use_proxies.add(proxy)
                             return True, proxy
-                    if len(tried) >= total_unique_proxy:
+                    if len(tried) >= total_unique_proxies:
                         return False, None
                     await proxy_condition.wait()
 
         async def release_proxy(proxy: Optional[str]) -> None:
             async with proxy_condition:
-                if proxy in in_use_proxy:
-                    in_use_proxy.remove(proxy)
+                if proxy in in_use_proxies:
+                    in_use_proxies.remove(proxy)
                     proxy_condition.notify_all()
 
-        max_workers = min(total_unique_proxy or 1, MAX_PARALLEL_LOGIN_TASKS, len(accounts))
+        # ограничиваем количество одновременно открытых браузеров
+        max_workers = min(total_unique_proxies or 1, MAX_PARALLEL_LOGIN_TASKS, len(accounts))
         max_workers = max(1, max_workers)
 
         result_lock = asyncio.Lock()
@@ -305,7 +390,10 @@ class InstagramParser:
             last_proxy: Optional[str] = None
             if cached_entry:
                 last_proxy = cached_entry.get("proxy")
-                is_valid, status_code = await self._validate_cookies(cached_entry, proxy=last_proxy)
+                is_valid, status_code = await self._validate_cookies(
+                    cached_entry,
+                    proxy=last_proxy,
+                )
                 if is_valid:
                     await mark_valid(username, cached_entry)
                     return
@@ -313,15 +401,18 @@ class InstagramParser:
                 print(f"🔁 Куки {username} в кеше просрочены или недоступны (статус {status_text}) — обновляем")
                 self._drop_session(username)
 
-            tried_proxy: set[Optional[str]] = set()
+            tried_proxies: set[Optional[str]] = set()
 
             if last_proxy in proxy_pool:
-                acquired_specific = await acquire_specific_proxy(last_proxy, tried_proxy)
+                acquired_specific = await acquire_specific_proxy(last_proxy, tried_proxies)
                 if acquired_specific:
                     entry_specific: Optional[Dict[str, Any]] = None
                     try:
                         entry_specific = await self._login_and_store_cookies(
-                            username, password, two_factor_code, proxy_candidates=[last_proxy],
+                            username,
+                            password,
+                            two_factor_code,
+                            proxy_candidates=[last_proxy],
                         )
                     except InvalidCredentialsError as cred_exc:
                         print(f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
@@ -333,21 +424,24 @@ class InstagramParser:
                     finally:
                         await release_proxy(last_proxy)
 
-                    tried_proxy.add(last_proxy)
+                    tried_proxies.add(last_proxy)
 
                     if entry_specific:
                         await mark_valid(username, entry_specific)
                         return
 
-            while len(tried_proxy) < total_unique_proxy:
-                acquired, proxy = await acquire_proxy(tried_proxy)
+            while len(tried_proxies) < total_unique_proxies:
+                acquired, proxy = await acquire_proxy(tried_proxies)
                 if not acquired:
                     break
 
                 entry: Optional[Dict[str, Any]] = None
                 try:
                     entry = await self._login_and_store_cookies(
-                        username, password, two_factor_code, proxy_candidates=[proxy],
+                        username,
+                        password,
+                        two_factor_code,
+                        proxy_candidates=[proxy],
                     )
                 except InvalidCredentialsError as cred_exc:
                     print(f"⚠️ Пропускаем аккаунт {username}: {cred_exc}")
@@ -359,7 +453,7 @@ class InstagramParser:
                 finally:
                     await release_proxy(proxy)
 
-                tried_proxy.add(proxy)
+                tried_proxies.add(proxy)
 
                 if entry:
                     await mark_valid(username, entry)
@@ -395,7 +489,10 @@ class InstagramParser:
         cached_entry = self.session_cache.get(username)
         if cached_entry:
             try:
-                is_valid, status_code = await self._validate_cookies(cached_entry, proxy=cached_entry.get("proxy"))
+                is_valid, status_code = await self._validate_cookies(
+                    cached_entry,
+                    proxy=cached_entry.get("proxy"),
+                )
                 if is_valid:
                     print(f"♻️ Куки для {username} ещё действительны — повторный логин не требуется (статус {status_code})")
                     return cached_entry
@@ -405,7 +502,7 @@ class InstagramParser:
             except Exception as exc:
                 print(f"⚠️ Ошибка при проверке сохранённых cookies {username}: {exc}")
 
-        proxy_pool = self._dedupe_proxy(proxy_candidates or self.proxy_list or [])
+        proxy_pool = self._dedupe_proxies(proxy_candidates or self.proxy_list or [])
         if proxy_candidates is None:
             if proxy_pool and None not in proxy_pool:
                 proxy_pool.append(None)
@@ -415,26 +512,39 @@ class InstagramParser:
             proxy_pool = [None]
 
         for proxy_str in proxy_pool:
-            playwright = await async_playwright().start()
+            playwright = await self._start_playwright()
+            if not playwright:
+                continue
             browser = None
             context = None
             page = None
             try:
                 device = playwright.devices.get("iPhone 14 Pro")
-                browser = await playwright.chromium.launch(headless=False, args=["--window-size=390,844"])
-                context_kwargs: Dict[str, Any] = {**(device or {}), "locale": "en-US"}
+                browser = await playwright.chromium.launch(
+                    headless=True,
+                    args=["--window-size=390,844"],
+                )
+                context_kwargs: Dict[str, Any] = {
+                    **(device or {}),
+                    "locale": "en-US",
+                    # "timezone_id": "America/Vancouver",
+                }
                 proxy_config = self._parse_proxy(proxy_str)
                 if proxy_config:
                     context_kwargs["proxy"] = proxy_config
 
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
+                # if apply_stealth:
+                #     try:
+                #         await apply_stealth(page)
+                #     except Exception as stealth_exc:
+                #         print(f"⚠️ Не удалось применить playwright-stealth: {stealth_exc}")
 
-                login_result = await self.login_to_instagram(page, username, password, two_factor_code)
-                if login_result:
-                    cookies, www_claim = login_result
+                cookies = await self.login_to_instagram(page, username, password, two_factor_code)
+                if cookies:
                     user_agent = await page.evaluate("navigator.userAgent")
-                    entry = self._update_cookie_entry(username, cookies, user_agent, proxy_str, www_claim=www_claim)
+                    entry = self._update_cookie_entry(username, cookies, user_agent, proxy_str)
                     print(f"✅ Сохранены cookies для {username} (прокси: {proxy_str})")
                     return entry
                 print(f"⚠️ Не удалось авторизоваться с аккаунтом {username} на прокси {proxy_str}")
@@ -444,15 +554,8 @@ class InstagramParser:
             except Exception as exc:
                 print(f"⚠️ Ошибка авторизации {username} через прокси {proxy_str}: {exc}")
             finally:
-                if browser:
-                    try:
-                        await browser.close()
-                    except Exception:
-                        pass
-                try:
-                    await playwright.stop()
-                except Exception:
-                    pass
+                await self._cleanup_browser_stack(page, context, browser)
+                await self._safe_close(playwright, "playwright", method="stop")
         return None
 
     async def _request_with_sessions(
@@ -472,54 +575,70 @@ class InstagramParser:
         last_exception: Optional[Exception] = None
 
         for username, entry in session_items:
-            proxy_for_httpx = self._format_proxy_for_httpx(entry.get("proxy"))
-            headers = self._build_headers(
-                entry.get("user_agent"),
-                entry["cookies"].get("csrftoken"),
-                entry.get("www_claim"),
-            )
-            client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT, "headers": headers, "cookies": entry["cookies"]}
-            if proxy_for_httpx:
-                if HTTPX_USES_PROXY_PARAM:
-                    client_kwargs["proxy"] = proxy_for_httpx
-                else:
-                    client_kwargs["proxy"] = {"http": proxy_for_httpx, "https": proxy_for_httpx}
-
-            try:
-                async with httpx.AsyncClient(**client_kwargs) as client:
-                    response = await client.request(method, url, params=params, data=data)
-
-                new_claim = self._extract_www_claim_from_response(response)
-                if new_claim and new_claim != entry.get("www_claim"):
-                    entry["www_claim"] = new_claim
-                    self.session_cache[username] = entry
-                    self._persist_cookie_store()
-
-                status = response.status_code
-                if status == 200:
-                    return response, username, entry
-                if status == 404:
-                    return response, username, entry
-
-                if status in (401, 403):
-                    print(f"⚠️ Сессия {username} вернула {status}, обновляем cookies...")
-                    self._drop_session(username)
-                    refreshed = await self._refresh_session(username)
-                    if refreshed:
-                        sessions[username] = refreshed
+            headers = self._build_headers(entry.get("user_agent"), entry["cookies"].get("csrftoken"))
+            for proxy in self._iter_proxy_candidates(entry):
+                client_kwargs: Dict[str, Any] = {
+                    "timeout": REQUEST_TIMEOUT,
+                    "headers": headers,
+                    "cookies": entry["cookies"],
+                }
+                proxy_for_httpx = self._format_proxy_for_httpx(proxy)
+                if proxy_for_httpx:
+                    if HTTPX_USES_PROXY_PARAM:
+                        client_kwargs["proxy"] = proxy_for_httpx
                     else:
-                        sessions.pop(username, None)
-                    continue
+                        client_kwargs["proxies"] = {
+                            "http": proxy_for_httpx,
+                            "https": proxy_for_httpx,
+                        }
+                try:
+                    async with httpx.AsyncClient(**client_kwargs) as client:
+                        response = await client.request(method, url, params=params, data=data)
 
-                if status in (400, 429):
-                    print(f"⚠️ Сессия {username} вернула {status}, пробуем другую.")
-                    continue
+                    status = response.status_code
+                    if status == 200:
+                        self._record_successful_proxy(username, entry, proxy)
+                        return response, username, entry
 
-                response.raise_for_status()
-                return response, username, entry
-            except Exception as exc:
-                last_exception = exc
-                print(f"⚠️ Ошибка при запросе ({username}): {exc}")
+                    if status in (401, 403):
+                        print(f"⚠️ Сессия {username} вернула {status}, обновляем cookies...")
+                        self._drop_session(username)
+                        refreshed = await self._refresh_session(username)
+                        if refreshed:
+                            sessions[username] = refreshed
+                        else:
+                            sessions.pop(username, None)
+                        break
+
+                    if status == 400:
+                        print(f"⚠️ Сессия {username} вернула 400, пробуем другую сессию.")
+                        break
+
+                    if status == 429:
+                        print(f"⚠️ Сессия {username} получила 429 (rate limit), пробуем другую.")
+                        break
+
+                    if status == 404:
+                        self._record_successful_proxy(username, entry, proxy)
+                        return response, username, entry
+
+                    response.raise_for_status()
+                    self._record_successful_proxy(username, entry, proxy)
+                    return response, username, entry
+                except Exception as exc:
+                    last_exception = exc
+                    proxy_label = proxy if proxy else "без прокси"
+                    print(f"⚠️ Ошибка при запросе ({username}, прокси {proxy_label}): {exc}")
+                    if not isinstance(
+                        exc,
+                        (
+                            httpx.ConnectError,
+                            httpx.ProxyError,
+                            httpx.TimeoutException,
+                        ),
+                    ):
+                        break
+                    continue
 
         if last_exception:
             raise last_exception
@@ -536,67 +655,111 @@ class InstagramParser:
         params: Optional[Dict[str, Any]] = None,
         data: Optional[Dict[str, Any]] = None,
     ) -> tuple[httpx.Response, str, Dict[str, Any]]:
-        proxy_for_httpx = self._format_proxy_for_httpx(entry.get("proxy"))
-        headers = self._build_headers(
-            entry.get("user_agent"),
-            entry["cookies"].get("csrftoken"),
-            entry.get("www_claim"),
-        )
-        client_kwargs: Dict[str, Any] = {"timeout": REQUEST_TIMEOUT, "headers": headers, "cookies": entry["cookies"]}
-        if proxy_for_httpx:
-            if HTTPX_USES_PROXY_PARAM:
-                client_kwargs["proxy"] = proxy_for_httpx
-            else:
-                client_kwargs["proxy"] = {"http": proxy_for_httpx, "https": proxy_for_httpx}
+        headers = self._build_headers(entry.get("user_agent"), entry["cookies"].get("csrftoken"))
+        last_exception: Optional[Exception] = None
 
-        try:
-            async with httpx.AsyncClient(**client_kwargs) as client:
-                response = await client.request(method, url, params=params, data=data)
+        for proxy in self._iter_proxy_candidates(entry):
+            client_kwargs: Dict[str, Any] = {
+                "timeout": REQUEST_TIMEOUT,
+                "headers": headers,
+                "cookies": entry["cookies"],
+            }
+            proxy_for_httpx = self._format_proxy_for_httpx(proxy)
+            if proxy_for_httpx:
+                if HTTPX_USES_PROXY_PARAM:
+                    client_kwargs["proxy"] = proxy_for_httpx
+                else:
+                    client_kwargs["proxies"] = {
+                        "http": proxy_for_httpx,
+                        "https": proxy_for_httpx,
+                    }
+            try:
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    response = await client.request(method, url, params=params, data=data)
 
-            new_claim = self._extract_www_claim_from_response(response)
-            if new_claim and new_claim != entry.get("www_claim"):
-                entry["www_claim"] = new_claim
-                self.session_cache[username] = entry
-                self._persist_cookie_store()
+                status = response.status_code
+                if status in (200, 404):
+                    self._record_successful_proxy(username, entry, proxy)
+                    return response, username, entry
 
-            status = response.status_code
-            if status in (200, 404):
-                return response, username, entry
-
-            if status in (401, 403):
-                print(f"⚠️ Сессия {username} устарела ({status}), пытаемся обновить.")
-                self._drop_session(username)
-                refreshed = await self._refresh_session(username)
-                if refreshed:
-                    sessions[username] = refreshed
-                    return await self._request_with_specific_session(
-                        sessions, username, refreshed, url, method=method, params=params, data=data
+                if status in (401, 403):
+                    print(f"⚠️ Сессия {username} устарела ({status}), пытаемся обновить.")
+                    self._drop_session(username)
+                    refreshed = await self._refresh_session(username)
+                    if refreshed:
+                        sessions[username] = refreshed
+                        return await self._request_with_specific_session(
+                            sessions,
+                            username,
+                            refreshed,
+                            url,
+                            method=method,
+                            params=params,
+                            data=data,
+                        )
+                    sessions.pop(username, None)
+                    return await self._request_with_sessions(
+                        sessions,
+                        url,
+                        method=method,
+                        params=params,
+                        data=data,
                     )
-                sessions.pop(username, None)
-                return await self._request_with_sessions(
-                    sessions, url, method=method, params=params, data=data
-                )
 
-            if status in (400, 429):
-                print(f"⚠️ Сессия {username} вернула {status}, переключаемся на другую.")
-                return await self._request_with_sessions(
-                    sessions, url, method=method, params=params, data=data
-                )
+                if status == 400:
+                    print(f"⚠️ Сессия {username} вернула 400, переключаемся на другую.")
+                    return await self._request_with_sessions(
+                        sessions,
+                        url,
+                        method=method,
+                        params=params,
+                        data=data,
+                    )
 
-            response.raise_for_status()
-            return response, username, entry
-        except Exception as exc:
-            print(f"⚠️ Ошибка запроса через сессию {username}: {exc}")
-            return await self._request_with_sessions(
-                sessions, url, method=method, params=params, data=data
-            )
+                if status == 429:
+                    print(f"⚠️ Сессия {username} получила 429, переключаемся.")
+                    return await self._request_with_sessions(
+                        sessions,
+                        url,
+                        method=method,
+                        params=params,
+                        data=data,
+                    )
+
+                response.raise_for_status()
+                self._record_successful_proxy(username, entry, proxy)
+                return response, username, entry
+            except Exception as exc:
+                last_exception = exc
+                proxy_label = proxy if proxy else "без прокси"
+                print(f"⚠️ Ошибка запроса через сессию {username} (прокси {proxy_label}): {exc}")
+                if not isinstance(
+                    exc,
+                    (
+                        httpx.ConnectError,
+                        httpx.ProxyError,
+                        httpx.TimeoutException,
+                    ),
+                ):
+                    break
+                continue
+
+        if last_exception:
+            raise last_exception
+        return await self._request_with_sessions(
+            sessions,
+            url,
+            method=method,
+            params=params,
+            data=data,
+        )
 
     async def _fetch_profile_via_api(
         self,
         sessions: Dict[str, Dict[str, Any]],
         username: str,
     ) -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, Any]]]:
-        url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={username}"
+        url = f"https://i.instagram.com/api/v1/users/web_profile_info/?username={username}"
         response, session_username, entry = await self._request_with_sessions(sessions, url)
 
         if response.status_code == 404:
@@ -629,11 +792,17 @@ class InstagramParser:
             "has_threaded_comments": True,
         }
         variables_str = json.dumps(variables, separators=(",", ":"))
-        url = "https://www.instagram.com/graphql/query/" f"?doc_id={doc_id}&variables={quote(variables_str)}"
+        url = (
+            "https://www.instagram.com/graphql/query/"
+            f"?doc_id={doc_id}&variables={quote(variables_str)}"
+        )
 
         if preferred_session and preferred_session[0] in sessions:
             response, session_username, entry = await self._request_with_specific_session(
-                sessions, preferred_session[0], preferred_session[1], url,
+                sessions,
+                preferred_session[0],
+                preferred_session[1],
+                url,
             )
         else:
             response, session_username, entry = await self._request_with_sessions(sessions, url)
@@ -674,17 +843,28 @@ class InstagramParser:
             if max_pages is not None and pages_fetched >= max_pages:
                 break
             pages_fetched += 1
-            payload: Dict[str, Any] = {"target_user_id": user_id, "page_size": page_size}
+            payload: Dict[str, Any] = {
+                "target_user_id": user_id,
+                "page_size": page_size,
+            }
             if next_max_id:
                 payload["max_id"] = next_max_id
 
             if session_hint and session_hint[0] in sessions:
                 response, session_username, session_entry = await self._request_with_specific_session(
-                    sessions, session_hint[0], session_hint[1], clips_url, method="POST", data=payload,
+                    sessions,
+                    session_hint[0],
+                    session_hint[1],
+                    clips_url,
+                    method="POST",
+                    data=payload,
                 )
             else:
                 response, session_username, session_entry = await self._request_with_sessions(
-                    sessions, clips_url, method="POST", data=payload,
+                    sessions,
+                    clips_url,
+                    method="POST",
+                    data=payload,
                 )
 
             try:
@@ -710,6 +890,7 @@ class InstagramParser:
         return collected, session_hint
 
     async def save_html_on_error(self, page, url: str, error_message: str):
+        """Save page HTML on error for debugging"""
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             parsed_url = urlparse(url)
@@ -723,38 +904,62 @@ class InstagramParser:
         except Exception as save_error:
             print(f"Failed to save HTML: {str(save_error)}")
 
+    # async def get_2fa_code(self, page, two_factor_code):
+    #     two_factor_page = await page.context.new_page()
+    #     try:
+    #         await two_factor_page.goto(
+    #             f"https://2fa.fb.rip/{two_factor_code}", timeout=60000)
+    #         await two_factor_page.wait_for_selector(
+    #             "div#verifyCode", timeout=60000)
+    #         two_factor_code_element = await two_factor_page.query_selector(
+    #             "div#verifyCode")
+    #         if two_factor_code_element:
+    #             code = await two_factor_code_element.inner_text()
+    #             code = re.sub(r"\D", "", code)
+    #             if len(code) == 6 and code.isdigit():
+    #                 print(f"2FA код успешно получен: {code}")
+    #                 return code
+    #             else:
+    #                 print(f"Неверный формат 2FA кода: {code}")
+    #                 return None
+    #         else:
+    #             print("Элемент 2FA кода не найден")
+    #             return None
+    #     except Exception as e:
+    #         await self.save_html_on_error(
+    #             two_factor_page,
+    #             f"https://2fa.fb.rip/{two_factor_code}", str(e))
+    #         print(f"Не удалось получить 2FA код: {e}")
+    #         return None
+    #     finally:
+    #         await two_factor_page.close()
+
     async def get_2fa_code(self, two_factor_code):
         totp = pyotp.TOTP(two_factor_code)
+        # print("Current OTP:", totp.now())
         return totp.now()
 
     async def login_to_instagram(self, page, username, password, two_factor_code) -> Optional[Dict[str, str]]:
+        # Сбор ошибок API
         api_errors = []
-        captured_claim: Optional[str] = None
 
         async def log_response(response):
-            nonlocal captured_claim
-            if ("www.instagram.com" in response.url) or ("i.instagram.com" in response.url):
+            if "www.instagram.com/api/v1" in response.url or "i.instagram.com/api" in response.url:
                 try:
-                    hdrs = response.headers
-                    cl = hdrs.get("x-ig-set-www-claim") or hdrs.get("x-ig-www-claim")
-                    if cl:
-                        captured_claim = cl
-                except Exception:
-                    pass
-            try:
-                status = response.status
-                if status >= 400:
-                    body = await response.text()
-                    print(f"API Error {status} from {response.url}: {body[:500]}")
-                    api_errors.append({"url": response.url, "status": status, "body": body})
-            except Exception as e:
-                print(f"Не удалось прочитать тело ответа API: {e}")
+                    status = response.status
+                    if status >= 400:
+                        body = await response.text()
+                        print(f"API Error {status} from {response.url}: {body[:500]}")
+                        api_errors.append({"url": response.url, "status": status, "body": body})
+                except Exception as e:
+                    print(f"Не удалось прочитать тело ответа API: {e}")
 
         page.on("response", log_response)
 
         try:
             print(f"Начало авторизации для пользователя {username}")
 
+            # Логируем среду
             user_agent = await page.evaluate("navigator.userAgent")
             language = await page.evaluate("navigator.language")
             timezone = await page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone")
@@ -769,6 +974,7 @@ class InstagramParser:
             await page.wait_for_load_state("networkidle", timeout=30000)
             print("Страница загружена")
 
+            # Обработка баннера cookies
             print("Проверка наличия баннера cookies")
             cookie_found = False
             cookie_selectors = [
@@ -792,6 +998,7 @@ class InstagramParser:
             if not cookie_found:
                 print("Баннер cookies не найден или не обработан — продолжаем")
 
+            # === КНОПКА "Log in" на главной ===
             print("Поиск начальной кнопки Log in")
             login_button = await page.query_selector('button:has-text("Log in")')
             if not login_button:
@@ -810,6 +1017,7 @@ class InstagramParser:
             await login_button.click(timeout=30000)
             await page.wait_for_timeout(4000)
 
+            # === ПРОВЕРКА ОШИБОК НА ФОРМЕ ===
             print("Проверка сообщений об ошибке после перехода на форму")
             error_selectors = [
                 'p:has-text("Sorry, your password was incorrect")',
@@ -831,6 +1039,7 @@ class InstagramParser:
                         raise InvalidCredentialsError(f"Аккаунт {username} не найден")
                     return None
 
+            # === ОЖИДАНИЕ ФОРМЫ ===
             print("Ожидание поля username")
             try:
                 await page.wait_for_selector('input[name="username"]', timeout=20000)
@@ -839,6 +1048,7 @@ class InstagramParser:
                 print("Форма входа не появилась")
                 return None
 
+            # === ЗАПОЛНЕНИЕ USERNAME ===
             username_field = await page.query_selector('input[name="username"]')
             if not username_field:
                 await self.save_html_on_error(page, page.url, "Поле username отсутствует")
@@ -851,6 +1061,7 @@ class InstagramParser:
                 print("Поле username не сохранило значение")
                 return None
 
+            # === ЗАПОЛНЕНИЕ PASSWORD ===
             password_field = await page.query_selector('input[name="password"]')
             if not password_field:
                 await self.save_html_on_error(page, page.url, "Поле password отсутствует")
@@ -859,8 +1070,10 @@ class InstagramParser:
             await password_field.fill(password)
             print("Пароль введён")
 
+            # === КНОПКА ВХОДА НА ФОРМЕ ===
             final_login_button = await page.query_selector('button[type="submit"]')
             if not final_login_button:
+                # fallback: иногда это div с aria-label
                 final_login_button = await page.query_selector('div[role="button"][aria-label="Log in"]')
 
             if not final_login_button:
@@ -879,10 +1092,12 @@ class InstagramParser:
             await final_login_button.click(timeout=30000)
             await page.wait_for_timeout(6000)
 
+            # === ПОСЛЕ КЛИКА: ПРОВЕРКА URL И ОШИБОК ===
             current_url = page.url
             title = await page.title()
             print(f"После входа: URL={current_url}, Title={title}")
 
+            # Проверка на challenge / suspended
             if "/challenge/" in current_url:
                 await self.save_html_on_error(page, current_url, "Требуется верификация (challenge)")
                 print("Обнаружен challenge — требуется ручная верификация")
@@ -893,6 +1108,7 @@ class InstagramParser:
                 print("Аккаунт приостановлен")
                 return None
 
+            # Повторная проверка ошибок на форме (иногда появляются позже)
             for sel in error_selectors:
                 el = await page.query_selector(sel)
                 if el and await el.is_visible():
@@ -906,6 +1122,7 @@ class InstagramParser:
                         raise InvalidCredentialsError(f"Аккаунт {username} не найден")
                     return None
 
+            # === 2FA ===
             print("Проверка 2FA")
             try:
                 await page.wait_for_selector('input[aria-label="Code"]', timeout=15000)
@@ -914,7 +1131,10 @@ class InstagramParser:
                 if not code_field:
                     raise Exception("Поле кода не найдено")
 
-                verification_code = await self.get_2fa_code(two_factor_code)
+                verification_code = await self.get_2fa_code(
+                    # page,
+                    two_factor_code
+                )
                 if not verification_code:
                     print("Не удалось получить 2FA код")
                     return None
@@ -927,6 +1147,7 @@ class InstagramParser:
                     await continue_btn.click()
                     await page.wait_for_timeout(3000)
 
+                # Trust device
                 trust_checkbox = await page.query_selector('div[role="checkbox"][aria-label*="Trust"]')
                 if trust_checkbox:
                     await trust_checkbox.click()
@@ -935,12 +1156,15 @@ class InstagramParser:
             except PlaywrightTimeoutError:
                 print("2FA не требуется")
 
+            # === КНОПКА "Not now" ===
             try:
+                # Попробуем найти кнопку по тексту и роли
                 not_now_button = page.get_by_role("button", name="Not now")
                 if await not_now_button.is_visible(timeout=5000):
                     await not_now_button.click()
                     print("Клик по 'Not now'")
                 else:
+                    # Попробуем русскую локализацию
                     not_now_button_ru = page.get_by_role("button", name="Не сейчас")
                     if await not_now_button_ru.is_visible(timeout=3000):
                         await not_now_button_ru.click()
@@ -948,6 +1172,7 @@ class InstagramParser:
             except Exception as e:
                 print(f"'Not now' не найден или не удалось нажать: {e}")
 
+            # === ФИНАЛЬНАЯ ПРОВЕРКА: УСПЕХ ===
             await page.wait_for_timeout(5000)
             if "instagram.com/accounts/login/" in page.url:
                 print("Всё ещё на странице входа — вход не удался")
@@ -968,14 +1193,13 @@ class InstagramParser:
             if "/accounts/onetap/" in page.url or "/accounts/login/" not in page.url:
                 print("Успешный вход в Instagram")
                 if cookies:
-                    # Вернём cookies и засечённый x-ig-www-claim (может быть None)
-                    return (cookies, captured_claim)
+                    return cookies
                 print("⚠️ Не удалось извлечь cookies после успешного входа")
                 return None
 
             print("Неясное состояние после входа — возможно, частичный успех")
             if cookies:
-                return (cookies, captured_claim)
+                return cookies
             print("⚠️ Не удалось извлечь cookies в неясном состоянии входа")
             return None
 
@@ -986,7 +1210,8 @@ class InstagramParser:
             await self.save_html_on_error(page, page.url or "https://www.instagram.com", "Необработанная ошибка")
             return None
 
-    async def scroll_until(self, page, url: str, selector: str, delay: float = 5.0, max_idle_rounds: int = 5):
+    async def scroll_until(self, page, url: str, selector: str,
+                           delay: float = 5.0, max_idle_rounds: int = 5):
         prev_count = 0
         idle_rounds = 0
         max_scroll_attempts = 3
@@ -996,22 +1221,26 @@ class InstagramParser:
             print(f"Прокрутка страницы, попытка {attempt + 1}/{max_scroll_attempts}")
 
             while True:
+                # Собираем все элементы рилсов
                 reel_elements = await page.query_selector_all('a[href*="/reel/"]')
                 for element in reel_elements:
                     href = await element.get_attribute('href')
                     if href and href.startswith('/'):
                         full_url = f"https://www.instagram.com{href}"
+                        # Ищем элемент с классом x1lvsgvq для получения URL изображения
                         image_element = await element.query_selector('div.x1lvsgvq')
                         image_url = None
                         if image_element:
                             style = await image_element.get_attribute('style')
                             if style and 'background-image: url' in style:
+                                # Извлекаем URL из background-image
                                 start = style.find('url("') + 5
                                 end = style.find('")')
                                 if start > 4 and end > start:
                                     image_url = style[start:end]
                         reel_data.add((full_url, image_url))
 
+                # Прокрутка страницы
                 await page.evaluate("""
                     async () => {
                         return new Promise((resolve) => {
@@ -1021,6 +1250,7 @@ class InstagramParser:
                                 const scrollHeight = document.body.scrollHeight;
                                 window.scrollBy(0, distance);
                                 totalHeight += distance;
+
                                 if (totalHeight >= scrollHeight) {
                                     clearInterval(timer);
                                     resolve();
@@ -1058,6 +1288,7 @@ class InstagramParser:
     def generate_short_title(self, full_title: str, max_length: int = 20) -> str:
         if not full_title:
             return ""
+        # Убираем переносы строк и лишние пробелы
         clean_title = " ".join(full_title.split())
         if len(clean_title) <= max_length:
             return clean_title
@@ -1068,18 +1299,24 @@ class InstagramParser:
         return truncated
 
     def extract_article_tag(self, caption: str) -> Optional[str]:
+        """Возвращает первый найденный артикул-хештег (#sv, #jw и т.д.) или None."""
         if not caption:
             return None
         caption_lower = caption.lower()
         for tag in ["#sv", "#jw", "#qz", "#sr", "#fg"]:
             if tag in caption_lower:
+                # Найти точное написание в оригинале (сохранить регистр)
                 start = caption_lower.find(tag)
                 if start != -1:
                     return caption[start:start + len(tag)]
         return None
 
     def _extract_metrics_from_media(self, shortcode_media: Dict[str, Any]) -> Dict[str, Any]:
-        likes = (shortcode_media.get("edge_media_preview_like", {}).get("count"))
+        likes = (
+            shortcode_media
+            .get("edge_media_preview_like", {})
+            .get("count")
+        )
         comments = (
             shortcode_media
             .get("edge_media_to_parent_comment", shortcode_media.get("edge_media_to_comment", {}))
@@ -1087,7 +1324,11 @@ class InstagramParser:
         )
         views = shortcode_media.get("video_view_count") or shortcode_media.get("video_play_count")
         ts = shortcode_media.get("taken_at_timestamp")
-        caption_edges = (shortcode_media.get("edge_media_to_caption", {}).get("edges", []))
+        caption_edges = (
+            shortcode_media
+            .get("edge_media_to_caption", {})
+            .get("edges", [])
+        )
         caption = caption_edges[0]["node"]["text"] if caption_edges else ""
         preview = shortcode_media.get("display_url") or shortcode_media.get("thumbnail_src")
         video_url = shortcode_media.get("video_url")
@@ -1120,26 +1361,20 @@ class InstagramParser:
         accounts: Optional[list[str]] = None,
         proxy_list: Optional[list[str]] = None,
     ):
-        if proxy_list is not None:
-            if proxy_list:
-                print(f"🔁 Обновляем список прокси из аргумента: {proxy_list}")
-            else:
-                print("ℹ️ Парсинг будет выполнен без прокси (передан пустой список).")
-            self.proxy_list = proxy_list or []
+        if proxy_list is None:
+            print("❌ proxy_list не передан в parse_channel — задача остановлена.")
+            return
+
+        normalized_proxies = self._normalize_proxy_input(proxy_list)
+        if normalized_proxies:
+            print(f"🔁 Обновляем список прокси из аргумента: {normalized_proxies}")
+        else:
+            print("ℹ️ Парсинг будет выполнен без прокси (после нормализации список пуст).")
+        self.proxy_list = normalized_proxies
 
         accounts = accounts or []
         if not accounts:
             print("⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
-            return
-
-        try:
-            sessions = await self.ensure_initial_cookies(accounts)
-        except Exception as exc:
-            print(f"❌ Не удалось подготовить cookies: {exc}")
-            return
-
-        if not sessions:
-            print("❌ Не удалось получить валидные cookies ни для одного аккаунта.")
             return
 
         username = self.extract_username_from_url(url)
@@ -1147,43 +1382,96 @@ class InstagramParser:
             print(f"❌ Не удалось определить username из URL {url}")
             return
 
-        print(f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
+        target_items = max_retries if max_retries and max_retries > 0 else None
+        max_attempts_collect = 3
+        clips_media: list[Dict[str, Any]] = []
         preferred_session: Optional[tuple[str, Dict[str, Any]]] = None
+        profile_data: Optional[Dict[str, Any]] = None
 
-        try:
-            profile_data, session_username, session_entry = await self._fetch_profile_via_api(sessions, username)
-        except Exception as exc:
-            print(f"❌ Ошибка получения профиля @{username}: {exc}")
-            return
+        for attempt in range(1, max_attempts_collect + 1):
+            attempt_suffix = f" (попытка {attempt}/{max_attempts_collect})" if max_attempts_collect > 1 else ""
+            try:
+                sessions = await self.ensure_initial_cookies(accounts)
+            except Exception as exc:
+                print(f"❌ Не удалось подготовить cookies{attempt_suffix}: {exc}")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
 
-        if not profile_data:
-            print(f"⚠️ Профиль @{username} недоступен или отсутствует.")
-            return
+            if not sessions:
+                print(f"❌ Не удалось получить валидные cookies ни для одного аккаунта{attempt_suffix}.")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
 
-        if session_username and session_entry:
-            preferred_session = (session_username, session_entry)
+            if attempt == 1:
+                print(f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
+            else:
+                print(f"🔁 Повторная попытка, используем {len(sessions)} сессий для @{username} (попытка {attempt}/{max_attempts_collect})",)
 
-        user_id = profile_data.get("id")
-        if not user_id:
-            print(f"❌ Не удалось получить ID пользователя для @{username}")
-            return
+            preferred_session = None
+            clips_media = []
+            try:
+                profile_data_result, session_username, session_entry = await self._fetch_profile_via_api(sessions, username)
+            except Exception as exc:
+                print(f"❌ Ошибка получения профиля @{username}{attempt_suffix}: {exc}")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
 
-        try:
-            clips_media, fetched_session = await self._fetch_user_clips(
-                sessions, user_id, page_size=50, max_pages=None, preferred_session=preferred_session,
-            )
-        except Exception as exc:
-            print(f"❌ Ошибка получения списка рилов для @{username}: {exc}")
-            return
+            if not profile_data_result:
+                print(f"⚠️ Профиль @{username} недоступен или отсутствует{attempt_suffix}.")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
 
-        if fetched_session:
-            preferred_session = fetched_session
+            profile_data = profile_data_result
+            if session_username and session_entry:
+                preferred_session = (session_username, session_entry)
+
+            instagram_user_id = profile_data.get("id")
+            if not instagram_user_id:
+                print(f"❌ Не удалось получить ID пользователя для @{username}")
+                return
+
+            try:
+                clips_media, fetched_session = await self._fetch_user_clips(
+                    sessions,
+                    instagram_user_id,
+                    page_size=50,
+                    max_pages=None,
+                    preferred_session=preferred_session,
+                )
+            except Exception as exc:
+                print(f"❌ Ошибка получения списка рилов для @{username}{attempt_suffix}: {exc}")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
+
+            if fetched_session:
+                preferred_session = fetched_session
+
+            if not clips_media:
+                print(f"⚠️ API не вернуло рилы для @{username}{attempt_suffix}.")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
+
+            if target_items and len(clips_media) < target_items:
+                print(f"⚠️ Получено только {len(clips_media)} рилов из ожидаемых {target_items} для @{username}{attempt_suffix}.",)
+                if attempt < max_attempts_collect:
+                    print(f"🔁 Пробуем повторить сбор рилов для @{username}...")
+                    continue
+
+            break
 
         if not clips_media:
-            print(f"⚠️ API не вернуло рилы для @{username}.")
             return
 
-        items_limit = max_retries if max_retries and max_retries > 0 else len(clips_media)
+        if target_items and len(clips_media) < target_items:
+            print(f"⚠️ После {max_attempts_collect} попыток удалось получить только {len(clips_media)} из {target_items} рилов для @{username}.",)
+
+        items_limit = target_items if target_items else len(clips_media)
         reel_sequence = clips_media[:items_limit] if items_limit < len(clips_media) else clips_media
         print(f"📹 Получено {len(clips_media)} рилов для @{username}, обрабатываем {len(reel_sequence)}")
 
@@ -1223,6 +1511,7 @@ class InstagramParser:
             caption_text: str,
         ):
             video_name = self.generate_short_title(caption_text, max_length=20)
+
             video_data = {
                 "type": "instagram",
                 "channel_id": channel_id,
@@ -1264,7 +1553,7 @@ class InstagramParser:
                                 timeout=20.0,
                             )
                             update_resp.raise_for_status()
-                            print(f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
+                            # print(f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
                         else:
                             is_new = True
                     else:
@@ -1286,7 +1575,7 @@ class InstagramParser:
                         print(f"Добавлено в очередь {video_id}: {image_url}")
 
             except Exception as exc:
-                print(f"❌ Ошибка сохранения видео {reел_url}: {exc}")  # noqa
+                print(f"❌ Ошибка сохранения видео {reel_url}: {exc}")
 
         processed = 0
         total_candidates = len(reel_sequence)
@@ -1357,70 +1646,39 @@ class InstagramParser:
         print(f"✅ Обработано {processed} рилов для @{username}")
         return
 
-# ============== Пример запуска ==============
-
 
 async def main():
-    # ВСТАВЬТЕ СВОЙ СПИСОК ПРОКСИ СЮДА (убедитесь, что нет "слипшихся" строк — между элементами ДОЛЖНА быть запятая)
     proxy_list = [
-        "d8mAnk3QEW:mJCDjUZQXt@45.150.35.133:20894",
-        "quUqYxfzsN:IVsnELV4fT@45.150.35.246:46257",
-        "RfbRo1W0gz:Rk5fwJnepP@45.150.35.131:63024",
-        "jcB7GBuBdw:wnOUcC6uC2@45.150.35.40:52284",
-        "rJexYOOn6O:tjd4Q4SgTN@45.150.35.194:57330",
-        "ZoA3aDjewp:lgRGWxPzR5@45.150.35.117:35941",
-        "PSKbldOuol:YRinsMQpQB@45.150.35.74:42121",
-        "aNpriSRLmG:RVEBaYMSnq@45.150.35.145:27900",
-        "um2y7QWzne:3NVuS7S93n@45.150.35.180:58611",
-        "gkmSRIalTf:xGROjfA2LF@45.150.35.154:39073",
-        "hejdZusT4h:BJYdsmEZKI@45.150.35.10:36612",
-        "nbyr75VACh:I5WWfT2oLt@45.150.35.215:48124",
-        "fgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557",
-        "um2y7QWzne:3NVuS7S93n@45.150.35.180:5861"
-        "msEHZ8:tYomUE@152.232.65.53:9461",
-        "msEHZ8:tYomUE@190.185.108.103:9335",
-        "msEHZ8:tYomUE@138.99.37.16:9622",
-        "msEHZ8:tYomUE@138.99.37.136:9248",
-        "msEHZ8:tYomUE@152.232.72.124:9057",
-        "msEHZ8:tYomUE@23.229.49.135:9511",
-        "msEHZ8:tYomUE@209.127.8.189:9281",
-        "msEHZ8:tYomUE@152.232.72.235:9966",
-        "msEHZ8:tYomUE@152.232.74.34:9043",
-        "PvJVn6:jr8EvS@38.148.133.33:8000",
-        "PvJVn6:jr8EvS@38.148.142.71:8000",
-        "PvJVn6:jr8EvS@38.148.133.69:8000",
-        "PvJVn6:jr8EvS@38.148.138.48:8000",
-        "msEHZ8:tYomUE@168.196.239.222:9211",
-        "msEHZ8:tYomUE@168.196.237.44:9129",
-        "msEHZ8:tYomUE@168.196.237.99:9160",
-        "msEHZ8:tYomUE@138.219.122.56:9409",
-        "msEHZ8:tYomUE@138.219.122.128:9584",
-        "msEHZ8:tYomUE@138.219.123.22:9205",
-        "msEHZ8:tYomUE@138.59.5.46:9559",
-        "msEHZ8:tYomUE@152.232.68.147:9269",
-        "msEHZ8:tYomUE@152.232.67.18:9241",
-        "msEHZ8:tYomUE@152.232.68.149:9212",
-        "msEHZ8:tYomUE@152.232.66.152:9388",
+        "suQs3N:j30sT6@170.246.55.146:9314",
+        "MecAgR:v5fbu6@186.65.118.237:9808",
+        "MecAgR:v5fbu6@186.65.115.230:9065",
+        "MecAgR:v5fbu6@186.65.115.105:9825",
+        "DWtvBb:M1uRTE@181.177.87.15:9725",
+        "DWtvBb:M1uRTE@181.177.84.185:9254",
+        "DWtvBb:M1uRTE@94.131.54.252:9746",
+        "DWtvBb:M1uRTE@95.164.200.121:9155",
+        "DWtvBb:M1uRTE@45.237.85.119:9458",
     ]
+    parser = InstagramParser()
+    url = "https://www.instagram.com/best_beautydeal"
+    user_id = 13
     accounts = [
-        # "juan.itaandersen:fsm8f5tb:FOJ2E2475FRD3UR5NY2E45YPTEJK5APH",
-        # "jodyrhodes74:Kr2V3bxS:2KYNTJCUL74SKSNTVGFENBL6DOAJ65X6",
-        # "Jeannetteosley12:7nYEEexK:SVTLSGQZVWLNB3ID2PCB5TR7C4VWWPES",
-        # "hild.amoody:6FL9Jg2j:FW26JAKMNNLP2U5BLQQF6L4ABMMMB4DC",
-        # "eliseowolf95:CuNAryR3Ly:VF442BGSAVQK3TBMGKM3SAN2U75EKMRG",
-        # "jolenemccoy650:KQ9GsFqzHy:GI2NPPGSYMTFZD4F75XMOVIAB4GFWSP4",
-        # "juliadacostabx829:payable64$!:OZITRNHYGIVKF27ZASD26JVIAE54JHLB",
-        # "claricepeixotokt640:unbeliEvably4$!:ZG33OWOBMCPJ37NKIGCHDTEMTC6FPEGL",
-        "allanacaldeiract154:sipHOnic5!*:NQ6453R7RMMPZGNDQWX74KAYZUDHIFA2",
+        "juan.itaandersen:fsm8f5tb:FOJ2E2475FRD3UR5NY2E45YPTEJK5APH",
+        "jodyrhodes74:Kr2V3bxS:2KYNTJCUL74SKSNTVGFENBL6DOAJ65X6",
+        "Jeannetteosley12:7nYEEexK:SVTLSGQZVWLNB3ID2PCB5TR7C4VWWPES",
+        "hild.amoody:6FL9Jg2j:FW26JAKMNNLP2U5BLQQF6L4ABMMMB4DC",
+        "eliseowolf95:CuNAryR3Ly:VF442BGSAVQK3TBMGKM3SAN2U75EKMRG",
+
+        
         "biancapeixotox577:cHanCroids05:LZNNNJYEYTPETIGT5AEIR5Z2FU47I65J",
         "jaquelinesiqueirayz922:ryBa7lBme:WT2DCIT2OVN5UE7GP5PHCYGPI32BHXKN",
         "ribeirobiatrizax784:x3OgxGA02PM:WMOL7EW3TUSGUWRCKQWLZS3DW3TVDA7K",
         "figueiredorosanaangelina:ufyqvzpel:FPYWZH4CS6EEIXGJRS57BCDZEEGD22CZ",
         # "emanuellasap325:barware2*!:MGUVERU2OWNNZCR5SKGZS7WGTHXXJ63W",
-        "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
-        "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
-        "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
-        "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
+        # "barbaradacruzp460:zaNilY51:ULKDMXA6E5JCJ5BHCPPYWAN2J65LBA34",
+        # "biancaleaoo212:genT73@*:TPW7CF4YDHG7G5C7YYAFQ2W4L2A7YUSV",
+        # "isisramosbm108:Leadwork996@:YWE7IWEZYOGGNNVRLZ4FW5QVTIAQ4QNZ",
+        # "sabrinapimentaut150:bOttOmed0!@:ODTDIB5IEZG6REB3RROMBW3JHR6G6PWP",
         # "liviadamotaj814:zoophiles5:XLMIX3HUL3N3YSHK7NY6HQBTW5TOPXPC",
         # "rezendesuelizn674:TwVHHXku6p:UI6C3HO4CWX2F36KXMLYDM7YVYU5PCY2",
         # "taylorvega968:FqR2RBQckZ:USEVPAIL5TQTVIT6N4YZQP6TMS6N6WFL",
@@ -1436,13 +1694,8 @@ async def main():
         # "lonzokoch385:C5cF5u4v:ESSSG7QBBKA2J2ZZZM2ZKAJDMC7MKXFK",
         # "connerhoffman8:rA2JVsXJ:5FH7UM5DB5QW4TZMCN6Q5RWBSQCZKQ6M",
     ]
-
-    parser = InstagramParser(proxy_list=proxy_list)
-
-    url = "https://www.instagram.com/best_beautydeal"
-
     await parser.parse_channel(url, channel_id=32,
-                               user_id=13, accounts=accounts)
+                               user_id=user_id, accounts=accounts, proxy_list=proxy_list)
 
 if __name__ == "__main__":
     asyncio.run(main())

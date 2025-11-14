@@ -506,16 +506,11 @@ class LikeeParser:
 
 async def main():
     proxy_list = [
-        "gYCnZWZrgi:iexdZdvSeN@193.168.224.25:50524",
-        "ndtvwtXQh7:Acg5amEuK7@103.82.103.34:48319",
-        "ZVaGoMrHmt:fLA2FnapWs@109.120.147.248:55710",
-        "YWpuNCTEcf:9J5UHLn2ha@45.132.252.137:20472",
-        "ThI4AlnYc8:cC6IiARsnD@109.120.147.221:60860",
-        "weTPSmpjHB:OPBSIuub2t@193.168.224.125:31635",
-        "frvEXoGF2v:nIbEnIuD26@45.132.252.60:43121",
-        "7dtzp90Dsr:DaDxgASS3d@45.132.252.89:24550",
-        "gzQZLQNslU:7wYp8R5UU9@103.82.103.150:51428",
-        "qI6mCjoRDV:aArrfm6cGH@109.120.147.208:32907",
+        "u9wJGy:VpJKtb@5.8.60.103:8000",
+        "u9wJGy:VpJKtb@5.8.61.103:8000",
+        "u9wJGy:VpJKtb@5.101.90.155:8000",
+        "u9wJGy:VpJKtb@5.8.60.139:8000",
+        "u9wJGy:VpJKtb@5.8.61.166:8000",
     ]
     parser = LikeeParser()
     url = "https://l.likee.video/p/IAF9JW"

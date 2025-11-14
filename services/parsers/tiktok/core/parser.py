@@ -81,6 +81,31 @@ class TikTokParser:
         self.proxy_list: List[Optional[str]] = []
         self.dom_settle_delay: float = 0.7  # доп. пауза, чтобы DOM успевал дорисоваться
 
+    async def _start_playwright(self):
+        try:
+            return await async_playwright().start()
+        except Exception as exc:
+            self.logger.send("INFO", f"❌ Не удалось запустить Playwright: {exc}")
+            return None
+
+    async def _safe_close(self, obj, label: str, method: str = "close"):
+        if not obj:
+            return
+        closer = getattr(obj, method, None)
+        if not closer:
+            return
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Ошибка закрытия {label}: {exc}")
+
+    async def _cleanup_browser_stack(self, page=None, context=None, browser=None):
+        await self._safe_close(page, "page")
+        await self._safe_close(context, "context")
+        await self._safe_close(browser, "browser")
+
     # ----------------------- УТИЛИТЫ -----------------------
 
     def reset_dom_state(self):
@@ -744,7 +769,9 @@ class TikTokParser:
         last_html_snapshot: Optional[str] = None
         success = False
 
-        playwright = await async_playwright().start()
+        playwright = await self._start_playwright()
+        if not playwright:
+            return
         try:
             proxies_for_browser = self.proxy_list or [None]
             random.shuffle(proxies_for_browser)
@@ -867,12 +894,7 @@ class TikTokParser:
                                     page.off("response", response_handler)
                                 except Exception:
                                     pass
-                            for obj in (page, context, browser):
-                                try:
-                                    if obj:
-                                        await obj.close()
-                                except Exception:
-                                    pass
+                            await self._cleanup_browser_stack(page, context, browser)
 
                         if success:
                             break
@@ -902,20 +924,12 @@ class TikTokParser:
                                 page.off("response", response_handler)
                             except Exception:
                                 pass
-                        for obj in (page, context, browser):
-                            try:
-                                if obj:
-                                    await obj.close()
-                            except Exception:
-                                pass
+                        await self._cleanup_browser_stack(page, context, browser)
 
                     await asyncio.sleep(5)
 
         finally:
-            try:
-                await playwright.stop()
-            except Exception:
-                pass
+            await self._safe_close(playwright, "playwright", method="stop")
 
         total_collected = len(self.dom_order)
         self.logger.send("INFO", f"🎯 Собрано {total_collected} ссылок (videoCount: {target_video_count if target_video_count is not None else '—'})",)
