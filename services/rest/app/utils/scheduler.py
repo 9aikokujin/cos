@@ -78,9 +78,11 @@
 #             print(f"❌ Ошибка в задаче {task_id}: {e}")
 
 import asyncio
-from datetime import datetime, timezone
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select
 
@@ -91,6 +93,14 @@ from app.models.proxy import Proxy
 from app.utils.rabbitmq_producer import rabbit_producer
 
 MOSCOW_TZ = ZoneInfo("Europe/Moscow")
+CI_CD_START_DELAY_MINUTES = 7
+CI_CD_STEP_MINUTES = 7
+CI_CD_TYPE_PRIORITY = [
+    ChannelType.YOUTUBE,
+    ChannelType.TIKTOK,
+    ChannelType.LIKEE,
+    ChannelType.INSTAGRAM,
+]
 
 scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)
 
@@ -172,7 +182,19 @@ def schedule_channel_task(
 
 
 async def restore_scheduled_tasks():
-    """При старте восстанавливает ежедневное расписание (05:00 и 23:00 мск) для всех каналов."""
+    """
+    Точка выбора расписания.
+    Держите активным только один из вариантов ниже (раскомментируйте нужный).
+    """
+    # --- Ежедневная очередь 05:00 и 20:00 (оставьте включённой для боевого режима) ---
+    # await _restore_scheduled_tasks_daily()
+
+    # --- CICD очередь: запуск через 7 минут и шагом 7 минут ---
+    await restore_scheduled_tasks_cicd()
+
+
+async def _restore_scheduled_tasks_daily():
+    """При старте восстанавливает ежедневное расписание (05:00 и 20:00 мск) для всех каналов."""
     async with SessionLocal() as session:
         result = await session.execute(select(Channel))
         channels = result.scalars().all()
@@ -193,13 +215,88 @@ async def restore_scheduled_tasks():
         schedule_channel_task(channel.id, offset_minutes=offset)
 
 
+def _round_robin_channels(channels: list[Channel]) -> list[Channel]:
+    """Перестраивает список каналов в порядке YT → TikTok → Likee → Instagram."""
+    buckets = {channel_type: deque() for channel_type in CI_CD_TYPE_PRIORITY}
+    leftovers = deque()
+    for channel in channels:
+        bucket = buckets.get(channel.type)
+        (bucket if bucket is not None else leftovers).append(channel)
+
+    ordered = []
+    while True:
+        appended = False
+        for channel_type in CI_CD_TYPE_PRIORITY:
+            bucket = buckets[channel_type]
+            if bucket:
+                ordered.append(bucket.popleft())
+                appended = True
+        if not appended:
+            break
+    ordered.extend(leftovers)
+    return ordered
+
+
+async def restore_scheduled_tasks_cicd(
+    start_delay_minutes: int = CI_CD_START_DELAY_MINUTES,
+    step_minutes: int = CI_CD_STEP_MINUTES,
+):
+    """
+    Альтернативная очередь для CICD: запуск через 7 минут после старта,
+    далее каждые 7 минут, в порядке YouTube → TikTok → Likee → Instagram.
+    """
+    async with SessionLocal() as session:
+        result = await session.execute(select(Channel))
+        channels = result.scalars().all()
+
+    channels = sorted(
+        channels,
+        key=lambda task: (
+            task.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            task.id,
+        ),
+    )
+
+    if not channels:
+        return
+
+    ordered_channels = _round_robin_channels(channels)
+    total = len(ordered_channels)
+    cycle_minutes = max(step_minutes * total, step_minutes)
+    first_run = datetime.now(MOSCOW_TZ) + timedelta(minutes=max(start_delay_minutes, 0))
+
+    for index, channel in enumerate(ordered_channels):
+        job_id = f"cicd_task_{channel.id}"
+        next_run = first_run + timedelta(minutes=step_minutes * index)
+        scheduler.add_job(
+            func=process_recurring_task,
+            trigger="interval",
+            minutes=cycle_minutes,
+            next_run_time=next_run,
+            args=[channel.id, "channel"],
+            id=job_id,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+            replace_existing=True,
+        )
+        print(
+            f"🚀 CICD очередь: канал {channel.id} стартует {next_run.strftime('%d.%m %H:%M')} "
+            f"и повторяется каждые {cycle_minutes} минут (шаг {step_minutes} мин.)"
+        )
+
+
 async def process_recurring_task(task_id: int, type: str):
     """Отправляет задачу парсинга с актуальными данными из БД."""
     async with SessionLocal() as db:
         try:
             channel = (await db.execute(select(Channel).where(Channel.id == task_id))).scalar()
             if not channel:
-                scheduler.remove_job(f"task_{task_id}")
+                for job_id in (f"task_{task_id}", f"cicd_task_{task_id}"):
+                    try:
+                        scheduler.remove_job(job_id)
+                    except JobLookupError:
+                        continue
                 return
 
             # Получаем свежие аккаунты и прокси
