@@ -32,7 +32,7 @@ export const createAuthActions = (set, get) => ({
       if (response.status) {
         set({ user: response, userTG: user, isAuthenticated: response.status });
       } else {
-        set({ userTG: user });
+        set({ userTG: user, user: response });
       }
     } finally {
       set({ isLoading: false });
