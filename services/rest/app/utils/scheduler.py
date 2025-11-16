@@ -80,6 +80,7 @@
 import asyncio
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 from apscheduler.jobstores.base import JobLookupError
@@ -103,6 +104,36 @@ CI_CD_TYPE_PRIORITY = [
 ]
 
 scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)
+INSTAGRAM_BATCH_JOB_ID = "instagram_batch_job"
+
+
+def _remove_instagram_batch_job():
+    try:
+        scheduler.remove_job(INSTAGRAM_BATCH_JOB_ID)
+    except JobLookupError:
+        pass
+
+
+def schedule_instagram_batch_job(offset_minutes: int = 0) -> None:
+    hours, minute = _compute_time_slots(offset_minutes)
+    hour_expr = ",".join(str(h) for h in hours)
+    slots_display = ", ".join(f"{h:02d}:{minute:02d}" for h in hours)
+    scheduler.add_job(
+        func=_instagram_batch_job,
+        trigger="cron",
+        hour=hour_expr,
+        minute=minute,
+        id=INSTAGRAM_BATCH_JOB_ID,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+        replace_existing=True,
+    )
+    print(f"✅ Batch-задача Instagram запланирована ежедневно по слотам {slots_display} (мск)")
+
+
+async def _instagram_batch_job():
+    await dispatch_instagram_batch("scheduled_daily")
 
 
 def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
@@ -199,20 +230,33 @@ async def _restore_scheduled_tasks_daily():
         result = await session.execute(select(Channel))
         channels = result.scalars().all()
 
-    channels = sorted(
-        channels,
-        key=lambda task: (
-            task.created_at or datetime.min.replace(tzinfo=timezone.utc),
-            task.id,
-        ),
-    )
-
     if not channels:
+        _remove_instagram_batch_job()
         return
 
-    for index, channel in enumerate(channels):
+    def _sort_key(task: Channel):
+        return (
+            task.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            task.id,
+        )
+
+    instagram_channels = sorted(
+        [channel for channel in channels if channel.type == ChannelType.INSTAGRAM],
+        key=_sort_key,
+    )
+    other_channels = sorted(
+        [channel for channel in channels if channel.type != ChannelType.INSTAGRAM],
+        key=_sort_key,
+    )
+
+    for index, channel in enumerate(other_channels):
         offset = index * 5
         schedule_channel_task(channel.id, offset_minutes=offset)
+
+    if instagram_channels:
+        schedule_instagram_batch_job(offset_minutes=0)
+    else:
+        _remove_instagram_batch_job()
 
 
 def _round_robin_channels(channels: list[Channel]) -> list[Channel]:
@@ -249,6 +293,8 @@ async def restore_scheduled_tasks_cicd(
         result = await session.execute(select(Channel))
         channels = result.scalars().all()
 
+    _remove_instagram_batch_job()
+
     channels = sorted(
         channels,
         key=lambda task: (
@@ -260,7 +306,10 @@ async def restore_scheduled_tasks_cicd(
     if not channels:
         return
 
-    ordered_channels = _round_robin_channels(channels)
+    instagram_channels = [channel for channel in channels if channel.type == ChannelType.INSTAGRAM]
+    other_channels = [channel for channel in channels if channel.type != ChannelType.INSTAGRAM]
+
+    ordered_channels = _round_robin_channels(other_channels)
     total = len(ordered_channels)
     cycle_minutes = max(step_minutes * total, step_minutes)
     first_run = datetime.now(MOSCOW_TZ) + timedelta(minutes=max(start_delay_minutes, 0))
@@ -285,6 +334,9 @@ async def restore_scheduled_tasks_cicd(
             f"и повторяется каждые {cycle_minutes} минут (шаг {step_minutes} мин.)"
         )
 
+    if instagram_channels:
+        await dispatch_instagram_batch("cicd_startup")
+
 
 async def process_recurring_task(task_id: int, type: str):
     """Отправляет задачу парсинга с актуальными данными из БД."""
@@ -302,11 +354,11 @@ async def process_recurring_task(task_id: int, type: str):
             # Получаем свежие аккаунты и прокси
             accounts = (await db.execute(select(Account).where(Account.is_active.is_(True)))).scalars().all()
             proxies = (await db.execute(select(Proxy))).scalars().all()
-            if channel.type == ChannelType.LIKEE:
-                proxy_payload = [p.proxy_str for p in proxies if p.for_likee is True]
-            else:
-                proxy_payload = [p.proxy_str for p in proxies]
+            likee_proxies = [p.proxy_str for p in proxies if p.for_likee is True]
+            generic_proxies = [p.proxy_str for p in proxies if p.for_likee is not True]
+            proxy_payload = likee_proxies if channel.type == ChannelType.LIKEE else generic_proxies
 
+            parse_started_at = datetime.now(MOSCOW_TZ).isoformat()
             rabbit_producer.send_task(
                 f"parsing_{channel.type.value.lower()}",
                 {
@@ -316,8 +368,59 @@ async def process_recurring_task(task_id: int, type: str):
                     "channel_id": channel.id,
                     "accounts": [a.account_str for a in accounts],
                     "proxy_list": proxy_payload,
+                    "parse_started_at": parse_started_at,
                 }
             )
             print(f"📤 Отправлена задача для канала {channel.id} (тип: {channel.type.value})")
         except Exception as e:
             print(f"❌ Ошибка в задаче {task_id}: {e}")
+
+
+async def dispatch_instagram_batch(reason: Optional[str] = None) -> bool:
+    """Формирует и отправляет единую задачу batch-парсинга для всех Instagram-каналов."""
+    async with SessionLocal() as session:
+        channels_result = await session.execute(
+            select(Channel).where(Channel.type == ChannelType.INSTAGRAM)
+        )
+        instagram_channels = channels_result.scalars().all()
+
+        if not instagram_channels:
+            print("ℹ️ Нет Instagram-каналов для batch-парсинга.")
+            return False
+
+        accounts_result = await session.execute(
+            select(Account).where(Account.is_active.is_(True))
+        )
+        accounts = accounts_result.scalars().all()
+
+        proxies_result = await session.execute(select(Proxy))
+        proxies = proxies_result.scalars().all()
+
+    if not accounts:
+        print("⚠️ Нет активных аккаунтов для batch-парсинга Instagram.")
+        return False
+
+    proxy_payload = [p.proxy_str for p in proxies if p.for_likee is not True]
+    parse_started_at = datetime.now(MOSCOW_TZ).isoformat()
+    payload = {
+        "type": "instagram_batch",
+        "channels": [
+            {
+                "channel_id": channel.id,
+                "url": channel.link,
+                "user_id": channel.user_id,
+                "parse_started_at": parse_started_at,
+            }
+            for channel in instagram_channels
+        ],
+        "accounts": [account.account_str for account in accounts],
+        "proxy_list": proxy_payload,
+        "parse_started_at": parse_started_at,
+    }
+
+    rabbit_producer.send_task("parsing_instagram", payload)
+    message = f"📤 Отправлена batch-задача Instagram на {len(instagram_channels)} каналов"
+    if reason:
+        message += f" ({reason})"
+    print(message)
+    return True

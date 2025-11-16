@@ -94,7 +94,7 @@ class ChannelService:
         proxies_from_db = await self.repo.db.execute(select(Proxy))
         proxies = proxies_from_db.scalars().all()
         likee_proxies = [p.proxy_str for p in proxies if p.for_likee is True]
-        proxies_for_send = [p.proxy_str for p in proxies]
+        proxies_for_send = [p.proxy_str for p in proxies if p.for_likee is not True]
 
         accounts_from_db = await self.repo.db.execute(select(Account))
         accounts = accounts_from_db.scalars().all()
@@ -142,7 +142,7 @@ class ChannelService:
         proxies_from_db = await self.repo.db.execute(select(Proxy))
         proxies = proxies_from_db.scalars().all()
         likee_proxies = [p.proxy_str for p in proxies if p.for_likee is True]
-        proxies_for_send = [p.proxy_str for p in proxies]
+        proxies_for_send = [p.proxy_str for p in proxies if p.for_likee is not True]
 
         accounts_from_db = await self.repo.db.execute(select(Account))
         accounts = accounts_from_db.scalars().all()

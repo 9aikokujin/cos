@@ -145,7 +145,7 @@ class VideoHistoryRepository:
                 raise ValueError("Видео не найдено или недостаточно прав")
 
         # Создаём запись
-        history = VideoHistory(**dto.model_dump())
+        history = VideoHistory(**dto.model_dump(exclude_none=True))
         self.db.add(history)
         await self.db.commit()
         await self.db.refresh(history)

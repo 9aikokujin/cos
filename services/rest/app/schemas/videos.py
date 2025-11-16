@@ -17,6 +17,7 @@ class VideosCreate(BaseModel):
     amount_likes: Optional[int] = None
     amount_comments: Optional[int] = None
     date_published: Optional[datetime] = None
+    history_created_at: Optional[datetime] = None
 
 
 class VideosUpdate(BaseModel):
@@ -29,6 +30,7 @@ class VideosUpdate(BaseModel):
     amount_likes: Optional[int] = None
     amount_comments: Optional[int] = None
     date_published: Optional[datetime] = None
+    history_created_at: Optional[datetime] = None
 
 
 class VideoFilter(BaseModel):

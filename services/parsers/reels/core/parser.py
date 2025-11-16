@@ -150,6 +150,16 @@ class InstagramParser:
             normalized.append(str(proxy).strip())
         return normalized
 
+    def configure_proxy_list(self, proxy_list: Optional[Any]) -> bool:
+        """Normalize and store proxies before parsing."""
+        normalized_proxies = self._normalize_proxy_input(proxy_list)
+        if normalized_proxies:
+            self.logger.send("INFO", f"🔁 Обновляем список прокси из аргумента: {normalized_proxies}")
+        else:
+            self.logger.send("INFO", "ℹ️ Парсинг будет выполнен без прокси (после нормализации список пуст).")
+        self.proxy_list = normalized_proxies
+        return True
+
     @staticmethod
     def _extract_auth_cookies(raw_cookies: list[Dict[str, Any]]) -> Dict[str, str]:
         auth_cookies: Dict[str, str] = {}
@@ -1332,77 +1342,49 @@ class InstagramParser:
             return None
         return path.split("/")[0]
 
-    async def parse_channel(
+    async def parse_channel_with_sessions(
         self,
+        *,
         url: str,
         channel_id: int,
         user_id: int,
+        sessions: Dict[str, Dict[str, Any]],
         max_retries: Optional[int] = None,
-        accounts: Optional[list[str]] = None,
-        proxy_list: Optional[list[str]] = None,
-    ):
-        if proxy_list is None:
-            self.logger.send("INFO", "❌ proxy_list не передан в parse_channel — задача остановлена.")
-            return
-
-        normalized_proxies = self._normalize_proxy_input(proxy_list)
-        if normalized_proxies:
-            self.logger.send("INFO", f"🔁 Обновляем список прокси из аргумента: {normalized_proxies}")
-        else:
-            self.logger.send("INFO", "ℹ️ Парсинг будет выполнен без прокси (после нормализации список пуст).")
-        self.proxy_list = normalized_proxies
-
-        accounts = accounts or []
-        if not accounts:
-            self.logger.send("INFO", "⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
-            return
-
-        username = self.extract_username_from_url(url)
-        if not username:
+        max_attempts_collect: int = 1,
+        parse_started_at: Optional[str] = None,
+        username: Optional[str] = None,
+    ) -> bool:
+        resolved_username = username or self.extract_username_from_url(url)
+        if not resolved_username:
             self.logger.send("INFO", f"❌ Не удалось определить username из URL {url}")
-            return
+            return False
+        if not sessions:
+            self.logger.send("INFO", f"⚠️ Отсутствуют валидные сессии для @{resolved_username}")
+            return False
 
         target_items = max_retries if max_retries and max_retries > 0 else None
-        max_attempts_collect = 3
-        clips_media: list[Dict[str, Any]] = []
+        attempts_total = max_attempts_collect if max_attempts_collect and max_attempts_collect > 0 else 1
         preferred_session: Optional[tuple[str, Dict[str, Any]]] = None
+        clips_media: list[Dict[str, Any]] = []
         profile_data: Optional[Dict[str, Any]] = None
 
-        for attempt in range(1, max_attempts_collect + 1):
-            attempt_suffix = f" (попытка {attempt}/{max_attempts_collect})" if max_attempts_collect > 1 else ""
+        for attempt in range(1, attempts_total + 1):
+            attempt_suffix = f" (попытка {attempt}/{attempts_total})" if attempts_total > 1 else ""
             try:
-                sessions = await self.ensure_initial_cookies(accounts)
+                profile_data_result, session_username, session_entry = await self._fetch_profile_via_api(
+                    sessions,
+                    resolved_username,
+                )
             except Exception as exc:
-                self.logger.send("INFO", f"❌ Не удалось подготовить cookies{attempt_suffix}: {exc}")
-                if attempt >= max_attempts_collect:
-                    return
-                continue
-
-            if not sessions:
-                self.logger.send("INFO", f"❌ Не удалось получить валидные cookies ни для одного аккаунта{attempt_suffix}.")
-                if attempt >= max_attempts_collect:
-                    return
-                continue
-
-            if attempt == 1:
-                self.logger.send("INFO", f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
-            else:
-                self.logger.send("INFO", f"🔁 Повторная попытка, используем {len(sessions)} сессий для @{username} (попытка {attempt}/{max_attempts_collect})",)
-
-            preferred_session = None
-            clips_media = []
-            try:
-                profile_data_result, session_username, session_entry = await self._fetch_profile_via_api(sessions, username)
-            except Exception as exc:
-                self.logger.send("INFO", f"❌ Ошибка получения профиля @{username}{attempt_suffix}: {exc}")
-                if attempt >= max_attempts_collect:
-                    return
+                self.logger.send("INFO", f"❌ Ошибка получения профиля @{resolved_username}{attempt_suffix}: {exc}")
+                if attempt >= attempts_total:
+                    return False
                 continue
 
             if not profile_data_result:
-                self.logger.send("INFO", f"⚠️ Профиль @{username} недоступен или отсутствует{attempt_suffix}.")
-                if attempt >= max_attempts_collect:
-                    return
+                self.logger.send("INFO", f"⚠️ Профиль @{resolved_username} недоступен или отсутствует{attempt_suffix}.")
+                if attempt >= attempts_total:
+                    return False
                 continue
 
             profile_data = profile_data_result
@@ -1411,8 +1393,8 @@ class InstagramParser:
 
             instagram_user_id = profile_data.get("id")
             if not instagram_user_id:
-                self.logger.send("INFO", f"❌ Не удалось получить ID пользователя для @{username}")
-                return
+                self.logger.send("INFO", f"❌ Не удалось получить ID пользователя для @{resolved_username}")
+                return False
 
             try:
                 clips_media, fetched_session = await self._fetch_user_clips(
@@ -1423,37 +1405,45 @@ class InstagramParser:
                     preferred_session=preferred_session,
                 )
             except Exception as exc:
-                self.logger.send("INFO", f"❌ Ошибка получения списка рилов для @{username}{attempt_suffix}: {exc}")
-                if attempt >= max_attempts_collect:
-                    return
+                self.logger.send("INFO", f"❌ Ошибка получения списка рилов для @{resolved_username}{attempt_suffix}: {exc}")
+                if attempt >= attempts_total:
+                    return False
                 continue
 
             if fetched_session:
                 preferred_session = fetched_session
 
             if not clips_media:
-                self.logger.send("INFO", f"⚠️ API не вернуло рилы для @{username}{attempt_suffix}.")
-                if attempt >= max_attempts_collect:
-                    return
+                self.logger.send("INFO", f"⚠️ API не вернуло рилы для @{resolved_username}{attempt_suffix}.")
+                if attempt >= attempts_total:
+                    return False
                 continue
 
             if target_items and len(clips_media) < target_items:
-                self.logger.send("INFO", f"⚠️ Получено только {len(clips_media)} рилов из ожидаемых {target_items} для @{username}{attempt_suffix}.",)
-                if attempt < max_attempts_collect:
-                    self.logger.send("INFO", f"🔁 Пробуем повторить сбор рилов для @{username}...")
+                self.logger.send(
+                    "INFO",
+                    f"⚠️ Получено только {len(clips_media)} рилов из ожидаемых {target_items} для @{resolved_username}{attempt_suffix}.",
+                )
+                if attempt < attempts_total:
+                    self.logger.send("INFO", f"🔁 Пробуем повторить сбор рилов для @{resolved_username}...")
                     continue
-
             break
 
         if not clips_media:
-            return
+            return False
 
         if target_items and len(clips_media) < target_items:
-            self.logger.send("INFO", f"⚠️ После {max_attempts_collect} попыток удалось получить только {len(clips_media)} из {target_items} рилов для @{username}.",)
+            self.logger.send(
+                "INFO",
+                f"⚠️ После {attempts_total} попыток удалось получить только {len(clips_media)} из {target_items} рилов для @{resolved_username}.",
+            )
 
         items_limit = target_items if target_items else len(clips_media)
         reel_sequence = clips_media[:items_limit] if items_limit < len(clips_media) else clips_media
-        self.logger.send("INFO", f"📹 Получено {len(clips_media)} рилов для @{username}, обрабатываем {len(reel_sequence)}")
+        self.logger.send(
+            "INFO",
+            f"📹 Получено {len(clips_media)} рилов для @{resolved_username}, обрабатываем {len(reel_sequence)}",
+        )
 
         image_tasks: list[tuple[int, str]] = []
 
@@ -1533,7 +1523,6 @@ class InstagramParser:
                                 timeout=20.0,
                             )
                             update_resp.raise_for_status()
-                            # self.logger.send("INFO", f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
                         else:
                             is_new = True
                     else:
@@ -1623,9 +1612,81 @@ class InstagramParser:
                 if idx < len(image_tasks) - 1:
                     await asyncio.sleep(2.0)
 
-        self.logger.send("INFO", f"✅ Обработано {processed} рилов для @{username}")
-        return
+        self.logger.send("INFO", f"✅ Обработано {processed} рилов для @{resolved_username}")
+        return True
 
+    async def parse_channel(
+        self,
+        url: str,
+        channel_id: int,
+        user_id: int,
+        max_retries: Optional[int] = None,
+        accounts: Optional[list[str]] = None,
+        proxy_list: Optional[list[str]] = None,
+        parse_started_at: Optional[str] = None,
+    ):
+        if proxy_list is None:
+            self.logger.send("INFO", "❌ proxy_list не передан в parse_channel — задача остановлена.")
+            return
+
+        self.configure_proxy_list(proxy_list)
+
+        accounts = [acc for acc in (accounts or []) if acc]
+        if not accounts:
+            self.logger.send("INFO", "⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
+            return
+
+        username = self.extract_username_from_url(url)
+        if not username:
+            self.logger.send("INFO", f"❌ Не удалось определить username из URL {url}")
+            return
+
+        max_attempts_collect = 3
+        for attempt in range(1, max_attempts_collect + 1):
+            attempt_suffix = f" (попытка {attempt}/{max_attempts_collect})" if max_attempts_collect > 1 else ""
+            try:
+                sessions = await self.ensure_initial_cookies(accounts)
+            except Exception as exc:
+                self.logger.send("INFO", f"❌ Не удалось подготовить cookies{attempt_suffix}: {exc}")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
+
+            if not sessions:
+                self.logger.send("INFO", f"❌ Не удалось получить валидные cookies ни для одного аккаунта{attempt_suffix}.")
+                if attempt >= max_attempts_collect:
+                    return
+                continue
+
+            if attempt == 1:
+                self.logger.send("INFO", f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
+            else:
+                self.logger.send(
+                    "INFO",
+                    f"🔁 Повторная попытка, используем {len(sessions)} сессий для @{username} (попытка {attempt}/{max_attempts_collect})",
+                )
+
+            success = await self.parse_channel_with_sessions(
+                url=url,
+                channel_id=channel_id,
+                user_id=user_id,
+                sessions=sessions,
+                max_retries=max_retries,
+                max_attempts_collect=1,
+                parse_started_at=parse_started_at,
+                username=username,
+            )
+            if success:
+                return
+
+            if attempt < max_attempts_collect:
+                self.logger.send(
+                    "INFO",
+                    f"🔁 Повторяем попытку парсинга @{username} (попытка {attempt + 1}/{max_attempts_collect})",
+                )
+
+        self.logger.send("INFO", f"❌ Не удалось обработать @{username} после {max_attempts_collect} попыток")
+        return
 
 # async def main():
 #     proxy_list = [

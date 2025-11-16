@@ -3,7 +3,7 @@ import asyncio
 # import time
 import json
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Union, Any
 import httpx
 import requests
@@ -35,6 +35,43 @@ class ShortsParser:
         self.dom_video_links = {}
         self.dom_order: List[str] = []
         self.saved_html_count = 0
+
+    @staticmethod
+    def _parse_started_at(value: Optional[Union[str, datetime]]) -> datetime:
+        if isinstance(value, datetime):
+            dt = value
+        elif isinstance(value, str) and value.strip():
+            text = value.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(text)
+            except ValueError:
+                dt = datetime.now(timezone.utc)
+        else:
+            dt = datetime.now(timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _log_summary(
+        self,
+        url: str,
+        channel_id: int,
+        video_count: int,
+        total_views: int,
+        started_at: datetime,
+        ended_at: datetime,
+        success: bool,
+    ) -> None:
+        status_icon = "✅" if success else "⚠️"
+        status_text = "Успешно спарсили" if success else "Не удалось спарсить"
+        self.logger.send(
+            "INFO",
+            f"{status_icon} {status_text} {url} с {channel_id} "
+            f"кол-во видео - {video_count}, кол-во просмотров - {total_views}, "
+            f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
+        )
 
     def reset_dom_state(self):
         """Сбрасывает накопленные DOM-данные перед новой попыткой парсинга."""
@@ -1217,7 +1254,15 @@ class ShortsParser:
 
         return status_code, image_path or payload
 
-    async def parse_channel(self, url: str, channel_id: int, user_id: int, max_retries: int = 3, proxy_list: list = None):
+    async def parse_channel(
+        self,
+        url: str,
+        channel_id: int,
+        user_id: int,
+        max_retries: int = 3,
+        proxy_list: list = None,
+        parse_started_at: Optional[Union[str, datetime]] = None,
+    ):
         """
         Новая логика:
         1. Получаем общее количество видео из шапки канала.
@@ -1226,6 +1271,23 @@ class ShortsParser:
         4. По одному запросу на прокси собираем метаданные каждого видео через httpx + BS4.
         5. Передаём данные дальше на API (ниже по функции).
         """
+        run_started_at = self._parse_started_at(parse_started_at)
+        history_created_at_iso = run_started_at.isoformat()
+        processed_count = 0
+        total_views = 0
+
+        def log_final(success: bool) -> None:
+            ended_at = datetime.now(timezone.utc)
+            self._log_summary(
+                url,
+                channel_id,
+                processed_count,
+                total_views,
+                run_started_at,
+                ended_at,
+                success and processed_count > 0,
+            )
+
         self.proxy_list = proxy_list or []
 
         url = self.normalize_profile_url(url)
@@ -1393,10 +1455,12 @@ class ShortsParser:
                 total_collected = len(self.dom_order)
             else:
                 self.logger.send("INFO", "⚠️ Не удалось собрать ни одного видео из DOM после всех попыток.")
+                log_final(False)
                 return []
         total_collected = len(self.dom_order)
         if total_collected == 0:
             self.logger.send("INFO", "⚠️ Не удалось собрать ни одного видео из DOM.")
+            log_final(False)
             return []
 
         videos_limit = header_videos_count if header_videos_count else total_collected
@@ -1429,6 +1493,7 @@ class ShortsParser:
                     "amount_comments": meta.get("comments") or 0,
                     "articles": meta.get("articles"),
                     "date_published": meta.get("date_published"),
+                    "history_created_at": history_created_at_iso,
                 }
             )
 
@@ -1437,7 +1502,7 @@ class ShortsParser:
             f"✅ Собрано {len(all_videos_data)} из {videos_limit} видео "
             f"(DOM найдено: {total_collected})"
         )
-        processed_count = 0
+        total_views = sum(int(item.get("amount_views", 0) or 0) for item in all_videos_data)
         image_queue = []
         queued_video_ids = set()
         for video_data in all_videos_data:
@@ -1461,6 +1526,7 @@ class ShortsParser:
                                 "articles": video_data.get("articles"),
                                 # "description": video_data.get("description"),
                                 "date_published": video_data.get("date_published"),
+                                "history_created_at": history_created_at_iso,
                             }
                             update_payload = {k: v for k, v in update_payload.items() if v is not None}
                             await client.patch(
@@ -1525,6 +1591,7 @@ class ShortsParser:
             await asyncio.sleep(60.0)
 
         self.logger.send("INFO", f"🎉 Парсинг завершён: {processed_count} видео обработано.")
+        log_final(processed_count > 0)
 
 
 # ----------------------- Пример запуска -----------------------

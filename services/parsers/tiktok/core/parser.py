@@ -6,7 +6,7 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Union, Optional, Tuple, Callable, Awaitable, Dict, List, Set
 from urllib.parse import urlparse, urlunparse, urljoin
-
+# Добавить что если не добрали до video_count, то будем скроллить на самый верх и считать заново
 import httpx
 import requests
 from playwright.async_api import async_playwright, Page, Response, TimeoutError as PlaywrightTimeoutError
@@ -79,6 +79,43 @@ class TikTokParser:
         self.dom_images: Dict[str, List[str]] = {}
         self.dom_order: List[str] = []
         self.proxy_list: List[Optional[str]] = []
+
+    @staticmethod
+    def _parse_started_at(value: Optional[Union[str, datetime]]) -> datetime:
+        if isinstance(value, datetime):
+            dt = value
+        elif isinstance(value, str) and value.strip():
+            text = value.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(text)
+            except ValueError:
+                dt = datetime.now(timezone.utc)
+        else:
+            dt = datetime.now(timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _log_summary(
+        self,
+        url: str,
+        channel_id: int,
+        video_count: int,
+        total_views: int,
+        started_at: datetime,
+        ended_at: datetime,
+        success: bool,
+    ) -> None:
+        status_icon = "✅" if success else "⚠️"
+        status_text = "Успешно спарсили" if success else "Не удалось спарсить"
+        self.logger.send(
+            "INFO",
+            f"{status_icon} {status_text} {url} с {channel_id} "
+            f"кол-во видео - {video_count}, кол-во просмотров - {total_views}, "
+            f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
+        )
         self.dom_settle_delay: float = 0.7  # доп. пауза, чтобы DOM успевал дорисоваться
 
     # ----------------------- УТИЛИТЫ -----------------------
@@ -731,6 +768,7 @@ class TikTokParser:
         user_id: int,
         max_retries: int = 3,
         proxy_list: Optional[List[str]] = None,
+        parse_started_at: Optional[Union[str, datetime]] = None,
     ):
         self.proxy_list = [p for p in (proxy_list or []) if p]
         proxies_for_requests = self.proxy_list or [None]
@@ -743,9 +781,26 @@ class TikTokParser:
         target_video_count: Optional[int] = None
         last_html_snapshot: Optional[str] = None
         success = False
+        run_started_at = self._parse_started_at(parse_started_at)
+        history_created_at_iso = run_started_at.isoformat()
+        processed_count = 0
+        total_views = 0
 
-        playwright = await async_playwright().start()
+        def log_final(outcome: bool) -> None:
+            ended_at = datetime.now(timezone.utc)
+            self._log_summary(
+                url,
+                channel_id,
+                processed_count,
+                total_views,
+                run_started_at,
+                ended_at,
+                outcome and processed_count > 0,
+            )
+
         try:
+            playwright = await async_playwright().start()
+            try:
             proxies_for_browser = self.proxy_list or [None]
             random.shuffle(proxies_for_browser)
 
@@ -928,6 +983,7 @@ class TikTokParser:
                 self.logger.send("INFO", f"📄 Не удалось собрать видео — HTML сохранён: {fname}")
             except Exception as e:
                 self.logger.send("INFO", f"⚠️ Не удалось сохранить HTML: {e}")
+            log_final(False)
             return
 
         video_ids = self.dom_order[: target_video_count] if target_video_count else self.dom_order
@@ -989,12 +1045,16 @@ class TikTokParser:
                     "image_url": image_url,
                     "articles": parsed.get("articles"),
                     "image_candidates": image_candidates,
+                    "history_created_at": history_created_at_iso,
                 }
             )
 
         if not all_videos_data:
             self.logger.send("INFO", "⚠️ После запросов не осталось данных для отправки")
+            log_final(False)
             return
+
+        total_views = sum(int(video.get("amount_views") or 0) for video in all_videos_data)
 
         async def download_image(img_url: str, proxy: Optional[str] = None) -> Union[bytes, None]:
             try:
@@ -1040,7 +1100,6 @@ class TikTokParser:
                 resp.raise_for_status()
                 return resp.status_code, resp.text
 
-        processed_count = 0
         image_queue: List[Tuple[int, List[str]]] = []
         queued_video_ids: Set[int] = set()
 
@@ -1065,6 +1124,7 @@ class TikTokParser:
                                 # "date_published": video_data.get("date_published"),
                                 "articles": video_data.get("articles"),
                                 # "description": video_data.get("description"),
+                                "history_created_at": history_created_at_iso,
                             }
                             upd = await client.patch(
                                 f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
@@ -1161,6 +1221,7 @@ class TikTokParser:
             await asyncio.sleep(30.0)
 
         self.logger.send("INFO", f"✅ Успешно обработано {processed_count} видео")
+        log_final(success)
 
 
 # ----------------------- Пример запуска -----------------------
