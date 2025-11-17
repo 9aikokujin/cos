@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
@@ -112,6 +113,8 @@ class InstagramBatchRunner:
         accounts: Sequence[str],
         proxy_list: Sequence[str],
         max_retries: Optional[int] = None,
+        retry_pause_seconds: int = 600,
+        refetch_on_full_failure: bool = True,
     ) -> None:
         """
         Последовательно обходит каналы Instagram, используя заранее подготовленные cookies.
@@ -130,15 +133,63 @@ class InstagramBatchRunner:
             self.logger.send("INFO", "❌ Не удалось подготовить cookies — batch-парсинг остановлен.")
             return
 
-        for task in tasks:
-            success, sessions = await self._process_task(
-                task,
-                sessions,
-                accounts,
-                max_retries=max_retries,
+        attempt = 1
+        while True:
+            success_any = False
+            sessions_depleted = False
+
+            for task in tasks:
+                success, sessions = await self._process_task(
+                    task,
+                    sessions,
+                    accounts,
+                    max_retries=max_retries,
+                )
+                if success:
+                    success_any = True
+                if not sessions:
+                    sessions_depleted = True
+                    self.logger.send(
+                        "INFO",
+                        f"❌ Сессии закончились на канале {task.channel_id}, дальнейшая обработка невозможна.",
+                    )
+                    break
+
+            if sessions_depleted:
+                break
+
+            if success_any or not tasks:
+                break
+
+            if retry_pause_seconds > 0:
+                if retry_pause_seconds % 60 == 0:
+                    wait_display = f"{retry_pause_seconds // 60} мин"
+                else:
+                    wait_display = f"{retry_pause_seconds} сек"
+            else:
+                wait_display = "0 сек"
+
+            self.logger.send(
+                "INFO",
+                f"⚠️ Все {len(tasks)} каналов завершились ошибками (попытка {attempt}). "
+                f"Ждём {wait_display} перед повтором.",
             )
-            if not success and not sessions:
-                self.logger.send("INFO", f"❌ Нет валидных сессий после канала {task.channel_id}, останавливаем batch.")
+            attempt += 1
+            if retry_pause_seconds > 0:
+                await asyncio.sleep(retry_pause_seconds)
+
+            if refetch_on_full_failure:
+                refreshed = await self.fetch_channels_from_api()
+                if refreshed:
+                    tasks = refreshed
+                    self.logger.send("INFO", f"♻️ Обновлён список каналов: {len(tasks)} записей.")
+                elif not tasks:
+                    self.logger.send("INFO", "⚠️ После повторной загрузки каналов список пуст — выходим.")
+                    break
+
+            sessions = await self.prepare_sessions(accounts)
+            if not sessions:
+                self.logger.send("INFO", "❌ Не удалось восстановить валидные cookies после ожидания, batch остановлен.")
                 break
 
     async def _process_task(
