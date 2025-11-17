@@ -22,6 +22,7 @@ class VideoHistoryCreate(BaseModel):
     amount_likes: Optional[int] = None
     amount_comments: Optional[int] = None
     date_published: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
 
 class HistoryParams(BaseModel):

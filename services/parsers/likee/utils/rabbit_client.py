@@ -33,6 +33,7 @@ class RabbitMQParserClient:
             user_id: int = task_data.get("user_id")
             channel_id: int = task_data.get("channel_id")
             proxy_list: list = task_data.get("proxy_list")
+            parse_started_at = task_data.get("parse_started_at")
 
             self.logger.send("INFO", f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url} и прокси: {proxy_list}")
             print(f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url}")
@@ -44,6 +45,7 @@ class RabbitMQParserClient:
                     user_id,
                     proxy_list=proxy_list,
                     max_retries=3,
+                    parse_started_at=parse_started_at,
                 )
 
             # if task_type == "video":

@@ -2,6 +2,8 @@ import asyncio
 import json
 
 from aio_pika import connect_robust, IncomingMessage
+from config import config
+from core.batch_runner import InstagramBatchRunner
 from core.parser import InstagramParser
 from utils.logger import TCPLogger
 
@@ -32,8 +34,9 @@ class RabbitMQParserClient:
             task_type: str = task_data.get("type")
             user_id: int = task_data.get("user_id")
             channel_id: int = task_data.get("channel_id")
-            accounts: list = task_data.get("accounts")
-            proxy_list: list = task_data.get("proxy_list")
+            accounts: list = task_data.get("accounts") or []
+            proxy_list: list = task_data.get("proxy_list") or []
+            parse_started_at = task_data.get("parse_started_at")
 
             self.logger.send("INFO", f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url} с аккаунтами: {accounts} и прокси: {proxy_list}")
             print(f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url}")
@@ -46,7 +49,34 @@ class RabbitMQParserClient:
                             max_retries=None,
                             accounts=accounts,
                             proxy_list=proxy_list,
+                            parse_started_at=parse_started_at,
                         )
+            elif task_type == "instagram_batch":
+                runner = InstagramBatchRunner(
+                    parser=self.parser,
+                    logger=self.logger,
+                    retries_per_channel=task_data.get("retries_per_channel", 1),
+                    session_refresh_on_failure=task_data.get("session_refresh_on_failure", True),
+                    collect_attempts=task_data.get("collect_attempts", 3),
+                    channels_api_url=config.CHANNELS_API_URL,
+                    channels_api_token=config.CHANNELS_API_TOKEN,
+                )
+                batch_tasks = task_data.get("channels") or []
+                if not batch_tasks:
+                    self.logger.send("INFO", "ℹ️ Batch-задача не содержит каналов — загружаем их из API.")
+                    batch_tasks = await runner.fetch_channels_from_api()
+
+                if not batch_tasks:
+                    self.logger.send("INFO", "⚠️ Нет каналов для batch-парсинга, задача пропущена.")
+                    return
+
+                self.logger.send("INFO", f"🚀 Batch Instagram: получено {len(batch_tasks)} каналов.")
+                await runner.run(
+                    channel_tasks=batch_tasks,
+                    accounts=accounts,
+                    proxy_list=proxy_list,
+                    max_retries=task_data.get("max_retries"),
+                )
 
             # if task_type == "video":
             #     self.logger.send("INFO", f"Начал парсить видео {url}")

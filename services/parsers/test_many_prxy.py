@@ -69,11 +69,6 @@ def test_all_proxies(proxy_list, test_url, timeout=10, max_workers=10):
 # Пример использования:
 if __name__ == "__main__":
     proxies = [
-        # "u9wJGy:VpJKtb@5.8.60.103:8000",
-        # "u9wJGy:VpJKtb@5.8.61.103:8000",
-        # "u9wJGy:VpJKtb@5.101.90.155:8000",
-        # "u9wJGy:VpJKtb@5.8.60.139:8000",
-        # "u9wJGy:VpJKtb@5.8.61.166:8000",
         "DWtvBb:M1uRTE@181.177.87.15:9725",
         "DWtvBb:M1uRTE@181.177.84.185:9254",
         "DWtvBb:M1uRTE@94.131.54.252:9746",
@@ -82,9 +77,18 @@ if __name__ == "__main__":
         "MecAgR:v5fbu6@186.65.118.237:9808",
         "MecAgR:v5fbu6@186.65.115.230:9065",
         "MecAgR:v5fbu6@186.65.115.105:9825",
+        "suQs3N:j30sT6@170.246.55.146:9314",
+        "MecAgR:v5fbu6@186.65.118.237:9808",
+        "MecAgR:v5fbu6@186.65.115.230:9065",
+        "MecAgR:v5fbu6@186.65.115.105:9825",
     ]
 
     # working = test_all_proxies(proxies, test_url="https://ya.ru/", timeout=10)
     # print(f"Всего рабочих прокси: {len(working)}")
-    working = test_all_proxies(proxies, test_url="https://www.tiktok.com/", timeout=10)
+
+    # working = test_all_proxies(proxies, test_url="https://www.tiktok.com/", timeout=10)
+    # print(f"Всего рабочих прокси: {len(working)}")
+    
+    working = test_all_proxies(proxies, test_url="https://www.instagram.com/", timeout=10)
     print(f"Всего рабочих прокси: {len(working)}")
+    

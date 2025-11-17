@@ -5,7 +5,7 @@ import random
 # import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, Union
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -69,6 +69,43 @@ class InstagramParser:
         self.session_cache: Dict[str, Dict[str, Any]] = self._load_cookie_store()
         self.account_credentials: Dict[str, Dict[str, str]] = {}
         self.invalid_accounts: set[str] = set()
+
+    @staticmethod
+    def _parse_started_at(value: Optional[Union[str, datetime]]) -> datetime:
+        if isinstance(value, datetime):
+            dt = value
+        elif isinstance(value, str) and value.strip():
+            text = value.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(text)
+            except ValueError:
+                dt = datetime.now(timezone.utc)
+        else:
+            dt = datetime.now(timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _log_summary(
+        self,
+        url: str,
+        channel_id: int,
+        video_count: int,
+        total_views: int,
+        started_at: datetime,
+        ended_at: datetime,
+        success: bool,
+    ) -> None:
+        status_icon = "✅" if success else "⚠️"
+        status_text = "Успешно спарсили" if success else "Не удалось спарсить"
+        self.logger.send(
+            "INFO",
+            f"{status_icon} {status_text} {url} с {channel_id} "
+            f"кол-во видео - {video_count}, кол-во просмотров - {total_views}, "
+            f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
+        )
 
     async def _start_playwright(self):
         try:
@@ -174,6 +211,18 @@ class InstagramParser:
                 continue
             normalized.append(str(proxy).strip())
         return normalized
+
+    def configure_proxy_list(self, proxy_list: Optional[list[str]]) -> bool:
+        if proxy_list is None:
+            self.logger.send("INFO", "❌ proxy_list не передан — задача остановлена.")
+            return False
+        normalized_proxies = self._normalize_proxy_input(proxy_list)
+        if normalized_proxies:
+            self.logger.send("INFO", f"🔁 Обновляем список прокси из аргумента: {normalized_proxies}")
+        else:
+            self.logger.send("INFO", "ℹ️ Парсинг будет выполнен без прокси (после нормализации список пуст).")
+        self.proxy_list = normalized_proxies
+        return True
 
     @staticmethod
     def _extract_auth_cookies(raw_cookies: list[Dict[str, Any]]) -> Dict[str, str]:
@@ -1352,62 +1401,44 @@ class InstagramParser:
             return None
         return path.split("/")[0]
 
-    async def parse_channel(
+    async def _run_channel_with_session_provider(
         self,
+        *,
         url: str,
+        username: str,
         channel_id: int,
         user_id: int,
-        max_retries: Optional[int] = None,
-        accounts: Optional[list[str]] = None,
-        proxy_list: Optional[list[str]] = None,
-    ):
-        if proxy_list is None:
-            self.logger.send("INFO", "❌ proxy_list не передан в parse_channel — задача остановлена.")
-            return
-
-        normalized_proxies = self._normalize_proxy_input(proxy_list)
-        if normalized_proxies:
-            self.logger.send("INFO", f"🔁 Обновляем список прокси из аргумента: {normalized_proxies}")
-        else:
-            self.logger.send("INFO", "ℹ️ Парсинг будет выполнен без прокси (после нормализации список пуст).")
-        self.proxy_list = normalized_proxies
-
-        accounts = accounts or []
-        if not accounts:
-            self.logger.send("INFO", "⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
-            return
-
-        username = self.extract_username_from_url(url)
-        if not username:
-            self.logger.send("INFO", f"❌ Не удалось определить username из URL {url}")
-            return
-
-        target_items = max_retries if max_retries and max_retries > 0 else None
-        max_attempts_collect = 3
+        target_items: Optional[int],
+        session_provider: Callable[[], Awaitable[Dict[str, Dict[str, Any]]]],
+        max_attempts_collect: int,
+        history_created_at_iso: str,
+    ) -> Tuple[bool, int, int]:
         clips_media: list[Dict[str, Any]] = []
         preferred_session: Optional[tuple[str, Dict[str, Any]]] = None
         profile_data: Optional[Dict[str, Any]] = None
+        processed = 0
+        total_views = 0
 
         for attempt in range(1, max_attempts_collect + 1):
             attempt_suffix = f" (попытка {attempt}/{max_attempts_collect})" if max_attempts_collect > 1 else ""
             try:
-                sessions = await self.ensure_initial_cookies(accounts)
+                sessions = await session_provider()
             except Exception as exc:
                 self.logger.send("INFO", f"❌ Не удалось подготовить cookies{attempt_suffix}: {exc}")
                 if attempt >= max_attempts_collect:
-                    return
+                    return False, processed, total_views
                 continue
 
             if not sessions:
                 self.logger.send("INFO", f"❌ Не удалось получить валидные cookies ни для одного аккаунта{attempt_suffix}.")
                 if attempt >= max_attempts_collect:
-                    return
+                    return False, processed, total_views
                 continue
 
             if attempt == 1:
                 self.logger.send("INFO", f"🔐 Используем сохранённые cookies {len(sessions)} аккаунтов для парсинга @{username}")
             else:
-                self.logger.send("INFO", f"🔁 Повторная попытка, используем {len(sessions)} сессий для @{username} (попытка {attempt}/{max_attempts_collect})",)
+                self.logger.send("INFO", f"🔁 Повторная попытка, используем {len(sessions)} сессий для @{username} (попытка {attempt}/{max_attempts_collect})")
 
             preferred_session = None
             clips_media = []
@@ -1416,13 +1447,13 @@ class InstagramParser:
             except Exception as exc:
                 self.logger.send("INFO", f"❌ Ошибка получения профиля @{username}{attempt_suffix}: {exc}")
                 if attempt >= max_attempts_collect:
-                    return
+                    return False, processed, total_views
                 continue
 
             if not profile_data_result:
                 self.logger.send("INFO", f"⚠️ Профиль @{username} недоступен или отсутствует{attempt_suffix}.")
                 if attempt >= max_attempts_collect:
-                    return
+                    return False, processed, total_views
                 continue
 
             profile_data = profile_data_result
@@ -1432,7 +1463,7 @@ class InstagramParser:
             instagram_user_id = profile_data.get("id")
             if not instagram_user_id:
                 self.logger.send("INFO", f"❌ Не удалось получить ID пользователя для @{username}")
-                return
+                return False, processed, total_views
 
             try:
                 clips_media, fetched_session = await self._fetch_user_clips(
@@ -1445,7 +1476,7 @@ class InstagramParser:
             except Exception as exc:
                 self.logger.send("INFO", f"❌ Ошибка получения списка рилов для @{username}{attempt_suffix}: {exc}")
                 if attempt >= max_attempts_collect:
-                    return
+                    return False, processed, total_views
                 continue
 
             if fetched_session:
@@ -1454,11 +1485,11 @@ class InstagramParser:
             if not clips_media:
                 self.logger.send("INFO", f"⚠️ API не вернуло рилы для @{username}{attempt_suffix}.")
                 if attempt >= max_attempts_collect:
-                    return
+                    return False, processed, total_views
                 continue
 
             if target_items and len(clips_media) < target_items:
-                self.logger.send("INFO", f"⚠️ Получено только {len(clips_media)} рилов из ожидаемых {target_items} для @{username}{attempt_suffix}.",)
+                self.logger.send("INFO", f"⚠️ Получено только {len(clips_media)} рилов из ожидаемых {target_items} для @{username}{attempt_suffix}.")
                 if attempt < max_attempts_collect:
                     self.logger.send("INFO", f"🔁 Пробуем повторить сбор рилов для @{username}...")
                     continue
@@ -1466,10 +1497,10 @@ class InstagramParser:
             break
 
         if not clips_media:
-            return
+            return False, processed, total_views
 
         if target_items and len(clips_media) < target_items:
-            self.logger.send("INFO", f"⚠️ После {max_attempts_collect} попыток удалось получить только {len(clips_media)} из {target_items} рилов для @{username}.",)
+            self.logger.send("INFO", f"⚠️ После {max_attempts_collect} попыток удалось получить только {len(clips_media)} из {target_items} рилов для @{username}.")
 
         items_limit = target_items if target_items else len(clips_media)
         reel_sequence = clips_media[:items_limit] if items_limit < len(clips_media) else clips_media
@@ -1523,6 +1554,7 @@ class InstagramParser:
                 "amount_comments": amount_comments,
                 "image_url": image_url,
                 "date_published": date_published,
+                "history_created_at": history_created_at_iso,
             }
             try:
                 async with httpx.AsyncClient() as client:
@@ -1547,13 +1579,13 @@ class InstagramParser:
                             }
                             if date_published and not existing_video.get("date_published"):
                                 update_payload["date_published"] = date_published
+                            update_payload["history_created_at"] = history_created_at_iso
                             update_resp = await client.patch(
                                 f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
                                 json=update_payload,
                                 timeout=20.0,
                             )
                             update_resp.raise_for_status()
-                            # self.logger.send("INFO", f"🔄 Обновлены просмотры для видео {video_id}: {play_count}")
                         else:
                             is_new = True
                     else:
@@ -1631,6 +1663,7 @@ class InstagramParser:
                     caption_text,
                 )
                 processed += 1
+                total_views += int(play_count or 0)
                 await asyncio.sleep(0.5)
             except Exception as exc:
                 self.logger.send("INFO", f"❌ Ошибка обработки рила {shortcode}: {exc}")
@@ -1644,7 +1677,104 @@ class InstagramParser:
                     await asyncio.sleep(2.0)
 
         self.logger.send("INFO", f"✅ Обработано {processed} рилов для @{username}")
-        return
+        return True, processed, total_views
+
+    async def parse_channel(
+        self,
+        url: str,
+        channel_id: int,
+        user_id: int,
+        max_retries: Optional[int] = None,
+        accounts: Optional[list[str]] = None,
+        proxy_list: Optional[list[str]] = None,
+        parse_started_at: Optional[Union[str, datetime]] = None,
+    ):
+        run_started_at = self._parse_started_at(parse_started_at)
+        history_created_at_iso = run_started_at.isoformat()
+
+        if not self.configure_proxy_list(proxy_list):
+            self._log_summary(url, channel_id, 0, 0, run_started_at, datetime.now(timezone.utc), False)
+            return
+
+        accounts = accounts or []
+        if not accounts:
+            self.logger.send("INFO", "⚠️ Список аккаунтов пуст, невозможно авторизоваться.")
+            self._log_summary(url, channel_id, 0, 0, run_started_at, datetime.now(timezone.utc), False)
+            return
+
+        username = self.extract_username_from_url(url)
+        if not username:
+            self.logger.send("INFO", f"❌ Не удалось определить username из URL {url}")
+            self._log_summary(url, channel_id, 0, 0, run_started_at, datetime.now(timezone.utc), False)
+            return
+
+        target_items = max_retries if max_retries and max_retries > 0 else None
+        max_attempts_collect = 3
+
+        async def session_provider() -> Dict[str, Dict[str, Any]]:
+            return await self.ensure_initial_cookies(accounts)
+
+        success, processed_count, total_views = await self._run_channel_with_session_provider(
+            url=url,
+            username=username,
+            channel_id=channel_id,
+            user_id=user_id,
+            target_items=target_items,
+            session_provider=session_provider,
+            max_attempts_collect=max_attempts_collect,
+            history_created_at_iso=history_created_at_iso,
+        )
+        self._log_summary(url, channel_id, processed_count, total_views, run_started_at, datetime.now(timezone.utc), success)
+
+    async def parse_channel_with_sessions(
+        self,
+        *,
+        url: str,
+        channel_id: int,
+        user_id: int,
+        sessions: Dict[str, Dict[str, Any]],
+        proxy_list: Optional[list[str]] = None,
+        max_retries: Optional[int] = None,
+        max_attempts_collect: int = 1,
+        parse_started_at: Optional[Union[str, datetime]] = None,
+    ) -> bool:
+        run_started_at = self._parse_started_at(parse_started_at)
+        history_created_at_iso = run_started_at.isoformat()
+
+        if proxy_list is not None and not self.configure_proxy_list(proxy_list):
+            self._log_summary(url, channel_id, 0, 0, run_started_at, datetime.now(timezone.utc), False)
+            return False
+
+        if not sessions:
+            self.logger.send("INFO", "⚠️ Не переданы подготовленные сессии для batch-парсинга.")
+            self._log_summary(url, channel_id, 0, 0, run_started_at, datetime.now(timezone.utc), False)
+            return False
+
+        username = self.extract_username_from_url(url)
+        if not username:
+            self.logger.send("INFO", f"❌ Не удалось определить username из URL {url}")
+            self._log_summary(url, channel_id, 0, 0, run_started_at, datetime.now(timezone.utc), False)
+            return False
+
+        target_items = max_retries if max_retries and max_retries > 0 else None
+
+        async def session_provider() -> Dict[str, Dict[str, Any]]:
+            return sessions
+
+        success, processed_count, total_views = await self._run_channel_with_session_provider(
+            url=url,
+            username=username,
+            channel_id=channel_id,
+            user_id=user_id,
+            target_items=target_items,
+            session_provider=session_provider,
+            max_attempts_collect=max_attempts_collect,
+            history_created_at_iso=history_created_at_iso,
+        )
+        self._log_summary(url, channel_id, processed_count, total_views, run_started_at, datetime.now(timezone.utc), success)
+        return success
+
+
 
 
 # async def main():

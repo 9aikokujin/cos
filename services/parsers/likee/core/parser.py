@@ -19,6 +19,43 @@ class LikeeParser:
         self.logger = logger
         self.current_proxy_index = 0
 
+    @staticmethod
+    def _parse_started_at(value: Optional[Union[str, datetime]]) -> datetime:
+        if isinstance(value, datetime):
+            dt = value
+        elif isinstance(value, str) and value.strip():
+            text = value.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(text)
+            except ValueError:
+                dt = datetime.now(timezone.utc)
+        else:
+            dt = datetime.now(timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _log_summary(
+        self,
+        url: str,
+        channel_id: int,
+        video_count: int,
+        total_views: int,
+        started_at: datetime,
+        ended_at: datetime,
+        success: bool,
+    ) -> None:
+        status_icon = "✅" if success else "⚠️"
+        status_text = "Успешно спарсили" if success else "Не удалось спарсить"
+        self.logger.send(
+            "INFO",
+            f"{status_icon} {status_text} {url} с {channel_id} "
+            f"кол-во видео - {video_count}, кол-во просмотров - {total_views}, "
+            f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
+        )
+
     async def _start_playwright(self):
         try:
             return await async_playwright().start()
@@ -367,7 +404,15 @@ class LikeeParser:
                 return None, str(e)
 
     # --- Основной метод с централизованным управлением Playwright ---
-    async def parse_channel(self, profile_url: str, channel_id: int, user_id: int, proxy_list: List[str] = None, max_retries: int = 3):
+    async def parse_channel(
+        self,
+        profile_url: str,
+        channel_id: int,
+        user_id: int,
+        proxy_list: List[str] = None,
+        max_retries: int = 3,
+        parse_started_at: Optional[Union[str, datetime]] = None,
+    ):
         profile_url = profile_url.strip()
         match = re.search(r"/p/([a-zA-Z0-9]+)", profile_url)
         if not match:
@@ -375,6 +420,23 @@ class LikeeParser:
 
         short_id = match.group(1)
         self.logger.send("INFO", f"🔍 Извлечен short_id: {short_id}")
+
+        run_started_at = self._parse_started_at(parse_started_at)
+        history_created_at_iso = run_started_at.isoformat()
+        processed_count = 0
+        total_views = 0
+
+        def log_final(success: bool) -> None:
+            ended_at = datetime.now(timezone.utc)
+            self._log_summary(
+                profile_url,
+                channel_id,
+                processed_count,
+                total_views,
+                run_started_at,
+                ended_at,
+                success and processed_count > 0,
+            )
 
         playwright = await self._start_playwright()
         if not playwright:
@@ -469,10 +531,11 @@ class LikeeParser:
                     "amount_views": amount_views,
                     "amount_likes": amount_likes,
                     "amount_comments": amount_comments,
-                    "date_published": published_at
+                    "date_published": published_at,
+                    "history_created_at": history_created_at_iso,
                 })
 
-            processed_count = 0
+            total_views = sum(int(item.get("amount_views", 0) or 0) for item in all_videos_data)
             image_queue = []
 
             for video_data in all_videos_data:
@@ -494,7 +557,8 @@ class LikeeParser:
                                     json={
                                         "amount_views": video_data["amount_views"],
                                         "amount_likes": video_data["amount_likes"],
-                                        "amount_comments": video_data["amount_comments"]
+                                        "amount_comments": video_data["amount_comments"],
+                                        "history_created_at": history_created_at_iso,
                                     }
                                 )
                                 update_resp.raise_for_status()
@@ -543,12 +607,8 @@ class LikeeParser:
 
         finally:
             # Централизованное закрытие Playwright
-            try:
-                await playwright.stop()
-            except Exception as e:
-                self.logger.send("INFO", f"Ошибка при остановке Playwright: {e}")
-            else:
-                self.logger.send("INFO", "✅ Playwright успешно остановлен")
+            await self._safe_close(playwright, "playwright", method="stop")
+            log_final(processed_count > 0)
 
 
 # async def main():
