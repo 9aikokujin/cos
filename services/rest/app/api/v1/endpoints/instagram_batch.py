@@ -7,7 +7,7 @@ from app.utils.scheduler import release_instagram_batch, get_instagram_batch_sta
 
 class BatchReleaseRequest(BaseModel):
     batch_id: str
-    token: str
+    token: str | None = None
 
 
 router = APIRouter(prefix="/instagram-batch", tags=["InstagramBatch"])
@@ -15,10 +15,6 @@ router = APIRouter(prefix="/instagram-batch", tags=["InstagramBatch"])
 
 @router.post("/release")
 async def release_batch(payload: BatchReleaseRequest):
-    expected_token = getattr(settings, "INSTAGRAM_BATCH_CONTROL_TOKEN", None)
-    if expected_token and payload.token != expected_token:
-        raise HTTPException(status_code=403, detail="Invalid token")
-
     released = release_instagram_batch(payload.batch_id)
     if not released:
         active, current_id, _ = get_instagram_batch_state()
