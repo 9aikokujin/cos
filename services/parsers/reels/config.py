@@ -17,6 +17,7 @@ class Config(BaseSettings):
     )
     INSTAGRAM_BATCH_CALLBACK_URL: str = "https://cosmeya.dev-klick.cyou/api/v1/instagram-batch/release"
     INSTAGRAM_BATCH_CALLBACK_TOKEN: str | None = None
+    INSTAGRAM_BATCH_STATE_DIR: str = "/tmp/instagram_batch_state"
 
     model_config = {
         "env_file": ".env"

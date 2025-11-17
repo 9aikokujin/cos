@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import httpx
 from core.parser import InstagramParser
+from utils.batch_state import BatchProgressStore
 from utils.logger import TCPLogger
 
 
@@ -39,6 +40,7 @@ class InstagramBatchRunner:
         channels_api_token: Optional[str] = None,
         channels_per_wave: int = 4,
         pause_between_waves_seconds: int = 300,
+        progress_store: Optional[BatchProgressStore] = None,
     ):
         self.parser = parser
         self.logger = logger or parser.logger
@@ -49,6 +51,7 @@ class InstagramBatchRunner:
         self.channels_api_token = channels_api_token
         self.channels_per_wave = max(0, int(channels_per_wave))
         self.pause_between_waves_seconds = max(0, int(pause_between_waves_seconds))
+        self.progress_store = progress_store
 
     def _normalize_tasks(
         self,
@@ -119,6 +122,7 @@ class InstagramBatchRunner:
         max_retries: Optional[int] = None,
         retry_pause_seconds: int = 600,
         refetch_on_full_failure: bool = True,
+        batch_id: Optional[str] = None,
     ) -> None:
         """
         Последовательно обходит каналы Instagram, используя заранее подготовленные cookies.
@@ -127,6 +131,24 @@ class InstagramBatchRunner:
         tasks = self._normalize_tasks(channel_tasks)
         if not tasks:
             self.logger.send("INFO", "⚠️ Нет каналов для batch-парсинга Instagram.")
+            return
+
+        processed_cache: set[int] = set()
+        processed_since_pause = 0
+        if batch_id and self.progress_store:
+            processed_cache = self.progress_store.load(batch_id)
+            if processed_cache:
+                tasks = self._filter_processed(tasks, processed_cache, batch_id)
+                processed_since_pause = (
+                    len(processed_cache) % self.channels_per_wave
+                    if self.channels_per_wave
+                    else 0
+                )
+        if not tasks:
+            self.logger.send(
+                "INFO",
+                "ℹ️ Batch-очередь пуста: все каналы ранее завершились успешно, завершаем задачу.",
+            )
             return
 
         if not self.parser.configure_proxy_list(list(proxy_list)):
@@ -138,7 +160,6 @@ class InstagramBatchRunner:
             return
 
         attempt = 1
-        processed_since_pause = 0
         while True:
             success_any = False
             sessions_depleted = False
@@ -152,6 +173,9 @@ class InstagramBatchRunner:
                 )
                 if success:
                     success_any = True
+                    if batch_id and self.progress_store:
+                        self.progress_store.mark_processed(batch_id, task.channel_id)
+                        processed_cache.add(task.channel_id)
                 if not sessions:
                     sessions_depleted = True
                     self.logger.send(
@@ -207,7 +231,7 @@ class InstagramBatchRunner:
             if refetch_on_full_failure:
                 refreshed = await self.fetch_channels_from_api()
                 if refreshed:
-                    tasks = refreshed
+                    tasks = self._filter_processed(refreshed, processed_cache, batch_id)
                     self.logger.send("INFO", f"♻️ Обновлён список каналов: {len(tasks)} записей.")
                 elif not tasks:
                     self.logger.send("INFO", "⚠️ После повторной загрузки каналов список пуст — выходим.")
@@ -217,6 +241,29 @@ class InstagramBatchRunner:
             if not sessions:
                 self.logger.send("INFO", "❌ Не удалось восстановить валидные cookies после ожидания, batch остановлен.")
                 break
+
+    def _filter_processed(
+        self,
+        tasks: list[InstagramChannelTask],
+        processed_cache: set[int],
+        batch_id: Optional[str],
+    ) -> list[InstagramChannelTask]:
+        if not processed_cache:
+            return tasks
+        filtered = [task for task in tasks if task.channel_id not in processed_cache]
+        skipped = len(tasks) - len(filtered)
+        if skipped > 0:
+            if batch_id:
+                self.logger.send(
+                    "INFO",
+                    f"♻️ Batch {batch_id}: пропускаем {skipped} каналов, уже обработаны ранее.",
+                )
+            else:
+                self.logger.send(
+                    "INFO",
+                    f"♻️ Пропущено {skipped} каналов из-за ранее сохранённого прогресса.",
+                )
+        return filtered
 
     async def _process_task(
         self,
