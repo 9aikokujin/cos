@@ -48,16 +48,29 @@ class RabbitMQParserClient:
             accounts: list = task_data.get("accounts") or []
             proxy_list: list = task_data.get("proxy_list") or []
             parse_started_at = task_data.get("parse_started_at")
+            batch_raw_tasks = task_data.get("channels") or []
+            batch_id = task_data.get("batch_id")
+
+            batch_channel_ids = [
+                str(entry.get("channel_id"))
+                for entry in batch_raw_tasks
+                if entry.get("channel_id") is not None
+            ]
+            if task_type == "instagram_batch":
+                channels_display = ", ".join(batch_channel_ids) if batch_channel_ids else "API_FETCH"
+                target_display = f"batch_id={batch_id or '-'} channels=[{channels_display}]"
+            else:
+                target_display = url or channel_id or "unknown"
 
             accounts_count = len(accounts)
             proxies_count = len(proxy_list)
             self.logger.send(
                 "INFO",
-                f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url} "
+                f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {target_display} "
                 f"(аккаунтов: {accounts_count}, прокси: {proxies_count})",
             )
             print(
-                f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url} "
+                f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {target_display} "
                 f"(аккаунтов: {accounts_count}, прокси: {proxies_count})"
             )
             if task_type == "channel":
@@ -72,7 +85,6 @@ class RabbitMQParserClient:
                             parse_started_at=parse_started_at,
                         )
             elif task_type == "instagram_batch":
-                batch_id = task_data.get("batch_id")
                 runner = InstagramBatchRunner(
                     parser=self.parser,
                     logger=self.logger,
@@ -85,7 +97,7 @@ class RabbitMQParserClient:
                     pause_between_waves_seconds=task_data.get("pause_between_waves_seconds", 300),
                     progress_store=self.progress_store,
                 )
-                batch_tasks = task_data.get("channels") or []
+                batch_tasks = batch_raw_tasks or []
                 if not batch_tasks:
                     self.logger.send("INFO", "ℹ️ Batch-задача не содержит каналов — загружаем их из API.")
                     batch_tasks = await runner.fetch_channels_from_api()

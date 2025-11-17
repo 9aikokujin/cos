@@ -244,3 +244,4 @@ volumes:
   cos_clickhouse_logs:
   cos_es_data:
   cos_uploads:
+  cos_instagram_batch_state:
