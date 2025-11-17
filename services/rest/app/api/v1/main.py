@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from sqlalchemy.sql.expression import select
-from app.api.v1.endpoints import user, channel, proxy, videos, account, videohistory
+from app.api.v1.endpoints import user, channel, proxy, videos, account, videohistory, instagram_batch
 from app.core.db import SessionLocal
 from app.models.user import User, UserRole
 from app.services.user import UserService
@@ -86,3 +86,4 @@ api_router.include_router(account.router, prefix="/accounts",
                           tags=["Accounts"])
 api_router.include_router(videohistory.router, prefix="/videohistory",
                           tags=["VideoHistory"])
+api_router.include_router(instagram_batch.router)

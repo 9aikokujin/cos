@@ -105,6 +105,10 @@ CI_CD_TYPE_PRIORITY = [
 
 scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)
 INSTAGRAM_BATCH_JOB_ID = "instagram_batch_job"
+INSTAGRAM_BATCH_LOCK_TIMEOUT_MINUTES = 120
+_instagram_batch_active = False
+_instagram_batch_id: Optional[str] = None
+_instagram_batch_started_at: Optional[datetime] = None
 
 
 def _remove_instagram_batch_job():
@@ -150,6 +154,44 @@ def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
 
     hours = sorted({morning_hour, evening_hour})
     return hours, minute
+
+
+def _mark_instagram_batch_state(active: bool, batch_id: Optional[str] = None):
+    global _instagram_batch_active, _instagram_batch_id, _instagram_batch_started_at
+    _instagram_batch_active = active
+    if active:
+        _instagram_batch_id = batch_id
+        _instagram_batch_started_at = datetime.now(timezone.utc)
+    else:
+        _instagram_batch_id = None
+        _instagram_batch_started_at = None
+
+
+def is_instagram_batch_active() -> bool:
+    return _instagram_batch_active
+
+
+def get_instagram_batch_state() -> tuple[bool, Optional[str], Optional[datetime]]:
+    return _instagram_batch_active, _instagram_batch_id, _instagram_batch_started_at
+
+
+def release_instagram_batch(batch_id: Optional[str] = None) -> bool:
+    active, current_batch_id, _ = get_instagram_batch_state()
+    if not active:
+        return False
+    if batch_id and current_batch_id and batch_id != current_batch_id:
+        return False
+    _mark_instagram_batch_state(False)
+    print("ℹ️ Instagram batch lock released.")
+    return True
+
+
+async def _auto_release_instagram_batch(batch_id: str):
+    await asyncio.sleep(max(1, INSTAGRAM_BATCH_LOCK_TIMEOUT_MINUTES * 60))
+    active, current_batch_id, _ = get_instagram_batch_state()
+    if active and current_batch_id == batch_id:
+        print("⚠️ Авто-сброс блокировки Instagram batch по таймауту.")
+        _mark_instagram_batch_state(False)
 
 
 def _normalize_parse_started_at(
@@ -405,6 +447,10 @@ async def process_recurring_task(
                         continue
                 return
 
+            if channel.type != ChannelType.INSTAGRAM and is_instagram_batch_active():
+                print(f"⏸ Instagram batch активен — пропускаем отправку задачи для канала {channel.id} ({channel.type.value}).")
+                return
+
             # Получаем свежие аккаунты и прокси
             accounts = (await db.execute(select(Account).where(Account.is_active.is_(True)))).scalars().all()
             proxies = (await db.execute(select(Proxy))).scalars().all()
@@ -462,6 +508,14 @@ async def dispatch_instagram_batch(reason: Optional[str] = None) -> bool:
 
     proxy_payload = [p.proxy_str for p in proxies if p.for_likee is not True]
     parse_started_at = datetime.now(MOSCOW_TZ).isoformat()
+    batch_id = f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-{len(instagram_channels)}"
+    _mark_instagram_batch_state(True, batch_id=batch_id)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_auto_release_instagram_batch(batch_id))
+    except RuntimeError:
+        pass
+
     payload = {
         "type": "instagram_batch",
         "channels": [
@@ -476,10 +530,11 @@ async def dispatch_instagram_batch(reason: Optional[str] = None) -> bool:
         "accounts": [account.account_str for account in accounts],
         "proxy_list": proxy_payload,
         "parse_started_at": parse_started_at,
+        "batch_id": batch_id,
     }
 
     rabbit_producer.send_task("parsing_instagram", payload)
-    message = f"📤 Отправлена batch-задача Instagram на {len(instagram_channels)} каналов"
+    message = f"📤 Отправлена batch-задача Instagram на {len(instagram_channels)} каналов (batch_id={batch_id})"
     if reason:
         message += f" ({reason})"
     print(message)
