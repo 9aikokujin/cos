@@ -121,17 +121,25 @@ class RabbitMQParserClient:
         await asyncio.Future()
 
     async def _notify_batch_release(self, batch_id: str):
-        if self.progress_store:
-            self.progress_store.clear(batch_id)
         callback_url = getattr(config, "INSTAGRAM_BATCH_CALLBACK_URL", None)
-        token = getattr(config, "INSTAGRAM_BATCH_CALLBACK_TOKEN", None)
-        if not callback_url:
-            return
-        payload = {"batch_id": batch_id, "token": token or ""}
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(callback_url, json=payload)
-                resp.raise_for_status()
-                self.logger.send("INFO", f"📬 Уведомили сервис о завершении batch {batch_id}")
-        except Exception as exc:
-            self.logger.send("INFO", f"⚠️ Не удалось уведомить о завершении batch {batch_id}: {exc}")
+        token = getattr(config, "INSTAGRAM_BATCH_CALLBACK_TOKEN", None) or ""
+        payload = {"batch_id": batch_id, "token": token}
+        notified = False
+
+        if callback_url:
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(callback_url, json=payload)
+                    resp.raise_for_status()
+                    self.logger.send("INFO", f"📬 Уведомили сервис о завершении batch {batch_id}")
+                    notified = True
+            except Exception as exc:
+                self.logger.send(
+                    "INFO",
+                    f"⚠️ Не удалось уведомить о завершении batch {batch_id}: {exc}",
+                )
+        else:
+            notified = True
+
+        if notified and self.progress_store:
+            self.progress_store.clear(batch_id)
