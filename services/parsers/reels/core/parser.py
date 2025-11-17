@@ -102,7 +102,7 @@ class InstagramParser:
         status_text = "Успешно спарсили" if success else "Не удалось спарсить"
         self.logger.send(
             "INFO",
-            f"{status_icon} {status_text} {url} с {channel_id} "
+            f"{status_icon} {status_text} {url} (канал {channel_id}) "
             f"кол-во видео - {video_count}, кол-во просмотров - {total_views}, "
             f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
         )

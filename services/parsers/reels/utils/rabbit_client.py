@@ -28,7 +28,6 @@ class RabbitMQParserClient:
     async def handle_message(self, message: IncomingMessage):
         async with message.process():
             task_data_str = message.body.decode()
-            print(task_data_str)
             task_data = json.loads(task_data_str)
             url: str = task_data.get("url")
             task_type: str = task_data.get("type")
@@ -38,8 +37,17 @@ class RabbitMQParserClient:
             proxy_list: list = task_data.get("proxy_list") or []
             parse_started_at = task_data.get("parse_started_at")
 
-            self.logger.send("INFO", f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url} с аккаунтами: {accounts} и прокси: {proxy_list}")
-            print(f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url}")
+            accounts_count = len(accounts)
+            proxies_count = len(proxy_list)
+            self.logger.send(
+                "INFO",
+                f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url} "
+                f"(аккаунтов: {accounts_count}, прокси: {proxies_count})",
+            )
+            print(
+                f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url} "
+                f"(аккаунтов: {accounts_count}, прокси: {proxies_count})"
+            )
             if task_type == "channel":
                 self.logger.send("INFO", f"Начал парсить канал {url}")
                 data = await self.parser.parse_channel(
