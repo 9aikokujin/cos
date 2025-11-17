@@ -366,10 +366,7 @@ class InstagramParser:
         self.invalid_accounts.clear()
 
         proxy_pool = self._dedupe_proxies(self.proxy_list or [])
-        if proxy_pool:
-            if None not in proxy_pool:
-                proxy_pool.append(None)
-        else:
+        if not proxy_pool:
             proxy_pool = [None]
 
         proxy_pool = list(proxy_pool)
@@ -552,12 +549,7 @@ class InstagramParser:
                 self.logger.send("INFO", f"⚠️ Ошибка при проверке сохранённых cookies {username}: {exc}")
 
         proxy_pool = self._dedupe_proxies(proxy_candidates or self.proxy_list or [])
-        if proxy_candidates is None:
-            if proxy_pool and None not in proxy_pool:
-                proxy_pool.append(None)
-            if not proxy_pool:
-                proxy_pool = [None]
-        elif not proxy_pool:
+        if not proxy_pool:
             proxy_pool = [None]
 
         for proxy_str in proxy_pool:

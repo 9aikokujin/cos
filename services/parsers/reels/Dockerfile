@@ -35,6 +35,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/ playwright install-deps
 RUN PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/ playwright install chromium
 
+RUN mkdir -p /app/storage/instagram_batch_state
+
 COPY . .
 
 CMD ["python", "main.py"]

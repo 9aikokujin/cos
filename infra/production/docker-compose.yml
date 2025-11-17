@@ -42,6 +42,7 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       LOGSTASH_HOST: ${COS_LOGSTASH_HOST}
       LOGSTASH_PORT: ${COS_LOGSTASH_PORT}
+      INSTAGRAM_BATCH_STATE_DIR: /app/storage/instagram_batch_state
     depends_on:
       - postgres
       - rabbitmq
@@ -52,6 +53,8 @@ services:
       - logstash
       - rest-api
       - frontend
+    volumes:
+      - cos_instagram_batch_state:/app/storage/instagram_batch_state
     restart: always
 
   short-parser:
@@ -265,3 +268,4 @@ volumes:
   # cos_clickhouse_logs:
   cos_es_data:
   cos_uploads:
+  cos_instagram_batch_state:
