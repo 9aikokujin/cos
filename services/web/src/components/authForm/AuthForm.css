@@ -3,6 +3,8 @@
   background-color: var(--color-white);
   width: 100%;
   margin-top: 59px;
+  margin-bottom: 20px;
+  overflow: auto;
 }
 
 .auth_form_container {
@@ -22,9 +24,9 @@
 }
 
 .auth_form_btn {
-    height: 45px;
-    width: 100%;
-    margin-top: 45px;
+  height: 45px;
+  width: 100%;
+  margin-top: 45px;
 }
 
 .social_form {
@@ -33,16 +35,33 @@
   gap: 22px;
 }
 
+.social_field {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
 .social-input-wrapper {
-    max-height: 0;
-    opacity: 0;
-    transition: all 0.3s ease;
-    margin-top: 0;
+  position: relative;
+}
+
+.social-input-wrapper ._social_close_btn {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: inherit;
+  box-shadow: none;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+}
+
+@media (max-width: 450px) {
+  .social_add_btn {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
-  
-  .social-input-wrapper.visible {
-    max-height: 45px; /* достаточно для одного input */
-    opacity: 1;
-    margin-top: 20px;
-  }
-  
+}
+

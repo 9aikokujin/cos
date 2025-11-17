@@ -83,8 +83,6 @@ if __name__ == "__main__":
         "MecAgR:v5fbu6@186.65.115.105:9825",
     ]
 
-# F0AIJxsjsK:0KaDLg5uES@109.120.131.169:31162\nd8mAnk3QEW:mJCDjUZQXt@45.150.35.133:2089\nquUqYxfzsN:IVsnELV4fT@45.150.35.246:4625\nRfbRo1W0gz:Rk5fwJnepP@45.150.35.131:6302\njcB7GBuBdw:wnOUcC6uC2@45.150.35.40:5228\nrJexYOOn6O:tjd4Q4SgTN@45.150.35.194:5733\nZoA3aDjewp:lgRGWxPzR5@45.150.35.117:3594\nPSKbldOuol:YRinsMQpQB@45.150.35.74:4212\naNpriSRLmG:RVEBaYMSnq@45.150.35.145:2790\num2y7QWzne:3NVuS7S93n@45.150.35.180:5861\ngkmSRIalTf:xGROjfA2LF@45.150.35.154:3907\nhejdZusT4h:BJYdsmEZKI@45.150.35.10:3661\nnbyr75VACh:I5WWfT2oLt@45.150.35.215:4812\nfgOfy2ylm9:9fKs4syWBG@45.150.35.48:47557
-
     # working = test_all_proxies(proxies, test_url="https://ya.ru/", timeout=10)
     # print(f"Всего рабочих прокси: {len(working)}")
 

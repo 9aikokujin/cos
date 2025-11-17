@@ -73,6 +73,31 @@ class ShortsParser:
             f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
         )
 
+    async def _start_playwright(self):
+        try:
+            return await async_playwright().start()
+        except Exception as exc:
+            self.logger.send("INFO", f"❌ Не удалось запустить Playwright: {exc}")
+            return None
+
+    async def _safe_close(self, obj, label: str, method: str = "close"):
+        if not obj:
+            return
+        closer = getattr(obj, method, None)
+        if not closer:
+            return
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Ошибка закрытия {label}: {exc}")
+
+    async def _cleanup_browser_stack(self, page=None, context=None, browser=None):
+        await self._safe_close(page, "page")
+        await self._safe_close(context, "context")
+        await self._safe_close(browser, "browser")
+
     def reset_dom_state(self):
         """Сбрасывает накопленные DOM-данные перед новой попыткой парсинга."""
         self.dom_images = {}
@@ -1361,7 +1386,11 @@ class ShortsParser:
             page = None
 
             try:
-                playwright = await async_playwright().start()
+                playwright = await self._start_playwright()
+                if not playwright:
+                    self.logger.send("INFO", "❌ Не удалось инициализировать Playwright, пробуем следующую попытку.")
+                    await asyncio.sleep(1.0)
+                    continue
                 browser, context, page = await create_browser_with_proxy(current_proxy, playwright)
 
                 self.logger.send("INFO", "🔍 Загружаем страницу Shorts…")
@@ -1404,15 +1433,8 @@ class ShortsParser:
             except Exception as main_error:
                 self.logger.send("INFO", f"Критическая ошибка при работе с Playwright: {main_error}")
             finally:
-                for obj, name in [(page, "page"), (context, "context"), (browser, "browser"), (playwright, "playwright")]:
-                    if obj:
-                        try:
-                            if name == "playwright":
-                                await obj.stop()
-                            else:
-                                await obj.close()
-                        except Exception as e:
-                            self.logger.send("INFO", f"Ошибка закрытия {name}: {e}")
+                await self._cleanup_browser_stack(page, context, browser)
+                await self._safe_close(playwright, "playwright", method="stop")
 
             total_collected = len(self.dom_order)
             if total_collected > best_total:

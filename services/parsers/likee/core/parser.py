@@ -56,6 +56,31 @@ class LikeeParser:
             f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
         )
 
+    async def _start_playwright(self):
+        try:
+            return await async_playwright().start()
+        except Exception as exc:
+            self.logger.send("INFO", f"❌ Не удалось запустить Playwright: {exc}")
+            return None
+
+    async def _safe_close(self, obj, label: str, method: str = "close"):
+        if not obj:
+            return
+        closer = getattr(obj, method, None)
+        if not closer:
+            return
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Ошибка закрытия {label}: {exc}")
+
+    async def _cleanup_browser_stack(self, page=None, context=None, browser=None):
+        await self._safe_close(page, "page")
+        await self._safe_close(context, "context")
+        await self._safe_close(browser, "browser")
+
     def _format_proxy(self, proxy: Optional[str]) -> Optional[str]:
         if not proxy:
             return None
@@ -212,22 +237,7 @@ class LikeeParser:
                 await asyncio.sleep(5)
 
             finally:
-                # Закрываем ресурсы этой попытки
-                if page:
-                    try:
-                        await page.close()
-                    except:
-                        pass
-                if context:
-                    try:
-                        await context.close()
-                    except:
-                        pass
-                if browser:
-                    try:
-                        await browser.close()
-                    except:
-                        pass
+                await self._cleanup_browser_stack(page, context, browser)
 
         return None
 
@@ -308,21 +318,7 @@ class LikeeParser:
                     break
 
         finally:
-            if page:
-                try:
-                    await page.close()
-                except:
-                    pass
-            if context:
-                try:
-                    await context.close()
-                except:
-                    pass
-            if browser:
-                try:
-                    await browser.close()
-                except:
-                    pass
+            await self._cleanup_browser_stack(page, context, browser)
 
         self.logger.send("INFO", f"📦 Всего собрано видео: {len(all_videos)}")
         return all_videos
@@ -442,12 +438,11 @@ class LikeeParser:
                 success and processed_count > 0,
             )
 
-        # Объявляем ресурсы Playwright
-        playwright = None
+        playwright = await self._start_playwright()
+        if not playwright:
+            return
 
         try:
-            playwright = await async_playwright().start()
-
             if proxy_list is None:
                 proxy_list = []
             elif not isinstance(proxy_list, list):
@@ -612,13 +607,7 @@ class LikeeParser:
 
         finally:
             # Централизованное закрытие Playwright
-            if playwright:
-                try:
-                    await playwright.stop()
-                except Exception as e:
-                    self.logger.send("INFO", f"Ошибка при остановке Playwright: {e}")
-                else:
-                    self.logger.send("INFO", "✅ Playwright успешно остановлен")
+            await self._safe_close(playwright, "playwright", method="stop")
             log_final(processed_count > 0)
 
 

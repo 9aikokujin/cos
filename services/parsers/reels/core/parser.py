@@ -107,6 +107,31 @@ class InstagramParser:
             f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
         )
 
+    async def _start_playwright(self):
+        try:
+            return await async_playwright().start()
+        except Exception as exc:
+            self.logger.send("INFO", f"❌ Не удалось запустить Playwright: {exc}")
+            return None
+
+    async def _safe_close(self, obj, label: str, method: str = "close"):
+        if not obj:
+            return
+        closer = getattr(obj, method, None)
+        if not closer:
+            return
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Ошибка закрытия {label}: {exc}")
+
+    async def _cleanup_browser_stack(self, page=None, context=None, browser=None):
+        await self._safe_close(page, "page")
+        await self._safe_close(context, "context")
+        await self._safe_close(browser, "browser")
+
     def _load_cookie_store(self) -> Dict[str, Dict[str, Any]]:
         if self.cookie_file_path.exists():
             try:
@@ -536,7 +561,9 @@ class InstagramParser:
             proxy_pool = [None]
 
         for proxy_str in proxy_pool:
-            playwright = await async_playwright().start()
+            playwright = await self._start_playwright()
+            if not playwright:
+                continue
             browser = None
             context = None
             page = None
@@ -576,15 +603,8 @@ class InstagramParser:
             except Exception as exc:
                 self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {proxy_str}: {exc}")
             finally:
-                if browser:
-                    try:
-                        await browser.close()
-                    except Exception:
-                        pass
-                try:
-                    await playwright.stop()
-                except Exception:
-                    pass
+                await self._cleanup_browser_stack(page, context, browser)
+                await self._safe_close(playwright, "playwright", method="stop")
         return None
 
     async def _request_with_sessions(

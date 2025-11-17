@@ -536,7 +536,9 @@ class InstagramParser:
             proxy_pool = [None]
 
         for proxy_str in proxy_pool:
-            playwright = await async_playwright().start()
+            playwright = await self._start_playwright()
+            if not playwright:
+                continue
             browser = None
             context = None
             page = None
@@ -576,15 +578,8 @@ class InstagramParser:
             except Exception as exc:
                 self.logger.send("INFO", f"⚠️ Ошибка авторизации {username} через прокси {proxy_str}: {exc}")
             finally:
-                if browser:
-                    try:
-                        await browser.close()
-                    except Exception:
-                        pass
-                try:
-                    await playwright.stop()
-                except Exception:
-                    pass
+                await self._cleanup_browser_stack(page, context, browser)
+                await self._safe_close(playwright, "playwright", method="stop")
         return None
 
     async def _request_with_sessions(
@@ -959,6 +954,36 @@ class InstagramParser:
     #             two_factor_page,
     #             f"https://2fa.fb.rip/{two_factor_code}", str(e))
     #         self.logger.send("INFO", f"Не удалось получить 2FA код: {e}")
+    #         return None
+    #     finally:
+    #         await two_factor_page.close()
+
+    # async def get_2fa_code(self, page, two_factor_code):
+    #     two_factor_page = await page.context.new_page()
+    #     try:
+    #         await two_factor_page.goto(
+    #             f"https://2fa.fb.rip/{two_factor_code}", timeout=60000)
+    #         await two_factor_page.wait_for_selector(
+    #             "div#verifyCode", timeout=60000)
+    #         two_factor_code_element = await two_factor_page.query_selector(
+    #             "div#verifyCode")
+    #         if two_factor_code_element:
+    #             code = await two_factor_code_element.inner_text()
+    #             code = re.sub(r"\D", "", code)
+    #             if len(code) == 6 and code.isdigit():
+    #                 print(f"2FA код успешно получен: {code}")
+    #                 return code
+    #             else:
+    #                 print(f"Неверный формат 2FA кода: {code}")
+    #                 return None
+    #         else:
+    #             print("Элемент 2FA кода не найден")
+    #             return None
+    #     except Exception as e:
+    #         await self.save_html_on_error(
+    #             two_factor_page,
+    #             f"https://2fa.fb.rip/{two_factor_code}", str(e))
+    #         print(f"Не удалось получить 2FA код: {e}")
     #         return None
     #     finally:
     #         await two_factor_page.close()
