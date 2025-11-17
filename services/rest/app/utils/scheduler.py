@@ -152,6 +152,40 @@ def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
     return hours, minute
 
 
+def _normalize_parse_started_at(
+    now: datetime,
+    schedule_offset_minutes: Optional[int],
+    schedule_wave_anchor: Optional[str],
+) -> datetime:
+    """
+    Возвращает скорректированное время начала парсинга.
+    Для ежедневного расписания (wave_anchor == "daily") учитывает смещение,
+    чтобы у каналов, перенесённых за полночь из-за offset, оставалась дата исходного слота.
+    """
+    if schedule_wave_anchor != "daily" or schedule_offset_minutes is None:
+        return now
+
+    morning_total = 5 * 60 + schedule_offset_minutes
+    evening_total = 20 * 60 + schedule_offset_minutes
+    expected_minute = morning_total % 60
+
+    if now.minute != expected_minute:
+        return now
+
+    schedule_points = (
+        (morning_total, (morning_total // 60) % 24),
+        (evening_total, (evening_total // 60) % 24),
+    )
+
+    for total_minutes, expected_hour in schedule_points:
+        if now.hour == expected_hour:
+            day_shift = total_minutes // 1440
+            if day_shift:
+                return now - timedelta(days=day_shift)
+            return now
+    return now
+
+
 def schedule_channel_task(
     channel_id: int,
     *,
@@ -167,6 +201,10 @@ def schedule_channel_task(
         hour=hour_expr,
         minute=minute,
         args=[channel_id, "channel"],
+        kwargs={
+            "schedule_offset_minutes": offset_minutes,
+            "schedule_wave_anchor": "daily",
+        },
         id=job_id,
         max_instances=1,
         coalesce=True,
@@ -204,7 +242,14 @@ def schedule_channel_task(
     if run_immediately:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(process_recurring_task(channel_id, "channel"))
+            loop.create_task(
+                process_recurring_task(
+                    channel_id,
+                    "channel",
+                    schedule_offset_minutes=offset_minutes,
+                    schedule_wave_anchor="daily",
+                )
+            )
             immediate_dispatched = True
         except RuntimeError:
             print(f"⚠️ Не удалось инициировать немедленный запуск для канала {channel_id}: нет активного цикла событий")
@@ -323,6 +368,10 @@ async def restore_scheduled_tasks_cicd(
             minutes=cycle_minutes,
             next_run_time=next_run,
             args=[channel.id, "channel"],
+            kwargs={
+                "schedule_wave_anchor": "cicd",
+                "schedule_offset_minutes": step_minutes * index,
+            },
             id=job_id,
             max_instances=1,
             coalesce=True,
@@ -338,7 +387,12 @@ async def restore_scheduled_tasks_cicd(
         await dispatch_instagram_batch("cicd_startup")
 
 
-async def process_recurring_task(task_id: int, type: str):
+async def process_recurring_task(
+    task_id: int,
+    type: str,
+    schedule_offset_minutes: Optional[int] = None,
+    schedule_wave_anchor: Optional[str] = None,
+):
     """Отправляет задачу парсинга с актуальными данными из БД."""
     async with SessionLocal() as db:
         try:
@@ -358,7 +412,13 @@ async def process_recurring_task(task_id: int, type: str):
             generic_proxies = [p.proxy_str for p in proxies if p.for_likee is not True]
             proxy_payload = likee_proxies if channel.type == ChannelType.LIKEE else generic_proxies
 
-            parse_started_at = datetime.now(MOSCOW_TZ).isoformat()
+            now_local = datetime.now(MOSCOW_TZ)
+            started_at_dt = _normalize_parse_started_at(
+                now_local,
+                schedule_offset_minutes,
+                schedule_wave_anchor,
+            )
+            parse_started_at = started_at_dt.isoformat()
             rabbit_producer.send_task(
                 f"parsing_{channel.type.value.lower()}",
                 {
