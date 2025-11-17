@@ -2,6 +2,7 @@ import asyncio
 import json
 
 from aio_pika import connect_robust, IncomingMessage
+import httpx
 from config import config
 from core.batch_runner import InstagramBatchRunner
 from core.parser import InstagramParser
@@ -60,6 +61,7 @@ class RabbitMQParserClient:
                             parse_started_at=parse_started_at,
                         )
             elif task_type == "instagram_batch":
+                batch_id = task_data.get("batch_id")
                 runner = InstagramBatchRunner(
                     parser=self.parser,
                     logger=self.logger,
@@ -68,6 +70,8 @@ class RabbitMQParserClient:
                     collect_attempts=task_data.get("collect_attempts", 3),
                     channels_api_url=config.CHANNELS_API_URL,
                     channels_api_token=config.CHANNELS_API_TOKEN,
+                    channels_per_wave=task_data.get("channels_per_wave", 4),
+                    pause_between_waves_seconds=task_data.get("pause_between_waves_seconds", 300),
                 )
                 batch_tasks = task_data.get("channels") or []
                 if not batch_tasks:
@@ -79,12 +83,16 @@ class RabbitMQParserClient:
                     return
 
                 self.logger.send("INFO", f"🚀 Batch Instagram: получено {len(batch_tasks)} каналов.")
-                await runner.run(
-                    channel_tasks=batch_tasks,
-                    accounts=accounts,
-                    proxy_list=proxy_list,
-                    max_retries=task_data.get("max_retries"),
-                )
+                try:
+                    await runner.run(
+                        channel_tasks=batch_tasks,
+                        accounts=accounts,
+                        proxy_list=proxy_list,
+                        max_retries=task_data.get("max_retries"),
+                    )
+                finally:
+                    if batch_id:
+                        await self._notify_batch_release(batch_id)
 
             # if task_type == "video":
             #     self.logger.send("INFO", f"Начал парсить видео {url}")
@@ -98,3 +106,17 @@ class RabbitMQParserClient:
         await self.queue.consume(self.handle_message, no_ack=False)
 
         await asyncio.Future()
+
+    async def _notify_batch_release(self, batch_id: str):
+        callback_url = getattr(config, "INSTAGRAM_BATCH_CALLBACK_URL", None)
+        token = getattr(config, "INSTAGRAM_BATCH_CALLBACK_TOKEN", None)
+        if not callback_url:
+            return
+        payload = {"batch_id": batch_id, "token": token or ""}
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(callback_url, json=payload)
+                resp.raise_for_status()
+                self.logger.send("INFO", f"📬 Уведомили сервис о завершении batch {batch_id}")
+        except Exception as exc:
+            self.logger.send("INFO", f"⚠️ Не удалось уведомить о завершении batch {batch_id}: {exc}")

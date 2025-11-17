@@ -37,6 +37,8 @@ class InstagramBatchRunner:
         collect_attempts: int = 1,
         channels_api_url: Optional[str] = None,
         channels_api_token: Optional[str] = None,
+        channels_per_wave: int = 4,
+        pause_between_waves_seconds: int = 300,
     ):
         self.parser = parser
         self.logger = logger or parser.logger
@@ -45,6 +47,8 @@ class InstagramBatchRunner:
         self.collect_attempts = max(1, collect_attempts)
         self.channels_api_url = channels_api_url
         self.channels_api_token = channels_api_token
+        self.channels_per_wave = max(0, int(channels_per_wave))
+        self.pause_between_waves_seconds = max(0, int(pause_between_waves_seconds))
 
     def _normalize_tasks(
         self,
@@ -134,11 +138,12 @@ class InstagramBatchRunner:
             return
 
         attempt = 1
+        processed_since_pause = 0
         while True:
             success_any = False
             sessions_depleted = False
 
-            for task in tasks:
+            for idx, task in enumerate(tasks, start=1):
                 success, sessions = await self._process_task(
                     task,
                     sessions,
@@ -154,6 +159,27 @@ class InstagramBatchRunner:
                         f"❌ Сессии закончились на канале {task.channel_id}, дальнейшая обработка невозможна.",
                     )
                     break
+
+                if self.channels_per_wave:
+                    processed_since_pause += 1
+                    threshold_reached = processed_since_pause >= self.channels_per_wave
+                    if threshold_reached:
+                        processed_since_pause = 0
+                        if (
+                            self.pause_between_waves_seconds > 0
+                            and not sessions_depleted
+                            and idx < len(tasks)
+                        ):
+                            wait_display = (
+                                f"{self.pause_between_waves_seconds // 60} мин"
+                                if self.pause_between_waves_seconds % 60 == 0
+                                else f"{self.pause_between_waves_seconds} сек"
+                            )
+                            self.logger.send(
+                                "INFO",
+                                f"⏸ Обработано {self.channels_per_wave} каналов, ждём {wait_display} для снижения нагрузки.",
+                            )
+                            await asyncio.sleep(self.pause_between_waves_seconds)
 
             if sessions_depleted:
                 break

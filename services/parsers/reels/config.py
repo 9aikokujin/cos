@@ -15,6 +15,8 @@ class Config(BaseSettings):
         "auth_date=1756811077&signature=sGPn4HKdOKeWe4iWsqnqUrx0g1D7hxCjPlLKoGCfPCCC79C5BGr6Jf4nQ8vfz8v75u3B"
         "ZleWbKAItfxM0VZkCA&hash=6e2fcae017ce013d8e8d05f160125443dabb4c7bcc08cb92f9e827b90d6d8ae3"
     )
+    INSTAGRAM_BATCH_CALLBACK_URL: str = "https://cosmeya.dev-klick.cyou/api/v1/instagram-batch/release"
+    INSTAGRAM_BATCH_CALLBACK_TOKEN: str | None = None
 
     model_config = {
         "env_file": ".env"
