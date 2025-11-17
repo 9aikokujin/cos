@@ -1,17 +1,25 @@
 import asyncio
 import json
+from typing import Optional
 
 from aio_pika import connect_robust, IncomingMessage
 import httpx
 from config import config
 from core.batch_runner import InstagramBatchRunner
 from core.parser import InstagramParser
+from utils.batch_state import BatchProgressStore
 from utils.logger import TCPLogger
 
 
 class RabbitMQParserClient:
-    def __init__(self, amqp_url: str, queue_name: str,
-                 logger: TCPLogger, parser: InstagramParser):
+    def __init__(
+        self,
+        amqp_url: str,
+        queue_name: str,
+        logger: TCPLogger,
+        parser: InstagramParser,
+        progress_store: Optional[BatchProgressStore] = None,
+    ):
         self.amqp_url = amqp_url
         self.queue_name = queue_name
         self.logger = logger
@@ -19,6 +27,9 @@ class RabbitMQParserClient:
         self.connection = None
         self.channel = None
         self.queue = None
+        self.progress_store = progress_store or BatchProgressStore(
+            config.INSTAGRAM_BATCH_STATE_DIR
+        )
 
     async def connect(self):
         self.connection = await connect_robust(self.amqp_url)
@@ -72,6 +83,7 @@ class RabbitMQParserClient:
                     channels_api_token=config.CHANNELS_API_TOKEN,
                     channels_per_wave=task_data.get("channels_per_wave", 4),
                     pause_between_waves_seconds=task_data.get("pause_between_waves_seconds", 300),
+                    progress_store=self.progress_store,
                 )
                 batch_tasks = task_data.get("channels") or []
                 if not batch_tasks:
@@ -89,6 +101,7 @@ class RabbitMQParserClient:
                         accounts=accounts,
                         proxy_list=proxy_list,
                         max_retries=task_data.get("max_retries"),
+                        batch_id=batch_id,
                     )
                 finally:
                     if batch_id:
@@ -108,6 +121,8 @@ class RabbitMQParserClient:
         await asyncio.Future()
 
     async def _notify_batch_release(self, batch_id: str):
+        if self.progress_store:
+            self.progress_store.clear(batch_id)
         callback_url = getattr(config, "INSTAGRAM_BATCH_CALLBACK_URL", None)
         token = getattr(config, "INSTAGRAM_BATCH_CALLBACK_TOKEN", None)
         if not callback_url:
