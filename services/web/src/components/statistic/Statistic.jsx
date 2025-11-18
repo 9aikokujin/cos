@@ -30,7 +30,6 @@ const Statistic = () => {
           ? dayjs(filter.date_from).subtract(1, "day").format("YYYY-MM-DD")
           : undefined,
       };
-      console.log(patchedFilter);
 
       if (withTags) {
         const data = await API.statistic.getStatisticWithTags({
