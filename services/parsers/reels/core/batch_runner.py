@@ -38,8 +38,8 @@ class InstagramBatchRunner:
         collect_attempts: int = 1,
         channels_api_url: Optional[str] = None,
         channels_api_token: Optional[str] = None,
-        channels_per_wave: int = 4,
-        pause_between_waves_seconds: int = 300,
+        channels_per_wave: int = 5,
+        pause_between_waves_seconds: int = 150,
         progress_store: Optional[BatchProgressStore] = None,
     ):
         self.parser = parser
@@ -120,7 +120,7 @@ class InstagramBatchRunner:
         accounts: Sequence[str],
         proxy_list: Sequence[str],
         max_retries: Optional[int] = None,
-        retry_pause_seconds: int = 600,
+        retry_pause_seconds: int = 300,
         refetch_on_full_failure: bool = True,
         batch_id: Optional[str] = None,
     ) -> None:
