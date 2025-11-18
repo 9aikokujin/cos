@@ -305,10 +305,10 @@ async def restore_scheduled_tasks():
     Держите активным только один из вариантов ниже (раскомментируйте нужный).
     """
     # --- Ежедневная очередь 05:00 и 20:00 (оставьте включённой для боевого режима) ---
-    # await _restore_scheduled_tasks_daily()
+    await _restore_scheduled_tasks_daily()
 
     # --- CICD очередь: запуск через 7 минут и шагом 7 минут ---
-    await restore_scheduled_tasks_cicd()
+    # await restore_scheduled_tasks_cicd()
 
 
 async def _restore_scheduled_tasks_daily():
