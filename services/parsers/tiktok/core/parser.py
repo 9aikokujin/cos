@@ -27,6 +27,8 @@ from playwright.async_api import async_playwright, Page, Response, TimeoutError 
 
 from utils.logger import TCPLogger
 
+# давай хранить найденный videoCount и  найденные ссылки для каждого канала, но каждый раз все равно проверять актуальные ссылки на видео, так как владелец профиля может удалять 1-2 видео, если видео меньше на 10 единиц чем в предыдущий раз, 
+
 
 ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
 

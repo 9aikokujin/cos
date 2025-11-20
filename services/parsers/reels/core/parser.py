@@ -998,7 +998,7 @@ class InstagramParser:
         page.on("response", log_response)
 
         try:
-            self.logger.send("INFO", f"Начало авторизации для пользователя {username}")
+            self.logger.send("INFO", f"LOGIN: Начало авторизации для пользователя {username}")
 
             # Логируем среду
             user_agent = await page.evaluate("navigator.userAgent")
@@ -1013,22 +1013,22 @@ class InstagramParser:
 
             await page.goto("https://www.instagram.com", timeout=50000)
             await page.wait_for_load_state("networkidle", timeout=30000)
-            self.logger.send("INFO", "Страница загружена")
+            self.logger.send("INFO", "LOGIN: Страница загружена")
 
             # Обработка баннера cookies
-            self.logger.send("INFO", "Проверка наличия баннера cookies")
+            self.logger.send("INFO", "LOGIN: Проверка наличия баннера cookies")
             cookie_found = False
             cookie_selectors = [
                 'button:has-text("Allow all cookies")',
                 'button:has-text("Decline optional cookies")',
             ]
             for selector in cookie_selectors:
-                self.logger.send("INFO", f"Поиск кнопки cookies: {selector}")
+                self.logger.send("INFO", f"LOGIN: Поиск кнопки cookies: {selector}")
                 try:
                     await page.wait_for_selector(selector, timeout=5000)
                     btn = await page.query_selector(selector)
                     if btn and await btn.is_visible() and await btn.is_enabled():
-                        self.logger.send("INFO", f"Клик по кнопке cookies: {selector}")
+                        self.logger.send("INFO", f"LOGIN: Клик по кнопке cookies: {selector}")
                         await btn.click()
                         await page.wait_for_timeout(3000)
                         cookie_found = True
@@ -1037,10 +1037,10 @@ class InstagramParser:
                     self.logger.send("INFO", f"Селектор {selector} не сработал: {e}")
 
             if not cookie_found:
-                self.logger.send("INFO", "Баннер cookies не найден или не обработан — продолжаем")
+                self.logger.send("INFO", "LOGIN: Баннер cookies не найден или не обработан — продолжаем")
 
             # === КНОПКА "Log in" на главной ===
-            self.logger.send("INFO", "Поиск начальной кнопки Log in")
+            self.logger.send("INFO", "LOGIN: Поиск начальной кнопки Log in")
             login_button = await page.query_selector('button:has-text("Log in")')
             if not login_button:
                 await self.save_html_on_error(page, page.url, "Кнопка Log in не найдена")
@@ -1049,17 +1049,17 @@ class InstagramParser:
 
             is_visible = await login_button.is_visible()
             is_enabled = await login_button.is_enabled()
-            self.logger.send("INFO", f"Кнопка Log in видима: {is_visible}, активна: {is_enabled}")
+            self.logger.send("INFO", f"LOGIN: Кнопка Log in видима: {is_visible}, активна: {is_enabled}")
             if not (is_visible and is_enabled):
                 await self.save_html_on_error(page, page.url, "Кнопка Log in неактивна")
                 return None
 
-            self.logger.send("INFO", "Клик по кнопке Log in")
+            self.logger.send("INFO", "LOGIN: Клик по кнопке Log in")
             await login_button.click(timeout=30000)
             await page.wait_for_timeout(4000)
 
             # === ПРОВЕРКА ОШИБОК НА ФОРМЕ ===
-            self.logger.send("INFO", "Проверка сообщений об ошибке после перехода на форму")
+            self.logger.send("INFO", "LOGIN: Проверка сообщений об ошибке после перехода на форму")
             error_selectors = [
                 'p:has-text("Sorry, your password was incorrect")',
                 'p:has-text("We couldn\'t find an account with that username")',
@@ -1081,7 +1081,7 @@ class InstagramParser:
                     return None
 
             # === ОЖИДАНИЕ ФОРМЫ ===
-            self.logger.send("INFO", "Ожидание поля username")
+            self.logger.send("INFO", "LOGIN: Ожидание поля username")
             try:
                 await page.wait_for_selector('input[name="username"]', timeout=20000)
             except PlaywrightTimeoutError:
@@ -1097,7 +1097,7 @@ class InstagramParser:
 
             await username_field.fill(username)
             actual_user = await username_field.input_value()
-            self.logger.send("INFO", f"Введён username: '{username}', фактическое значение: '{actual_user}'")
+            self.logger.send("INFO", f"LOGIN: Введён username: '{username}', фактическое значение: '{actual_user}'")
             if actual_user != username:
                 self.logger.send("INFO", "Поле username не сохранило значение")
                 return None
@@ -1109,7 +1109,7 @@ class InstagramParser:
                 return None
 
             await password_field.fill(password)
-            self.logger.send("INFO", "Пароль введён")
+            self.logger.send("INFO", "LOGIN: Пароль введён")
 
             # === КНОПКА ВХОДА НА ФОРМЕ ===
             final_login_button = await page.query_selector('button[type="submit"]')
@@ -1124,19 +1124,19 @@ class InstagramParser:
 
             is_vis = await final_login_button.is_visible()
             is_en = await final_login_button.is_enabled()
-            self.logger.send("INFO", f"Кнопка входа на форме: видима={is_vis}, активна={is_en}")
+            self.logger.send("INFO", f"LOGIN: Кнопка входа на форме: видима={is_vis}, активна={is_en}")
             if not (is_vis and is_en):
                 await self.save_html_on_error(page, page.url, "Кнопка входа неактивна")
                 return None
 
-            self.logger.send("INFO", "Клик по финальной кнопке Log in")
+            self.logger.send("INFO", "LOGIN: Клик по финальной кнопке Log in")
             await final_login_button.click(timeout=30000)
             await page.wait_for_timeout(6000)
 
             # === ПОСЛЕ КЛИКА: ПРОВЕРКА URL И ОШИБОК ===
             current_url = page.url
             title = await page.title()
-            self.logger.send("INFO", f"После входа: URL={current_url}, Title={title}")
+            self.logger.send("INFO", f"LOGIN: После входа: URL={current_url}, Title={title}")
 
             # Проверка на challenge / suspended
             if "/challenge/" in current_url:
@@ -1164,10 +1164,10 @@ class InstagramParser:
                     return None
 
             # === 2FA ===
-            self.logger.send("INFO", "Проверка 2FA")
+            self.logger.send("INFO", "LOGIN: Проверка 2FA")
             try:
                 await page.wait_for_selector('input[aria-label="Code"]', timeout=15000)
-                self.logger.send("INFO", "Обнаружено поле 2FA")
+                self.logger.send("INFO", "LOGIN: Обнаружено поле 2FA")
                 code_field = await page.query_selector('input[aria-label="Code"]')
                 if not code_field:
                     raise Exception("Поле кода не найдено")
@@ -1181,7 +1181,7 @@ class InstagramParser:
                     return None
 
                 await code_field.fill(verification_code)
-                self.logger.send("INFO", f"2FA код введён: {verification_code}")
+                self.logger.send("INFO", f"LOGIN: 2FA код введён: {verification_code}")
 
                 continue_btn = await page.query_selector('div[role="button"][aria-label="Continue"]')
                 if continue_btn:
@@ -1192,7 +1192,7 @@ class InstagramParser:
                 trust_checkbox = await page.query_selector('div[role="checkbox"][aria-label*="Trust"]')
                 if trust_checkbox:
                     await trust_checkbox.click()
-                    self.logger.send("INFO", "Устройство помечено как доверенное")
+                    self.logger.send("INFO", "LOGIN: Устройство помечено как доверенное")
 
             except PlaywrightTimeoutError:
                 self.logger.send("INFO", "2FA не требуется")
@@ -1203,13 +1203,13 @@ class InstagramParser:
                 not_now_button = page.get_by_role("button", name="Not now")
                 if await not_now_button.is_visible(timeout=5000):
                     await not_now_button.click()
-                    self.logger.send("INFO", "Клик по 'Not now'")
+                    self.logger.send("INFO", "LOGIN: Клик по 'Not now'")
                 else:
                     # Попробуем русскую локализацию
                     not_now_button_ru = page.get_by_role("button", name="Не сейчас")
                     if await not_now_button_ru.is_visible(timeout=3000):
                         await not_now_button_ru.click()
-                        self.logger.send("INFO", "Клик по 'Не сейчас'")
+                        self.logger.send("INFO", "LOGIN: Клик по 'Не сейчас'")
             except Exception as e:
                 self.logger.send("INFO", f"'Not now' не найден или не удалось нажать: {e}")
 
@@ -1232,7 +1232,7 @@ class InstagramParser:
             cookies = self._extract_auth_cookies(await page.context.cookies())
 
             if "/accounts/onetap/" in page.url or "/accounts/login/" not in page.url:
-                self.logger.send("INFO", "Успешный вход в Instagram")
+                self.logger.send("INFO", "LOGIN: Успешный вход в Instagram")
                 if cookies:
                     return cookies
                 self.logger.send("INFO", "⚠️ Не удалось извлечь cookies после успешного входа")
@@ -1611,7 +1611,7 @@ class InstagramParser:
             if not shortcode or shortcode in seen_shortcodes:
                 continue
             seen_shortcodes.add(shortcode)
-            self.logger.send("INFO", f"➡️ Обработка рила {shortcode} ({idx}/{total_candidates})")
+            # self.logger.send("INFO", f"➡️ Обработка рила {shortcode} ({idx}/{total_candidates})")
             try:
                 play_count = media.get("play_count") or media.get("video_view_count") or 0
                 like_count = media.get("like_count") or 0
