@@ -458,6 +458,32 @@ class TikTokParser:
 
         return False
 
+    async def _force_bottom_scroll(self, page: Page, delay: float, attempts: int = 3) -> bool:
+        """
+        Агрессивно докручиваем страницу в самый низ, чтобы дотянуть оставшиеся карточки.
+        Возвращает True, если появилось больше карточек.
+        """
+        baseline = len(self.dom_order)
+        self.logger.send("INFO", "⬇️ Пробуем докрутить страницу до низа для добора карточек")
+        for attempt in range(1, attempts + 1):
+            self.logger.send("INFO", f"   ↘️ Попытка докрутки {attempt}/{attempts}")
+            try:
+                await page.evaluate("() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })")
+            except Exception:
+                try:
+                    await page.mouse.wheel(0, 3200)
+                except Exception:
+                    pass
+
+            await page.wait_for_timeout(int((max(delay, 2.5) + self.dom_settle_delay) * 1000))
+            await self.extract_videos_from_dom(page)
+            current_total = len(self.dom_order)
+            self.logger.send("INFO", f"   🔄 После докрутки собрано {current_total} карточек")
+            if current_total > baseline:
+                return True
+
+        return False
+
     async def _slow_scroll_to_top(self, page: Page) -> None:
         self.logger.send("INFO", "⬆️ Поднимаемся в начало страницы перед повторным подсчётом")
         try:
@@ -584,6 +610,9 @@ class TikTokParser:
             shortage = target_count - final_total
             if shortage > 0:
                 self.logger.send("INFO", f"⚠️ После пересчёта всё ещё не хватает {shortage} видео.")
+                forced = await self._force_bottom_scroll(page, slow_delay, attempts=2)
+                if forced:
+                    final_total = len(self.dom_order)
 
         return final_total
 
@@ -606,6 +635,7 @@ class TikTokParser:
         start_total = prev_total
         wait_without_start_growth = 0
         max_wait_without_start_growth = 2
+        recount_attempted = False
 
         acceptable_total: Optional[int] = None
         if target_count is not None:
@@ -681,6 +711,40 @@ class TikTokParser:
                         wait_without_start_growth = 0
                     continue
 
+                forced = await self._force_bottom_scroll(page, delay)
+                if forced:
+                    prev_total = len(self.dom_order)
+                    if prev_total > start_total:
+                        wait_without_start_growth = 0
+                    continue
+
+                if allow_recount and target_count and not recount_attempted:
+                    recount_attempted = True
+                    self.logger.send("INFO", "⚠️ Нет прогресса — поднимаемся наверх и пересчитываем ленту перед сменой прокси.")
+                    recount_total = await self._slow_recount_from_top(
+                        page,
+                        target_count,
+                        url,
+                        selector,
+                        delay,
+                        max_cycles,
+                        tolerance,
+                    )
+                    start_total = len(self.dom_order)
+                    prev_total = start_total
+                    wait_without_start_growth = 0
+                    if acceptable_total is not None and recount_total >= acceptable_total:
+                        return recount_total
+                    if recount_total > current_total:
+                        continue
+
+                forced_after_recount = await self._force_bottom_scroll(page, delay, attempts=2)
+                if forced_after_recount:
+                    prev_total = len(self.dom_order)
+                    if prev_total > start_total:
+                        wait_without_start_growth = 0
+                    continue
+
                 raise ProxySwitchRequired("Нет прогресса после 3 дополнительных прокруток — переключаем прокси.")
             else:
                 prev_total = current_total
@@ -690,7 +754,7 @@ class TikTokParser:
         await self.extract_videos_from_dom(page)
         final_total = len(self.dom_order)
 
-        if allow_recount and target_count and final_total < target_count:
+        if allow_recount and target_count and final_total < target_count and not recount_attempted:
             self.logger.send(
                 "INFO",
                 f"⚠️ Собрано {final_total}/{target_count} — запускаем медленный пересчёт с возвратом к началу ленты.",
@@ -704,6 +768,10 @@ class TikTokParser:
                 max_cycles,
                 tolerance,
             )
+            if target_count and final_total < target_count:
+                forced = await self._force_bottom_scroll(page, delay)
+                if forced:
+                    final_total = len(self.dom_order)
 
         return final_total
 
