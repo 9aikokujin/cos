@@ -4,9 +4,9 @@ import random
 import re
 from collections import deque
 from datetime import datetime, timezone
-from typing import Union, Optional, Tuple, Callable, Awaitable, Dict, List, Set
+from typing import Union, Optional, Tuple, Callable, Awaitable, Dict, List, Set, Any
 from urllib.parse import urlparse, urlunparse, urljoin
-
+# Добавить что если не добрали до video_count, то будем скроллить на самый верх и считать заново
 import httpx
 import requests
 from playwright.async_api import async_playwright, Page, Response, TimeoutError as PlaywrightTimeoutError
@@ -26,6 +26,8 @@ from playwright.async_api import async_playwright, Page, Response, TimeoutError 
 #             await stealth.apply_stealth_async(page)  # type: ignore
 
 # from utils.logger import TCPLogger
+
+# давай хранить найденный videoCount и  найденные ссылки для каждого канала, но каждый раз все равно проверять актуальные ссылки на видео, так как владелец профиля может удалять 1-2 видео, если видео меньше на 10 единиц чем в предыдущий раз, 
 
 
 ARTICLE_PREFIXES = ("#sv", "#jw", "#qz", "#sr", "#fg")
@@ -68,7 +70,6 @@ HEADERS_POOL = [
 class ProxySwitchRequired(RuntimeError):
     """Special exception to signal that we should switch to the next proxy."""
 
-
 class TikTokParser:
     def __init__(
             self,
@@ -79,7 +80,68 @@ class TikTokParser:
         self.dom_images: Dict[str, List[str]] = {}
         self.dom_order: List[str] = []
         self.proxy_list: List[Optional[str]] = []
-        self.dom_settle_delay: float = 0.7  # доп. пауза, чтобы DOM успевал дорисоваться
+        self.dom_settle_delay: float = 0.9  # доп. пауза, чтобы DOM успевал дорисоваться
+
+    @staticmethod
+    def _parse_started_at(value: Optional[Union[str, datetime]]) -> datetime:
+        if isinstance(value, datetime):
+            dt = value
+        elif isinstance(value, str) and value.strip():
+            text = value.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                dt = datetime.fromisoformat(text)
+            except ValueError:
+                dt = datetime.now(timezone.utc)
+        else:
+            dt = datetime.now(timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+
+    def _log_summary(
+        self,
+        url: str,
+        channel_id: int,
+        video_count: int,
+        total_views: int,
+        started_at: datetime,
+        ended_at: datetime,
+        success: bool,
+    ) -> None:
+        status_icon = "✅" if success else "⚠️"
+        status_text = "Успешно спарсили" if success else "Не удалось спарсить"
+        print(
+            f"{status_icon} {status_text} {url} с {channel_id} "
+            f"кол-во видео - {video_count}, кол-во просмотров - {total_views}, "
+            f"время начала парсинга - {started_at.isoformat()}, конец парсинга - {ended_at.isoformat()}",
+        )
+
+    async def _start_playwright(self):
+        try:
+            return await async_playwright().start()
+        except Exception as exc:
+            print(f"❌ Не удалось запустить Playwright: {exc}")
+            return None
+
+    async def _safe_close(self, obj, label: str, method: str = "close"):
+        if not obj:
+            return
+        closer = getattr(obj, method, None)
+        if not closer:
+            return
+        try:
+            result = closer()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            print(f"⚠️ Ошибка закрытия {label}: {exc}")
+
+    async def _cleanup_browser_stack(self, page=None, context=None, browser=None):
+        await self._safe_close(page, "page")
+        await self._safe_close(context, "context")
+        await self._safe_close(browser, "browser")
 
     # ----------------------- УТИЛИТЫ -----------------------
 
@@ -87,6 +149,19 @@ class TikTokParser:
         self.dom_video_links = {}
         self.dom_images = {}
         self.dom_order = []
+
+    def _snapshot_dom_state(self) -> Dict[str, Any]:
+        return {
+            "links": dict(self.dom_video_links),
+            "images": {video_id: list(images) for video_id, images in self.dom_images.items()},
+            "order": list(self.dom_order),
+        }
+
+    def _restore_dom_state(self, snapshot: Dict[str, Any]) -> None:
+        self.dom_video_links = dict(snapshot.get("links", {}))
+        images_snapshot = snapshot.get("images", {})
+        self.dom_images = {video_id: list(images) for video_id, images in images_snapshot.items()}
+        self.dom_order = list(snapshot.get("order", []))
 
     @staticmethod
     def _has_uploaded_image(image_field) -> bool:
@@ -163,7 +238,7 @@ class TikTokParser:
         )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080},
+            # viewport={"width": 1920, "height": 1080},
             timezone_id="America/New_York",
             proxy=proxy_config,
             locale="en-US",
@@ -381,6 +456,161 @@ class TikTokParser:
 
         return False
 
+    async def _force_bottom_scroll(self, page: Page, delay: float, attempts: int = 3) -> bool:
+        """
+        Агрессивно докручиваем страницу в самый низ, чтобы дотянуть оставшиеся карточки.
+        Возвращает True, если появилось больше карточек.
+        """
+        baseline = len(self.dom_order)
+        print("⬇️ Пробуем докрутить страницу до низа для добора карточек")
+        for attempt in range(1, attempts + 1):
+            print(f"   ↘️ Попытка докрутки {attempt}/{attempts}")
+            try:
+                await page.evaluate("() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })")
+            except Exception:
+                try:
+                    await page.mouse.wheel(0, 3200)
+                except Exception:
+                    pass
+
+            await page.wait_for_timeout(int((max(delay, 2.5) + self.dom_settle_delay) * 1000))
+            await self.extract_videos_from_dom(page)
+            current_total = len(self.dom_order)
+            print(f"   🔄 После докрутки собрано {current_total} карточек")
+            if current_total > baseline:
+                return True
+
+        return False
+
+    async def _slow_scroll_to_top(self, page: Page) -> None:
+        print("⬆️ Поднимаемся в начало страницы перед повторным подсчётом")
+        try:
+            await page.evaluate(
+                """
+                async () => {
+                    const step = Math.max(window.innerHeight * 0.8, 500);
+                    for (let i = 0; i < 25; i += 1) {
+                        window.scrollBy({ top: -step, behavior: 'smooth' });
+                        await new Promise((resolve) => setTimeout(resolve, 200));
+                        if (window.scrollY <= 0) {
+                            break;
+                        }
+                    }
+                    window.scrollTo({ top: 0, behavior: 'instant' });
+                }
+                """
+            )
+        except Exception as exc:
+            print(f"⚠️ Не удалось плавно подняться наверх: {exc}. Пробуем запасной способ.")
+            for _ in range(8):
+                try:
+                    await page.mouse.wheel(0, -2000)
+                except Exception:
+                    break
+                await page.wait_for_timeout(200)
+            try:
+                await page.evaluate("window.scrollTo({ top: 0, behavior: 'instant' })")
+            except Exception:
+                pass
+        await page.wait_for_timeout(int((0.6 + self.dom_settle_delay) * 1000))
+
+    async def _slow_recount_from_top(
+        self,
+        page: Page,
+        target_count: Optional[int],
+        url: str,
+        selector: str,
+        delay: float,
+        max_cycles: int,
+        tolerance: int,
+    ) -> int:
+        snapshot = self._snapshot_dom_state()
+        baseline_total = len(snapshot["order"])
+        print(
+            f"🔁 Недобор видео на {url}: {baseline_total}/{target_count or '?'} — пересчитываем ленту полностью.",
+        )
+
+        await self._slow_scroll_to_top(page)
+        self.reset_dom_state()
+        await self.extract_videos_from_dom(page)
+
+        slow_delay = max(delay, 1.5)
+        slow_cycles = max(max_cycles + 10, 30)
+        no_progress_rounds = 0
+        prev_total = len(self.dom_order)
+
+        for cycle in range(1, slow_cycles + 1):
+            if target_count and len(self.dom_order) >= target_count:
+                break
+
+            print(f"   ⬇️ Медленный проход {cycle}/{slow_cycles}")
+            try:
+                await page.evaluate(
+                    """
+                    async () => {
+                        const distance = Math.max(window.innerHeight * 0.6, 420);
+                        const steps = 8;
+                        for (let i = 0; i < steps; i += 1) {
+                            window.scrollBy({ top: distance, behavior: 'smooth' });
+                            await new Promise((resolve) => setTimeout(resolve, 220));
+                        }
+                    }
+                    """
+                )
+            except Exception:
+                try:
+                    await page.mouse.wheel(0, 1800)
+                except Exception:
+                    pass
+
+            await page.wait_for_timeout(int((slow_delay + self.dom_settle_delay) * 1000))
+            await self.extract_videos_from_dom(page)
+            current_total = len(self.dom_order)
+            print(f"      🔢 Пересчёт собрал {current_total} карточек")
+
+            if current_total == prev_total:
+                no_progress_rounds += 1
+                if no_progress_rounds >= 4:
+                    print("      ⏸️ Новых карточек при пересчёте не появляется.")
+                    break
+            else:
+                prev_total = current_total
+                no_progress_rounds = 0
+
+        try:
+            await page.evaluate("window.scrollBy({ top: window.innerHeight * 0.9, behavior: 'smooth' })")
+        except Exception:
+            pass
+        await page.wait_for_timeout(int((slow_delay + self.dom_settle_delay) * 1000))
+        await self.extract_videos_from_dom(page)
+
+        final_total = len(self.dom_order)
+        if selector:
+            try:
+                dom_count = await page.eval_on_selector_all(selector, "els => els.length")
+                print(
+                    f"      📦 После пересчёта DOM содержит {dom_count} элементов по селектору '{selector}'",
+                )
+            except Exception:
+                pass
+
+        if final_total < baseline_total:
+            print(
+                f"⚠️ Пересчёт дал меньше карточек ({final_total}) чем первоначально ({baseline_total}), возвращаем исходный набор.",
+            )
+            self._restore_dom_state(snapshot)
+            return baseline_total
+
+        if target_count and final_total < max(target_count - max(tolerance, 0), 0):
+            shortage = target_count - final_total
+            if shortage > 0:
+                print(f"⚠️ После пересчёта всё ещё не хватает {shortage} видео.")
+                forced = await self._force_bottom_scroll(page, slow_delay, attempts=2)
+                if forced:
+                    final_total = len(self.dom_order)
+
+        return final_total
+
     async def scroll_and_collect(
         self,
         page: Page,
@@ -390,6 +620,7 @@ class TikTokParser:
         delay: float = 2.0,
         max_cycles: int = 20,
         tolerance: int = 0,
+        allow_recount: bool = True,
     ) -> int:
         """
         Плавно скроллим вниз, пока не достигнем нужного количества карточек.
@@ -399,6 +630,7 @@ class TikTokParser:
         start_total = prev_total
         wait_without_start_growth = 0
         max_wait_without_start_growth = 2
+        recount_attempted = False
 
         acceptable_total: Optional[int] = None
         if target_count is not None:
@@ -474,6 +706,40 @@ class TikTokParser:
                         wait_without_start_growth = 0
                     continue
 
+                forced = await self._force_bottom_scroll(page, delay)
+                if forced:
+                    prev_total = len(self.dom_order)
+                    if prev_total > start_total:
+                        wait_without_start_growth = 0
+                    continue
+
+                if allow_recount and target_count and not recount_attempted:
+                    recount_attempted = True
+                    print("⚠️ Нет прогресса — поднимаемся наверх и пересчитываем ленту перед сменой прокси.")
+                    recount_total = await self._slow_recount_from_top(
+                        page,
+                        target_count,
+                        url,
+                        selector,
+                        delay,
+                        max_cycles,
+                        tolerance,
+                    )
+                    start_total = len(self.dom_order)
+                    prev_total = start_total
+                    wait_without_start_growth = 0
+                    if acceptable_total is not None and recount_total >= acceptable_total:
+                        return recount_total
+                    if recount_total > current_total:
+                        continue
+
+                forced_after_recount = await self._force_bottom_scroll(page, delay, attempts=2)
+                if forced_after_recount:
+                    prev_total = len(self.dom_order)
+                    if prev_total > start_total:
+                        wait_without_start_growth = 0
+                    continue
+
                 raise ProxySwitchRequired("Нет прогресса после 3 дополнительных прокруток — переключаем прокси.")
             else:
                 prev_total = current_total
@@ -481,7 +747,27 @@ class TikTokParser:
                     wait_without_start_growth = 0
 
         await self.extract_videos_from_dom(page)
-        return len(self.dom_order)
+        final_total = len(self.dom_order)
+
+        if allow_recount and target_count and final_total < target_count and not recount_attempted:
+            print(
+                f"⚠️ Собрано {final_total}/{target_count} — запускаем медленный пересчёт с возвратом к началу ленты.",
+            )
+            final_total = await self._slow_recount_from_top(
+                page,
+                target_count,
+                url,
+                selector,
+                delay,
+                max_cycles,
+                tolerance,
+            )
+            if target_count and final_total < target_count:
+                forced = await self._force_bottom_scroll(page, delay)
+                if forced:
+                    final_total = len(self.dom_order)
+
+        return final_total
 
     # ----------------------- ПАРСИНГ HTML -----------------------
 
@@ -729,6 +1015,7 @@ class TikTokParser:
         user_id: int,
         max_retries: int = 3,
         proxy_list: Optional[List[str]] = None,
+        parse_started_at: Optional[Union[str, datetime]] = None,
     ):
         self.proxy_list = [p for p in (proxy_list or []) if p]
         proxies_for_requests = self.proxy_list or [None]
@@ -741,8 +1028,26 @@ class TikTokParser:
         target_video_count: Optional[int] = None
         last_html_snapshot: Optional[str] = None
         success = False
+        run_started_at = self._parse_started_at(parse_started_at)
+        history_created_at_iso = run_started_at.isoformat()
+        processed_count = 0
+        total_views = 0
 
-        playwright = await async_playwright().start()
+        def log_final(outcome: bool) -> None:
+            ended_at = datetime.now(timezone.utc)
+            self._log_summary(
+                url,
+                channel_id,
+                processed_count,
+                total_views,
+                run_started_at,
+                ended_at,
+                outcome and processed_count > 0,
+            )
+
+        playwright = await self._start_playwright()
+        if not playwright:
+            return
         try:
             proxies_for_browser = self.proxy_list or [None]
             random.shuffle(proxies_for_browser)
@@ -864,12 +1169,7 @@ class TikTokParser:
                                     page.off("response", response_handler)
                                 except Exception:
                                     pass
-                            for obj in (page, context, browser):
-                                try:
-                                    if obj:
-                                        await obj.close()
-                                except Exception:
-                                    pass
+                            await self._cleanup_browser_stack(page, context, browser)
 
                         if success:
                             break
@@ -899,20 +1199,12 @@ class TikTokParser:
                                 page.off("response", response_handler)
                             except Exception:
                                 pass
-                        for obj in (page, context, browser):
-                            try:
-                                if obj:
-                                    await obj.close()
-                            except Exception:
-                                pass
+                        await self._cleanup_browser_stack(page, context, browser)
 
                     await asyncio.sleep(5)
 
         finally:
-            try:
-                await playwright.stop()
-            except Exception:
-                pass
+            await self._safe_close(playwright, "playwright", method="stop")
 
         total_collected = len(self.dom_order)
         print(f"🎯 Собрано {total_collected} ссылок (videoCount: {target_video_count if target_video_count is not None else '—'})",)
@@ -925,6 +1217,7 @@ class TikTokParser:
                 print(f"📄 Не удалось собрать видео — HTML сохранён: {fname}")
             except Exception as e:
                 print(f"⚠️ Не удалось сохранить HTML: {e}")
+            log_final(False)
             return
 
         video_ids = self.dom_order[: target_video_count] if target_video_count else self.dom_order
@@ -986,12 +1279,16 @@ class TikTokParser:
                     "image_url": image_url,
                     "articles": parsed.get("articles"),
                     "image_candidates": image_candidates,
+                    "history_created_at": history_created_at_iso,
                 }
             )
 
         if not all_videos_data:
             print("⚠️ После запросов не осталось данных для отправки")
+            log_final(False)
             return
+
+        total_views = sum(int(video.get("amount_views") or 0) for video in all_videos_data)
 
         async def download_image(img_url: str, proxy: Optional[str] = None) -> Union[bytes, None]:
             try:
@@ -1037,7 +1334,6 @@ class TikTokParser:
                 resp.raise_for_status()
                 return resp.status_code, resp.text
 
-        processed_count = 0
         image_queue: List[Tuple[int, List[str]]] = []
         queued_video_ids: Set[int] = set()
 
@@ -1062,6 +1358,7 @@ class TikTokParser:
                                 # "date_published": video_data.get("date_published"),
                                 "articles": video_data.get("articles"),
                                 # "description": video_data.get("description"),
+                                "history_created_at": history_created_at_iso,
                             }
                             upd = await client.patch(
                                 f"https://cosmeya.dev-klick.cyou/api/v1/videos/{video_id}",
@@ -1158,6 +1455,7 @@ class TikTokParser:
             await asyncio.sleep(30.0)
 
         print(f"✅ Успешно обработано {processed_count} видео")
+        log_final(success)
 
 
 # ----------------------- Пример запуска -----------------------
@@ -1172,16 +1470,11 @@ async def main():
         "MecAgR:v5fbu6@186.65.118.237:9808",
         "MecAgR:v5fbu6@186.65.115.230:9065",
         "MecAgR:v5fbu6@186.65.115.105:9825",
-        "suQs3N:j30sT6@170.246.55.146:9314",
-        "MecAgR:v5fbu6@186.65.118.237:9808",
-        "MecAgR:v5fbu6@186.65.115.230:9065",
-        "MecAgR:v5fbu6@186.65.115.105:9825",
-
     ]
     parser = TikTokParser()
-    url = "https://www.tiktok.com/@radugabeauty"
-    user_id = 13
-    await parser.parse_channel(url, channel_id=73, user_id=user_id, proxy_list=proxy_list)
+    url = "https://www.tiktok.com/@bestbeautydeal"
+    user_id = 1
+    await parser.parse_channel(url, channel_id=33, user_id=user_id, proxy_list=proxy_list)
 
 
 if __name__ == "__main__":

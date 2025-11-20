@@ -20,6 +20,7 @@ class RabbitMQParserClient:
     async def connect(self):
         self.connection = await connect_robust(self.amqp_url)
         self.channel = await self.connection.channel()
+        await self.channel.set_qos(prefetch_count=1)
         self.queue = await self.channel.declare_queue(
             self.queue_name, durable=True)
 
@@ -37,7 +38,7 @@ class RabbitMQParserClient:
             self.logger.send("INFO", f"Получена задача на парсинг {task_type}, пользователь: {user_id}, id: {url}")
             if task_type == "channel":
                 self.logger.send("INFO", f"Начал парсить канал {url}")
-                data = await self.parser.parse_channel(
+                await self.parser.parse_channel(
                     url, channel_id, user_id, 3, proxy_list, parse_started_at=parse_started_at
                 )
             # if task_type == "video":
