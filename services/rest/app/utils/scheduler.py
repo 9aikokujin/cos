@@ -109,6 +109,7 @@ INSTAGRAM_BATCH_LOCK_TIMEOUT_MINUTES = 120
 _instagram_batch_active = False
 _instagram_batch_id: Optional[str] = None
 _instagram_batch_started_at: Optional[datetime] = None
+_pending_tasks_after_batch: dict[int, tuple[int, Optional[int], Optional[str]]] = {}
 
 
 def _remove_instagram_batch_job():
@@ -167,6 +168,63 @@ def _mark_instagram_batch_state(active: bool, batch_id: Optional[str] = None):
         _instagram_batch_started_at = None
 
 
+def _queue_after_batch(
+    task_id: int,
+    schedule_offset_minutes: Optional[int],
+    schedule_wave_anchor: Optional[str],
+) -> None:
+    """
+    Сохраняем задачу, которую нужно отправить после окончания Instagram batch.
+    Используем dict, чтобы не плодить дубликаты по channel_id.
+    """
+    _pending_tasks_after_batch[task_id] = (
+        task_id,
+        schedule_offset_minutes,
+        schedule_wave_anchor,
+    )
+
+
+def _dispatch_pending_after_batch() -> int:
+    """
+    Запускает отложенные задачи, накопленные во время активного Instagram batch.
+    Возвращает число успешно добавленных джобов.
+    """
+    if not _pending_tasks_after_batch:
+        return 0
+
+    pending = list(_pending_tasks_after_batch.values())
+    _pending_tasks_after_batch.clear()
+
+    now = datetime.now(MOSCOW_TZ)
+    dispatched = 0
+
+    for task_id, schedule_offset_minutes, schedule_wave_anchor in pending:
+        run_at = now + timedelta(seconds=1 + dispatched)
+        job_id = f"deferred_task_{task_id}_{int(run_at.timestamp())}"
+        try:
+            scheduler.add_job(
+                func=process_recurring_task,
+                trigger="date",
+                run_date=run_at,
+                args=[task_id, "channel"],
+                kwargs={
+                    "schedule_offset_minutes": schedule_offset_minutes,
+                    "schedule_wave_anchor": schedule_wave_anchor,
+                },
+                id=job_id,
+                replace_existing=False,
+                max_instances=1,
+                coalesce=True,
+            )
+            dispatched += 1
+        except Exception as exc:
+            print(f"⚠️ Не удалось добавить отложенную задачу {task_id}: {exc}")
+
+    if dispatched:
+        print(f"▶️ Запущено {dispatched} отложенных задач после завершения Instagram batch.")
+    return dispatched
+
+
 def is_instagram_batch_active() -> bool:
     return _instagram_batch_active
 
@@ -183,6 +241,7 @@ def release_instagram_batch(batch_id: Optional[str] = None) -> bool:
         return False
     _mark_instagram_batch_state(False)
     print("ℹ️ Instagram batch lock released.")
+    _dispatch_pending_after_batch()
     return True
 
 
@@ -192,6 +251,7 @@ async def _auto_release_instagram_batch(batch_id: str):
     if active and current_batch_id == batch_id:
         print("⚠️ Авто-сброс блокировки Instagram batch по таймауту.")
         _mark_instagram_batch_state(False)
+        _dispatch_pending_after_batch()
 
 
 def _normalize_parse_started_at(
@@ -448,7 +508,15 @@ async def process_recurring_task(
                 return
 
             if channel.type != ChannelType.INSTAGRAM and is_instagram_batch_active():
-                print(f"⏸ Instagram batch активен — пропускаем отправку задачи для канала {channel.id} ({channel.type.value}).")
+                _queue_after_batch(
+                    task_id=task_id,
+                    schedule_offset_minutes=schedule_offset_minutes,
+                    schedule_wave_anchor=schedule_wave_anchor,
+                )
+                print(
+                    f"⏸ Instagram batch активен — откладываем отправку задачи для канала "
+                    f"{channel.id} ({channel.type.value}). Отложено: {len(_pending_tasks_after_batch)}"
+                )
                 return
 
             # Получаем свежие аккаунты и прокси

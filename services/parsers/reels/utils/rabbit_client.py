@@ -139,17 +139,34 @@ class RabbitMQParserClient:
         notified = False
 
         if callback_url:
-            try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    resp = await client.post(callback_url, json=payload)
-                    resp.raise_for_status()
-                    self.logger.send("INFO", f"📬 Уведомили сервис о завершении batch {batch_id}")
-                    notified = True
-            except Exception as exc:
-                self.logger.send(
-                    "INFO",
-                    f"⚠️ Не удалось уведомить о завершении batch {batch_id}: {exc}",
-                )
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        resp = await client.post(callback_url, json=payload)
+                        resp.raise_for_status()
+                        self.logger.send("INFO", f"📬 Уведомили сервис о завершении batch {batch_id}")
+                        notified = True
+                        break
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    body = exc.response.text
+                    body_preview = (body[:400] + "...") if len(body) > 400 else body
+                    self.logger.send(
+                        "INFO",
+                        f"⚠️ Не удалось уведомить о завершении batch {batch_id} "
+                        f"(HTTP {status}, попытка {attempt}/{max_attempts}): {body_preview}",
+                    )
+                    if attempt < max_attempts:
+                        await asyncio.sleep(5 * attempt)
+                except Exception as exc:
+                    self.logger.send(
+                        "INFO",
+                        f"⚠️ Не удалось уведомить о завершении batch {batch_id} "
+                        f"(попытка {attempt}/{max_attempts}): {exc}",
+                    )
+                    if attempt < max_attempts:
+                        await asyncio.sleep(5 * attempt)
         else:
             notified = True
 
