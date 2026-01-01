@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 infra/local/.env
 services/parsers/.env
+services/rest/.env
 venv
 env
 __pycache__
