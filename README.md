@@ -1,5 +1,5 @@
 # Что за проект
-Cosmeya — сервис, который автоматически собирает метрики каналов и роликов в TikTok, YouTube, Instagram и Likee. Есть бэкенд с API, фронт для Telegram mini‑app, воркеры‑парсеры и бот.
+Cos — сервис, который автоматически собирает метрики каналов и роликов в TikTok, YouTube, Instagram и Likee. Есть бэкенд с API, фронт для Telegram mini‑app, воркеры‑парсеры и бот.
 
 # Какие технологии используются
 - Backend: FastAPI, SQLAlchemy, Pydantic, APScheduler, pika (RabbitMQ), httpx, Alembic, PostgreSQL.
