@@ -37,7 +37,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"❌ Ошибка при инициализации БД: {e}")
             raise e
-    # 2. Инициализация RabbitMQ
     try:
         rabbit_producer.connect()
         rabbit_producer.declare_queue("parsing", durable=True)
@@ -51,22 +50,8 @@ async def lifespan(app: FastAPI):
     await restore_scheduled_tasks()
     scheduler.start()
 
-    # 3. Инициализация TCPLogger
-    # global logger
-    # try:
-    #     logger = TCPLogger(
-    #         service_name="sn_rest",
-    #         host=settings.SN_LOGSTASH_HOST,
-    #         port=5044
-    #     )
-    #     print(f"✅ TCPLogger подключён к {settings.SN_LOGSTASH_HOST}:5044")
-    # except Exception as e:
-    #     print(f"❌ Не удалось подключиться к Logstash: {e}")
-    #     logger = None
-
     yield
 
-    # 4. Завершение
     print("🛑 Приложение останавливается...")
     scheduler.shutdown()
     # if hasattr(logger, "close") and logger is not None:

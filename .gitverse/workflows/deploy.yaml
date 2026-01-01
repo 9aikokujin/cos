@@ -13,10 +13,6 @@ jobs:
   build-test:
     name: Server Deployment
     runs-on: img-ubuntu-22.04
-    # Если нет метки образа у раннера, используй:
-    # runs-on: self-hosted
-
-    # "Переход" в каталог infra — все run-скрипты выполняются из этой папки
     defaults:
       run:
         working-directory: infra
@@ -53,7 +49,6 @@ jobs:
       COS_LOGSTASH_CONTAINER: ${{ secrets.COS_LOGSTASH_CONTAINER }}
       COS_LOGSTASH_HOST: ${{ secrets.COS_LOGSTASH_HOST }}
 
-      # App / misc
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       COS_REST_API_CONTAINER: ${{ secrets.COS_REST_API_CONTAINER }}
@@ -79,11 +74,11 @@ jobs:
           elif [ -f "production/docker-compose.yml" ]; then
             echo "file=production/docker-compose.yml" >> "$GITHUB_OUTPUT"
           else
-            echo "❌ Не найден docker-compose.yml ни в infra/, ни в infra/production/"
+            echo "Не найден docker-compose.yml ни в infra/, ни в infra/production/"
             ls -la
             exit 1
           fi
-          echo "✅ Используем compose файл: $(cat "$GITHUB_OUTPUT" | sed -n 's/^file=//p')"
+          echo "Используем compose файл: $(cat "$GITHUB_OUTPUT" | sed -n 's/^file=//p')"
 
       - name: Docker Compose down
         run: |
@@ -94,7 +89,6 @@ jobs:
           docker compose -f "${{ steps.pick.outputs.file }}" pull || true
           docker compose -f "${{ steps.pick.outputs.file }}" up -d --build --remove-orphans
 
-      # Диагностика при падении
       - name: Debug on failure
         if: failure()
         run: |
@@ -103,7 +97,6 @@ jobs:
           echo "--- compose ls ---"
           docker compose -f "${{ steps.pick.outputs.file }}" ls || true
           echo "--- compose logs (last 200 lines per service) ---"
-          # Печатаем последние строки логов каждого сервиса, если нужно – увеличь tail
           services=$(docker compose -f "${{ steps.pick.outputs.file }}" config --services || true)
           for s in $services; do
             echo "### $s"

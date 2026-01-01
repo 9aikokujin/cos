@@ -133,7 +133,6 @@ class VideoHistoryRepository:
 
     async def create(self, dto: VideoHistoryCreate,
                      user_id: Optional[int] = None) -> VideoHistory:
-        # Если не админ — проверяем, что видео принадлежит пользователю
         if user_id is not None:
             result = await self.db.execute(
                 select(Videos)
@@ -144,7 +143,6 @@ class VideoHistoryRepository:
             if not video:
                 raise ValueError("Видео не найдено или недостаточно прав")
 
-        # Создаём запись
         history = VideoHistory(**dto.model_dump(exclude_none=True))
         self.db.add(history)
         await self.db.commit()
@@ -190,7 +188,6 @@ class VideoHistoryRepository:
             .where(Videos.articles.is_not(None))
         )
 
-        # --- Фильтры ---
         if id is not None:
             query = query.where(VideoHistory.id == id)
 
@@ -222,16 +219,13 @@ class VideoHistoryRepository:
         if articles:
             query = query.where(or_(*[Videos.articles.like(f"%{a}%") for a in articles]))
 
-        # --- Группировка и сортировка ---
         query = query.group_by(func.date(VideoHistory.created_at), Videos.articles, Videos.name)
         query = query.order_by(func.date(VideoHistory.created_at))
 
-        # --- Выполнение ---
         result = await self.db.execute(query)
         rows = result.all()
         print(f"Это ровсы: {rows}")
 
-        # --- Форматирование ---
         return [
             {
                 "date": row.view_date,

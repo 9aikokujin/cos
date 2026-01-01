@@ -168,9 +168,8 @@ async def update_product(
                 product_id, product_update, user)
             return updated_product
 
-        return product  # Если ничего не передано, возвращаем без изменений
+        return product
 
-    # Логика для администратора
     file_path = product.s3_url
     if file:
         if file_path and os.path.exists(file_path):

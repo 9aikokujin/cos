@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict
 from app.core.config import settings
 
+# пароль эластика = "PmjG_VB0SK"
 
 class RabbitMQProducer:
     def __init__(

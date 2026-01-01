@@ -79,7 +79,7 @@ async def update_video(
     video_id: int,
     video_update: VideosUpdate,
     db: AsyncSession = Depends(get_db),
-    # user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
+    # user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)) # Убрал проверку роли, т.к. этот метод используется только для обновления видео парсерами
 ):
     history_service = VideoHistoryService(db)
     service = VideosService(db, history_service)

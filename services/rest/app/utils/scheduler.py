@@ -142,15 +142,15 @@ async def _instagram_batch_job():
 
 
 def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
-    """Calculate 24h-based hours for morning/evening slots and shared minute."""
+    """Calculate 24h-based hours for midday/evening slots and shared minute."""
     if offset_minutes < 0:
         offset_minutes = 0
 
-    morning_total = 5 * 60 + offset_minutes
+    morning_total = 12 * 60 + offset_minutes
     morning_hour = (morning_total // 60) % 24
     minute = morning_total % 60
 
-    evening_total = 20 * 60 + offset_minutes
+    evening_total = 21 * 60 + offset_minutes
     evening_hour = (evening_total // 60) % 24
 
     hours = sorted({morning_hour, evening_hour})
@@ -267,8 +267,8 @@ def _normalize_parse_started_at(
     if schedule_wave_anchor != "daily" or schedule_offset_minutes is None:
         return now
 
-    morning_total = 5 * 60 + schedule_offset_minutes
-    evening_total = 20 * 60 + schedule_offset_minutes
+    morning_total = 12 * 60 + schedule_offset_minutes
+    evening_total = 21 * 60 + schedule_offset_minutes
     expected_minute = morning_total % 60
 
     if now.minute != expected_minute:

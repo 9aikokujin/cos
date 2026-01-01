@@ -322,7 +322,6 @@ class VideoHistoryService:
             )
         if channel_id is not None:
             subq = subq.where(Videos.channel_id == channel_id)
-        # 🔥 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: фильтр по подстроке
         if articles:
             or_conditions = [Videos.articles.contains(tag) for tag in articles]
             subq = subq.where(or_(*or_conditions))

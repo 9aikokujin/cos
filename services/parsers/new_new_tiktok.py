@@ -1462,17 +1462,17 @@ class TikTokParser:
 
 async def main():
     proxy_list = [
-        "DWtvBb:M1uRTE@181.177.87.15:9725",
-        "DWtvBb:M1uRTE@181.177.84.185:9254",
-        "DWtvBb:M1uRTE@94.131.54.252:9746",
-        "DWtvBb:M1uRTE@95.164.200.121:9155",
-        "DWtvBb:M1uRTE@45.237.85.119:9458",
-        "MecAgR:v5fbu6@186.65.118.237:9808",
-        "MecAgR:v5fbu6@186.65.115.230:9065",
-        "MecAgR:v5fbu6@186.65.115.105:9825",
+        "194.59.12.70:63176:16FwCvL1:jdpmbNib"
+        "5.1.46.55:63632:16FwCvL1:jdpmbNib"
+        "88.151.115.104:62196:16FwCvL1:jdpmbNib"
+        "45.159.125.35:62020:16FwCvL1:jdpmbNib"
+        "45.159.127.118:63166:16FwCvL1:jdpmbNib"
+        "5.252.190.198:64238:16FwCvL1:jdpmbNib"
+        "46.232.29.191:63890:16FwCvL1:jdpmbNib"
+        "46.232.34.147:62100:16FwCvL1:jdpmbNib"
     ]
     parser = TikTokParser()
-    url = "https://www.tiktok.com/@bestbeautydeal"
+    url = "https://www.tiktok.com/@beautyskazka"
     user_id = 1
     await parser.parse_channel(url, channel_id=33, user_id=user_id, proxy_list=proxy_list)
 

@@ -30,16 +30,13 @@ class VideosRepository:
         query = select(Videos).order_by(Videos.created_at.desc())
 
         if user_ids:
-            # Все видео из каналов, принадлежащих указанным пользователям
             query = query.join(Channel).filter(Channel.user_id.in_(user_ids))
 
-        # Фильтрация
         if id is not None:
             query = query.filter(Videos.id == id)
         if type is not None:
             query = query.filter(Videos.type == type)
         if articles is not None:
-            # Ищем артикул как часть строки: например, "#sv" в "#sv,#jw"
             query = query.filter(Videos.articles.contains(articles))
         if link is not None:
             query = query.filter(Videos.link.ilike(f"%{link}%"))
@@ -50,7 +47,6 @@ class VideosRepository:
 
         query = query.order_by(Videos.created_at.desc())
 
-        # Пагинация
         if page is not None and size is not None:
             offset = (page - 1) * size
             count_query = select(func.count()).select_from(query.subquery())
@@ -58,7 +54,6 @@ class VideosRepository:
             result = await self.db.execute(paginated_query)
             videos = result.scalars().all()
 
-            # Подсчет общего количества для пагинации
             total_result = await self.db.execute(count_query)
             total = total_result.scalar() or 0
 

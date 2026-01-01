@@ -106,7 +106,7 @@ class UserRepository:
         for key, value in user_update.model_dump(exclude_unset=True).items():
             setattr(user, key, value)
 
-        user.status = True  # type: ignore
+        user.status = True
 
         await self.db.commit()
         await self.db.refresh(user)
@@ -124,7 +124,7 @@ class UserRepository:
         for key, value in user_update.model_dump(exclude_unset=True).items():
             setattr(user, key, value)
 
-        user.status = True  # type: ignore
+        user.status = True
 
         await self.db.commit()
         await self.db.refresh(user)

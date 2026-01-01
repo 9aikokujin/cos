@@ -51,7 +51,6 @@ class UserService:
         if not target_user:
             raise ValueError("Пользователь не найден")
 
-        # Проверка прав доступа
         if current_user.role != UserRole.ADMIN and current_user.id != target_user_id:
             raise HTTPException(
                 status_code=403,

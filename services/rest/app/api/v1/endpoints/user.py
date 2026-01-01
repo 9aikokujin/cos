@@ -113,7 +113,7 @@ async def update_current_user(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except HTTPException as e:
-        raise e  # Пробрасываем 403 ошибку
+        raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

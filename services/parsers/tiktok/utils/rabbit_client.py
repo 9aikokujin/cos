@@ -42,7 +42,7 @@ class RabbitMQParserClient:
                     url, channel_id, user_id, 3, proxy_list, parse_started_at=parse_started_at
                 )
             # if task_type == "video":
-            #     self.logger.send("INFO", f"Начал парсить канал {url}")
+            #     self.logger.send("INFO", f"Начал парсить видео {url}")
             #     data = await self.parser.parse_single_video(url, user_id, 3)
 
     async def consume(self):

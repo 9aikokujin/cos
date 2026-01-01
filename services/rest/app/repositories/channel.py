@@ -32,7 +32,6 @@ class ChannelRepository:
             if user_id is not None:
                 query = query.filter(Channel.user_id == user_id)
 
-        # Фильтрация
         if id is not None:
             query = query.filter(Channel.id == id)
         if type is not None:
@@ -46,14 +45,12 @@ class ChannelRepository:
                 ).contains(func.lower(name_channel))
             )
 
-        # Пагинация
         if page is not None and size is not None:
             offset = (page - 1) * size
             query = query.offset(offset).limit(size)
             result = await self.db.execute(query)
             channels = result.scalars().all()
 
-            # Подсчет общего количества для пагинации
             count_query = select(func.count()).select_from(query.subquery())
             total_result = await self.db.execute(count_query)
             total = total_result.scalar()
@@ -77,7 +74,6 @@ class ChannelRepository:
     ) -> Optional[Channel]:
         query = select(Channel).where(Channel.id == channel_id)
 
-        # Проверка прав доступа
         if user is not None and user.role != UserRole.ADMIN:
             query = query.where(Channel.user_id == user.id)
 
@@ -87,7 +83,6 @@ class ChannelRepository:
     async def get_videos_by_channel_id(self, channel_id: int, user: User) -> List[Videos]:
         query = select(Videos).where(Videos.channel_id == channel_id)
 
-        # Если пользователь не админ — фильтруем по владельцу канала
         if user.role != UserRole.ADMIN:
             query = query.join(Channel).where(Channel.user_id == user.id)
 

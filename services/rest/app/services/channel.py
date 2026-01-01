@@ -36,7 +36,6 @@ class ChannelService:
 
     async def get_by_id(self, channel_id: int, user: User):
         channel = await self.repo.get_by_id(channel_id, user)
-        # Проверка прав доступа
         if not channel:
             raise HTTPException(status_code=404, detail="Канал не найден")
         if user.role != UserRole.ADMIN and channel.user_id != user.id:
@@ -170,7 +169,6 @@ class ChannelService:
 
         if not channel:
             raise HTTPException(status_code=404, detail="Канал не найден")
-        # Проверка прав доступа
         if user.role != UserRole.ADMIN and channel.user_id != user.id:
             raise HTTPException(
                 status_code=403,

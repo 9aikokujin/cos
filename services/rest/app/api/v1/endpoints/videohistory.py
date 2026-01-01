@@ -1,4 +1,4 @@
-# добавить возможность фильтрации по артиклям (несколько штук) 
+# добавить возможность фильтрации по артиклям (несколько штук) DONE
 
 from datetime import date as dt_date
 from http.client import HTTPException
@@ -70,7 +70,6 @@ async def get_filtered_history_all(
     if user_ids:
         params.user_ids = user_ids
 
-    # Возвращаем агрегированные данные по датам
     result = await service.get_aggregated_views_by_date_all(
         user=user,
         **params.model_dump()
@@ -152,7 +151,6 @@ async def download_video_stats_csv(
     date_to: Optional[dt_date] = Query(None, description="Дата публикации ДО (включительно)"),
     db: AsyncSession = Depends(get_db),
 ):
-    # Проверка: обычный пользователь не может указать чужой user_id
     requested_user_ids = []
     if user_ids:
         requested_user_ids.extend(user_ids)
@@ -169,7 +167,6 @@ async def download_video_stats_csv(
     else:
         actual_user_ids = list(dict.fromkeys(requested_user_ids)) if requested_user_ids else None
 
-    # Валидация channel_type
     actual_channel_type = None
     if channel_type:
         try:
@@ -190,7 +187,6 @@ async def download_video_stats_csv(
         pub_date_to=date_to,
     )
 
-    # Генерация CSV
     output = io.StringIO()
     writer = csv.writer(output)
 
