@@ -1,3 +1,5 @@
+# Добавить поиск акка по частичному совпадению account_str чтоб парсер дективировал акк
+#  при неверном пароле или если он в бане инсты
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
@@ -12,6 +14,7 @@ router = APIRouter()
 
 @router.get("/", response_model=list[AccountRead])
 async def get_all(db: AsyncSession = Depends(get_db)):
+    """Получаем все аккаунты."""
     service = AccountService(db)
     try:
         return await service.get_all()
@@ -24,6 +27,7 @@ async def search_accounts(
     query: str = Query(..., min_length=1, description="Частичное совпадение в account_str"),
     db: AsyncSession = Depends(get_db)
 ):
+    """Поиск аккаунтов по частичному совпадению в account_str."""
     service = AccountService(db)
     try:
         accounts = await service.search_accounts(query)
@@ -36,6 +40,7 @@ async def search_accounts(
 async def create_account(
     account_create: AccountCreate, db: AsyncSession = Depends(get_db)
 ):
+    """Создаем аккаунт."""
     service = AccountService(db)
     try:
         return await service.create_account(account_create)
@@ -48,6 +53,7 @@ async def bulk_create_accounts(
     payload: AccountBulkCreateRequest,
     db: AsyncSession = Depends(get_db)
 ):
+    """Создаем множество аккаунтов."""
     service = AccountService(db)
     try:
         return await service.bulk_create_accounts(payload)
@@ -61,6 +67,7 @@ async def update_account(
     account_update: AccountUpdate,
     db: AsyncSession = Depends(get_db)
 ):
+    """Обновляем аккаунт."""
     service = AccountService(db)
     try:
         return await service.update_account(id, account_update)
@@ -70,6 +77,7 @@ async def update_account(
 
 @router.delete("/{id}", response_model=AccountRead)
 async def delete_account(id: int, db: AsyncSession = Depends(get_db)):
+    """Удаляем аккаунт."""
     service = AccountService(db)
     try:
         return await service.delete_account(id)

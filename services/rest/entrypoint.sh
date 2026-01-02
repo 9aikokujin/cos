@@ -1,18 +1,16 @@
-#!/bin/bash
 set -e
 
-echo "⏳ Waiting for PostgreSQL to be ready..."
+echo "⏳ Ждем готовности PostgreSQL..."
 
-# Ждём с помощью pg_isready
 while ! pg_isready -h "$COS_POSTGRES_CONTAINER" -p "$COS_POSTGRES_PORT" -U "$COS_POSTGRES_USER" -d "$COS_POSTGRES_DB"; do
-  echo "🟡 PostgreSQL is still starting up... waiting 2 seconds"
+  echo "PostgreSQL еще не готов, ждем 2 секунды"
   sleep 2
 done
 
-echo "✅ PostgreSQL is ready!"
+echo "PostgreSQL готов!"
 
-echo "🚀 Running Alembic migrations..."
+echo "Запуск миграций Alembic..."
 alembic upgrade head
 
-echo "🔥 Starting Uvicorn..."
+echo "Запуск Uvicorn..."
 exec "$@"

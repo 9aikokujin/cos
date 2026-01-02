@@ -9,7 +9,7 @@ ACCOUNT_PATTERN = re.compile(
 
 
 def parse_account_lines(raw_data: str) -> List[str]:
-    """Normalize account lines and strip spaces from 2FA secrets."""
+    """Нормализуем строки аккаунтов и убираем пробелы из кодов 2FA."""
     if raw_data is None:
         return []
 

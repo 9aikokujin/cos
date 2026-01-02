@@ -7,13 +7,15 @@ from .timestamp import TimestampMixin
 
 
 class ChannelType(enum.Enum):
-    TIKTOK = "tiktok"
-    YOUTUBE = "youtube"
-    INSTAGRAM = "instagram"
-    LIKEE = "likee"
+    """Тип канала."""
+    TIKTOK = "tiktok" # ТикТок
+    YOUTUBE = "youtube" # Ютуб
+    INSTAGRAM = "instagram" # Инстаграм
+    LIKEE = "likee" # Лайк
 
 
 class Channel(Base, TimestampMixin):
+    """Канал."""
     __tablename__ = "channels"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -37,6 +39,7 @@ class Channel(Base, TimestampMixin):
     start_comments = Column(Integer, default=0)
 
     def grap_name_channel(self):
+        """Получаем название канала."""
         link = self.link.strip()
         tiktok_pattern = r'https://www\.tiktok\.com/@([^/?\?]+)'
         match = re.search(tiktok_pattern, link)

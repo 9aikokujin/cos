@@ -10,7 +10,7 @@ PROXY_PATTERN = re.compile(
 
 
 def parse_proxy_lines(raw_data: str) -> List[str]:
-    """Normalize and validate raw proxy lines."""
+    """Нормализуем и валидируем строки прокси."""
     if raw_data is None:
         return []
 

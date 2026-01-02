@@ -5,6 +5,7 @@ from datetime import datetime
 
 
 class VideoHistoryRead(BaseModel):
+    """История видео."""
     id: int
     amount_views: int
     amount_likes: int
@@ -17,6 +18,7 @@ class VideoHistoryRead(BaseModel):
 
 
 class VideoHistoryCreate(BaseModel):
+    """Создание истории видео."""
     video_id: int
     amount_views: Optional[int] = None
     amount_likes: Optional[int] = None
@@ -26,6 +28,7 @@ class VideoHistoryCreate(BaseModel):
 
 
 class HistoryParams(BaseModel):
+    """Фильтр истории видео."""
     id: Optional[int] = None
     date_to: Optional[datetime] = None
     date_from: Optional[datetime] = None
@@ -44,6 +47,7 @@ class HistoryParams(BaseModel):
 
 
 class VideoAmountViews(BaseModel):
+    """Статистика просмотров видео."""
     date: Optional[datetime] = None
     views: Optional[int] = None
     likes: Optional[int] = None
@@ -53,6 +57,7 @@ class VideoAmountViews(BaseModel):
 
 
 class DailyVideoCount(BaseModel):
+    """Ежедневная статистика видео."""
     date: Optional[datetime] = None
     video_count: Optional[int] = None
     date_published: Optional[datetime] = None

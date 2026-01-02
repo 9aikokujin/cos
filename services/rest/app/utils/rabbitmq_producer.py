@@ -4,13 +4,13 @@ import logging
 from typing import Any, Dict
 from app.core.config import settings
 
-# пароль эластика = "PmjG_VB0SK"
 
 class RabbitMQProducer:
+    """Продюсер RabbitMQ."""
     def __init__(
             self,
             host: str = 'localhost',
-            port: int = 5672,  # менять на 5673 зачем?
+            port: int = 5672,
             username: str = 'guest',
             password: str = 'guest'
     ):

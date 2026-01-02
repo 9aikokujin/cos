@@ -26,6 +26,7 @@ async def get_all(
 
 @router.get("/find/{user_id}", response_model=UserRead)
 async def get_user_by_id(user_id: int, db: AsyncSession = Depends(get_db)):
+    """Получаем пользователя по ID."""
     service = UserService(db)
     try:
         return await service.get_by_id(user_id)
@@ -65,6 +66,7 @@ async def search_users_paginated(
 async def create_user(
     user_create: UserCreate, db: AsyncSession = Depends(get_db)
 ):
+    """Создаем пользователя."""
     service = UserService(db)
     try:
         return await service.create_user(user_create)
@@ -74,6 +76,7 @@ async def create_user(
 
 @router.delete("/{user_id}", response_model=UserRead)
 async def delete_user(user_id: int, db: AsyncSession = Depends(get_db)):
+    """Удаляем пользователя."""
     service = UserService(db)
     try:
         return await service.delete_user(user_id)
@@ -87,6 +90,7 @@ async def register_user(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
+    """Регистрация пользователя."""
     service = UserService(db)
     try:
         return await service.register_user(current_user, user_register)
@@ -98,6 +102,7 @@ async def register_user(
 async def read_current_user(
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Получаем текущего пользователя."""
     return user
 
 
@@ -107,6 +112,7 @@ async def update_current_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Обновляем пользователя по ID (только для администраторов)."""
     service = UserService(db)
     try:
         return await service.update_own_profile(current_user, user_update)
@@ -125,6 +131,7 @@ async def update_user_by_id(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Обновляем пользователя по ID."""
     service = UserService(db)
     try:
         return await service.update_user(current_user, user_id, user_update)

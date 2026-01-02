@@ -142,7 +142,7 @@ async def _instagram_batch_job():
 
 
 def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
-    """Calculate 24h-based hours for midday/evening slots and shared minute."""
+    """Рассчитываем часы для слотов дневного/вечернего времени."""
     if offset_minutes < 0:
         offset_minutes = 0
 
@@ -158,6 +158,7 @@ def _compute_time_slots(offset_minutes: int) -> tuple[list[int], int]:
 
 
 def _mark_instagram_batch_state(active: bool, batch_id: Optional[str] = None):
+    """Отмечаем состояние Instagram batch."""
     global _instagram_batch_active, _instagram_batch_id, _instagram_batch_started_at
     _instagram_batch_active = active
     if active:
@@ -175,7 +176,7 @@ def _queue_after_batch(
 ) -> None:
     """
     Сохраняем задачу, которую нужно отправить после окончания Instagram batch.
-    Используем dict, чтобы не плодить дубликаты по channel_id.
+    Используем словарь, чтобы не плодить дубликаты по channel_id.
     """
     _pending_tasks_after_batch[task_id] = (
         task_id,
@@ -226,14 +227,17 @@ def _dispatch_pending_after_batch() -> int:
 
 
 def is_instagram_batch_active() -> bool:
+    """Проверяем, активен ли Instagram batch."""
     return _instagram_batch_active
 
 
 def get_instagram_batch_state() -> tuple[bool, Optional[str], Optional[datetime]]:
+    """Получаем состояние Instagram batch."""
     return _instagram_batch_active, _instagram_batch_id, _instagram_batch_started_at
 
 
 def release_instagram_batch(batch_id: Optional[str] = None) -> bool:
+    """Освобождаем Instagram batch."""
     active, current_batch_id, _ = get_instagram_batch_state()
     if not active:
         return False
@@ -246,6 +250,7 @@ def release_instagram_batch(batch_id: Optional[str] = None) -> bool:
 
 
 async def _auto_release_instagram_batch(batch_id: str):
+    """Автоматически освобождаем Instagram batch по таймауту."""
     await asyncio.sleep(max(1, INSTAGRAM_BATCH_LOCK_TIMEOUT_MINUTES * 60))
     active, current_batch_id, _ = get_instagram_batch_state()
     if active and current_batch_id == batch_id:
@@ -294,6 +299,7 @@ def schedule_channel_task(
     run_immediately: bool = False,
     offset_minutes: int = 0,
 ) -> bool:
+    """Планируем задачу парсинга для канала."""
     hours, minute = _compute_time_slots(offset_minutes)
     hour_expr = ",".join(str(h) for h in hours)
     job_id = f"task_{channel_id}"
@@ -318,7 +324,6 @@ def schedule_channel_task(
     if next_run is None:
         next_run = getattr(job, "next_fire_time", None)
     if next_run is None:
-        # APScheduler 4.x no longer exposes next_run_time; compute manually.
         try:
             now = datetime.now(MOSCOW_TZ)
             next_run = job.trigger.get_next_fire_time(None, now)
@@ -364,11 +369,8 @@ async def restore_scheduled_tasks():
     Точка выбора расписания.
     Держите активным только один из вариантов ниже (раскомментируйте нужный).
     """
-    # --- Ежедневная очередь 05:00 и 20:00 (оставьте включённой для боевого режима) ---
+    # --- Ежедневная очередь 05:00 и 20:00 ---
     await _restore_scheduled_tasks_daily()
-
-    # --- CICD очередь: запуск через 7 минут и шагом 7 минут ---
-    # await restore_scheduled_tasks_cicd()
 
 
 async def _restore_scheduled_tasks_daily():
@@ -382,6 +384,7 @@ async def _restore_scheduled_tasks_daily():
         return
 
     def _sort_key(task: Channel):
+        """Ключ для сортировки каналов."""
         return (
             task.created_at or datetime.min.replace(tzinfo=timezone.utc),
             task.id,

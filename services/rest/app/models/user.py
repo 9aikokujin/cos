@@ -9,11 +9,13 @@ from .timestamp import TimestampMixin
 
 
 class UserRole(enum.Enum):
-    ADMIN = "admin"
-    USER = "user"
+    """Роль пользователя."""
+    ADMIN = "admin" # Админ
+    USER = "user" # Пользователь
 
 
 class User(Base, TimestampMixin):
+    """Пользователь."""
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)

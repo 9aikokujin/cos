@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Config(BaseSettings):
+    """Конфигурация парсера Likee."""
     RABBITMQ_URL: str
     CLICKHOUSE_URL: str
     LOGSTASH_HOST: str

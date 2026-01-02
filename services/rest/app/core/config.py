@@ -7,6 +7,7 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
+    """Настройки."""
     DATABASE_URL: str
     TELEGRAM_BOT_TOKEN: str
     TELEGRAM_ADMIN_ID: int

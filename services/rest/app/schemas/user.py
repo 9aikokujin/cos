@@ -3,6 +3,7 @@ from typing import List
 
 
 class UserBase(BaseModel):
+    """Пользователь."""
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
@@ -13,10 +14,12 @@ class UserBase(BaseModel):
 
 
 class UserCreate(BaseModel):
+    """Создание пользователя."""
     tg_id: int
 
 
 class UserRead(UserBase, UserCreate):
+    """Чтение пользователя."""
     id: int
     role: str
 
@@ -25,6 +28,7 @@ class UserRead(UserBase, UserCreate):
 
 
 class UserUpdate(BaseModel):
+    """Обновление пользователя."""
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
@@ -34,6 +38,7 @@ class UserUpdate(BaseModel):
 
 
 class UserRegister(BaseModel):
+    """Регистрация пользователя."""
     username: str | None = None
     fullname: str
     first_name: str | None = None
@@ -42,5 +47,6 @@ class UserRegister(BaseModel):
 
 
 class PaginatedUsers(BaseModel):
+    """Пагинация пользователей."""
     users: List[UserRead]
     pagination: dict

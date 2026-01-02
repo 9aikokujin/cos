@@ -8,6 +8,7 @@ from .timestamp import TimestampMixin
 
 
 class Proxy(Base, TimestampMixin):
+    """Прокси."""
     __tablename__ = "proxies"
 
     id = Column(Integer, primary_key=True)
@@ -16,4 +17,5 @@ class Proxy(Base, TimestampMixin):
     for_likee = Column(Boolean, default=False)
 
     def toggle_active(self):
+        """Переключаем активность прокси."""
         self.is_active = not self.is_active

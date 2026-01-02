@@ -1,3 +1,4 @@
+# Жекина стата не зашла, сделаем через апишку
 from datetime import datetime, timedelta
 
 import asyncio
@@ -14,13 +15,14 @@ from config import config
 bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
+
 @dp.message(Command(commands=["start"]))
 async def start_command(message: types.Message):
     await message.answer("Бот запущен и ожидает задачи из RabbitMQ")
 
 
-
 async def get_analytics(params: dict = None):
+    """Получаем аналитику пользователя."""
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
@@ -37,7 +39,9 @@ async def get_analytics(params: dict = None):
             print(f"HTTP ошибка: {e.response.status_code}")
             return None
 
+
 async def generator_message(user_id):
+    """Генерируем сообщение для пользователя."""
     yesterday = datetime.now() - timedelta(days=1)
     yesterday_date = yesterday.strftime("%Y-%m-%d")
 
@@ -66,7 +70,9 @@ async def generator_message(user_id):
 
     return message
 
+
 async def process_task(message: aio_pika.IncomingMessage):
+    """Обрабатываем задачу из очереди."""
     try:
         task_data = json.loads(message.body.decode('utf-8'))
         user_id = task_data.get("user_id")
@@ -86,7 +92,9 @@ async def process_task(message: aio_pika.IncomingMessage):
 
     await message.ack()
 
+
 async def start_rabbitmq():
+    """Запускаем RabbitMQ."""
     while True:
         try:
             connection = await aio_pika.connect_robust(config.RABBITMQ_URL)
@@ -104,7 +112,9 @@ async def start_rabbitmq():
             print("Повторная попытка подключения через 5 секунд...")
             await asyncio.sleep(5)
 
+
 async def main():
+    """Запускаем бота."""
     bot_task = asyncio.create_task(dp.start_polling(bot))
 
     rabbitmq_connection = await start_rabbitmq()
@@ -117,6 +127,7 @@ async def main():
             await rabbitmq_connection.close()
     else:
         print("Не удалось подключиться к RabbitMQ")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

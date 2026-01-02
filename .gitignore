@@ -25,6 +25,7 @@ dist-ssr
 infra/local/.env
 services/parsers/.env
 services/rest/.env
+reedme.txt
 venv
 env
 __pycache__

@@ -9,6 +9,7 @@ from utils.logger import TCPLogger
 class RabbitMQParserClient:
     def __init__(self, amqp_url: str, queue_name: str,
                  logger: TCPLogger, parser: LikeeParser):
+        """Инициализируем клиент для работы с RabbitMQ."""
         self.amqp_url = amqp_url
         self.queue_name = queue_name
         self.logger = logger
@@ -18,12 +19,14 @@ class RabbitMQParserClient:
         self.queue = None
 
     async def connect(self):
+        """Подключаемся к RabbitMQ."""
         self.connection = await connect_robust(self.amqp_url)
         self.channel = await self.connection.channel()
         self.queue = await self.channel.declare_queue(
             self.queue_name, durable=True)
 
     async def handle_message(self, message: IncomingMessage):
+        """Обрабатываем сообщение из очереди."""
         async with message.process():
             task_data_str = message.body.decode()
             print(task_data_str)
@@ -54,6 +57,7 @@ class RabbitMQParserClient:
             #         url, 1, 1, 1, 3, proxy_list, accounts)
 
     async def consume(self):
+        """Запускаем потребление сообщений из очереди."""
         await self.connect()
         self.logger.send("INFO", f"Подключен к RabbitMQ, ожидаю задачи в очереди '{self.queue_name}'...")
         print(f"Подключен к RabbitMQ, ожидаю задачи в очереди '{self.queue_name}'")

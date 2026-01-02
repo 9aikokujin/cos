@@ -36,6 +36,7 @@ async def get_videos(
         description="Можно передавать несколько ID: user_ids=1&user_ids=2"
     ),
 ):
+    """Получаем все видео."""
     history_service = VideoHistoryService(db)
     service = VideosService(db, history_service)
     result = await service.get_all_filtered_paginated(
@@ -57,6 +58,7 @@ async def get_video(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Получаем видео по ID."""
     history_service = VideoHistoryService(db)
     service = VideosService(db, history_service)
     videos = await service.get_by_video_id(video_id, user)
@@ -68,6 +70,7 @@ async def create_video(
     video_new: VideosCreate,
     db: AsyncSession = Depends(get_db)
 ):
+    """Создаем видео."""
     history_service = VideoHistoryService(db)
     videos_service = VideosService(db, history_service=history_service)
     video = await videos_service.create_or_update_and_create_history(video_new)
@@ -81,6 +84,7 @@ async def update_video(
     db: AsyncSession = Depends(get_db),
     # user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)) # Убрал проверку роли, т.к. этот метод используется только для обновления видео парсерами
 ):
+    """Обновляем видео."""
     history_service = VideoHistoryService(db)
     service = VideosService(db, history_service)
     video = await service.create_or_update_and_create_history(
@@ -94,6 +98,7 @@ async def delete_video(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Удаляем видео."""
     history_service = VideoHistoryService(db)
     service = VideosService(db, history_service)
     await service.delete(video_id, user)
@@ -105,6 +110,7 @@ async def upload_video_image(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
+    """Загружаем изображение видео."""
     history_service = VideoHistoryService(db)
     service = VideosService(db, history_service)
     file_path = None

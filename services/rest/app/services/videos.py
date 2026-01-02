@@ -12,11 +12,13 @@ from app.models.videos import VideoType, Videos
 
 
 class VideosService:
+    """Сервис для работы с видео."""
     def __init__(
         self,
         db: AsyncSession,
         history_service: VideoHistoryService
     ):
+        """Инициализируем сервис."""
         self.repo = VideosRepository(db)
         self.history_service = history_service
 
@@ -50,6 +52,7 @@ class VideosService:
         page: Optional[int] = None,
         size: Optional[int] = None
     ):
+        """Получаем все видео с фильтрацией и пагинацией."""
         normalized_user_ids = self._normalize_user_ids(user_id, user_ids)
         return await self.repo.get_all_filtered_paginated(
             user_ids=normalized_user_ids,
@@ -62,6 +65,7 @@ class VideosService:
         )
 
     async def get_by_id(self, video_id: int, user_id: int):
+        """Получаем видео по ID."""
         user = None
         if user_id is not None:
             result = await self.repo.db.execute(
@@ -79,20 +83,18 @@ class VideosService:
         return video
 
     async def get_by_video_id(self, video_id: int, user: User) -> dict:
+        """Получаем видео по video_id."""
         video = await self.repo.get_by_video_id(video_id)
 
         if not video:
             raise ValueError("Видео не найдено")
 
-        # Проверяем, что у видео есть канал (на всякий случай)
         if not video.channel:
             raise ValueError("Видео не привязано к каналу")
 
-        # Проверка прав: админ видит всё, пользователь — только если канал его
         if user.role != UserRole.ADMIN and video.channel.user_id != user.id:
             raise ValueError("Недостаточно прав для доступа к видео")
 
-        # Получаем все записи истории для видео
         history = await self.history_service.get_all_filtered(
             user=user,
             video_id=video.id
@@ -104,6 +106,7 @@ class VideosService:
         }
 
     async def get_by_article(self, articles: str, user: User):
+        """Получаем видео по артиклю."""
         video = await self.repo.get_by_article(articles, user)
         if not video:
             raise ValueError("Видео не найдено по артиклю")
@@ -120,16 +123,13 @@ class VideosService:
         """
         video = None
 
-        # Сначала пробуем найти видео по video_id (PATCH)
         if video_id:
             video = await self.repo.get_by_id(video_id)
 
-        # Если видео не найдено по ID, ищем по link (POST или новая запись)
         if not video:
             video = await self.repo.get_by_link(dto.link)
 
         if video:
-            # Обновляем видео
             update_dto = VideosUpdate(
                 type=dto.type,
                 name=dto.name,
@@ -143,13 +143,11 @@ class VideosService:
             video = await self.repo.update(video.id, update_dto)
             is_new = False
         else:
-            # Создаём новое видео
             video = await self.repo.create(dto)
             if not video:
                 raise ValueError("Ошибка при создании видео")
             is_new = True
 
-        # Создаём новую запись в истории просмотров без проверки пользователя
         history_dto = VideoHistoryCreate(
             video_id=video.id,
             amount_views=dto.amount_views,
@@ -163,6 +161,7 @@ class VideosService:
         return video
 
     async def delete(self, video_id: int, user: User):
+        """Удаляем видео."""
         video = await self.repo.get_by_video_id(video_id)
         if user.role != UserRole.ADMIN and video.user_id != user.id:
             raise ValueError("Недостаточно прав для доступа к видео")
@@ -171,6 +170,7 @@ class VideosService:
         return await self.repo.delete(video_id)
 
     async def update_image(self, video_id: int, image: str):
+        """Обновляем изображение видео."""
         video = await self.repo.get_by_video_id(video_id)
         if not video:
             raise ValueError("Видео не найдено")

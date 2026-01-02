@@ -12,7 +12,9 @@ from app.models.videos import Videos, VideoType
 
 
 class VideosRepository:
+    """Репозиторий для работы с видео."""
     def __init__(self, db: AsyncSession):
+        """Инициализируем репозиторий."""
         self.db = db
 
     async def get_all_filtered_paginated(
@@ -27,6 +29,7 @@ class VideosRepository:
         page: Optional[int] = None,
         size: Optional[int] = None
     ) -> dict:
+        """Получаем все видео с фильтрацией и пагинацией."""
         query = select(Videos).order_by(Videos.created_at.desc())
 
         if user_ids:
@@ -94,6 +97,7 @@ class VideosRepository:
             return None
 
     async def get_by_video_id(self, video_id: int):
+        """Получаем видео по ID."""
         stmt = (
             select(Videos)
             .where(Videos.id == video_id)
@@ -116,6 +120,7 @@ class VideosRepository:
             return None
 
     async def create(self, dto: VideosCreate) -> Videos:
+        """Создаем видео."""
         channel = await self.db.get(Channel, dto.channel_id)
         if not channel:
             raise ValueError("Канал не найден")

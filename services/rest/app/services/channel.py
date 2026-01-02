@@ -16,7 +16,9 @@ from fastapi import HTTPException
 
 
 class ChannelService:
+    """Сервис для работы с каналами."""
     def __init__(self, db: AsyncSession):
+        """Инициализируем сервис."""
         self.repo = ChannelRepository(db)
 
     async def get_all_filtered_paginated(
@@ -30,11 +32,13 @@ class ChannelService:
         page: Optional[int] = None,
         size: Optional[int] = None
     ):
+        """Получаем все каналы с фильтрацией и пагинацией."""
         return await self.repo.get_all_filtered_paginated(
             user, user_id, id, type, link, name_channel, page, size
         )
 
     async def get_by_id(self, channel_id: int, user: User):
+        """Получаем канал по id."""
         channel = await self.repo.get_by_id(channel_id, user)
         if not channel:
             raise HTTPException(status_code=404, detail="Канал не найден")
@@ -53,9 +57,11 @@ class ChannelService:
         }
 
     async def get_by_link(self, link: str):
+        """Получаем канал по ссылке."""
         return await self.repo.get_by_link(link)
 
     async def _calculate_offset_for_channel(self, channel_id: int) -> int:
+        """Рассчитываем смещение для канала."""
         result = await self.repo.db.execute(select(Channel))
         channels = result.scalars().all()
         channels = sorted(
@@ -73,6 +79,7 @@ class ChannelService:
         return position * 5
 
     async def create(self, dto: ChannelCreate, user: User):
+        """Создаем канал."""
         existing_channel = await self.repo.get_by_link(str(dto.link))
         if existing_channel:
             raise ValueError("Канал уже существует")
@@ -117,6 +124,7 @@ class ChannelService:
 
     async def create_for_user(self, dto: ChannelCreate,
                               target_user_id: int, current_user: User):
+        """Создаем канал для пользователя."""
         if current_user.role != UserRole.ADMIN and target_user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Недостаточно прав")
 
@@ -178,6 +186,7 @@ class ChannelService:
         return await self.repo.update(channel_id, dto)
 
     async def delete(self, channel_id: int, user: User):
+        """Удаляем канал."""
         channel = await self.repo.get_by_id(channel_id, user)
         if not channel:
             raise HTTPException(status_code=404, detail="Канал не найден")

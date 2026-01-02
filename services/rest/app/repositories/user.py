@@ -8,7 +8,9 @@ from app.schemas.user import UserCreate, UserRegister, UserUpdate
 
 
 class UserRepository:
+    """Репозиторий для работы с пользователями."""
     def __init__(self, db: AsyncSession):
+        """Инициализируем репозиторий."""
         self.db = db
 
     async def get_all_paginated(self, page: int, size: int):
@@ -33,10 +35,12 @@ class UserRepository:
         }
 
     async def get_by_id(self, id: int) -> User | None:
+        """Получаем пользователя по ID."""
         result = await self.db.execute(select(User).filter_by(id=id))
         return result.scalar_one_or_none()
 
     async def get_by_tg_id(self, tg_id: int) -> User | None:
+        """Получаем пользователя по TG ID."""
         result = await self.db.execute(select(User).filter_by(tg_id=tg_id))
         return result.scalar_one_or_none()
 
@@ -131,6 +135,7 @@ class UserRepository:
         return user
 
     async def block_user(self, user_id: int):
+        """Блокировка пользователя."""
         user = await self.get_by_id(user_id)
 
         if not user:
@@ -143,6 +148,7 @@ class UserRepository:
         return user
 
     async def create(self, user_create: UserCreate) -> User:
+        """Создание пользователя."""
         db_user = User(**user_create.model_dump())
         self.db.add(db_user)
         await self.db.commit()
@@ -150,6 +156,7 @@ class UserRepository:
         return db_user
 
     async def delete(self, user_id: int):
+        """Удаление пользователя."""
         user = await self.get_by_id(user_id)
 
         if not user:

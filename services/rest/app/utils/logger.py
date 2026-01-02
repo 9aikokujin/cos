@@ -6,6 +6,7 @@ from app.core.config import settings
 
 
 class TCPLogger:
+    """Логирование в Logstash через TCP."""
     def __init__(self, service_name: str, host: str, port: int):
         self.service_name = service_name
         self.host = host

@@ -13,11 +13,14 @@ from sqlalchemy.orm import selectinload
 
 
 class VideoHistoryService:
+    """Сервис для работы с историей видео."""
     def __init__(self, db: AsyncSession):
+        """Инициализируем сервис."""
         self.repo = VideoHistoryRepository(db)
 
     @staticmethod
     def _normalize_user_ids(user_ids: Optional[List[int]]) -> Optional[List[int]]:
+        """Нормализуем список пользователей."""
         if not user_ids:
             return None
         # Убираем None и дубликаты, сохраняя порядок
@@ -34,6 +37,7 @@ class VideoHistoryService:
         user_id: Optional[int],
         user_ids: Optional[List[int]],
     ) -> Optional[List[int]]:
+        """Определяем список пользователей для фильтрации."""
         if user.role != UserRole.ADMIN:
             return [user.id]
         normalized = self._normalize_user_ids(user_ids)
@@ -58,6 +62,7 @@ class VideoHistoryService:
         date_published_from: Optional[dt_date] = None,
         video_id: Optional[int] = None,
     ):
+        """Получаем все истории видео с фильтрацией."""
         effective_user_ids = self._resolve_user_ids(user, user_id, user_ids)
         records = await self.repo.get_filtered(
             id=id,
@@ -91,6 +96,7 @@ class VideoHistoryService:
         return formatted
 
     async def get_by_id(self, video_history_id: int, user: User):
+        """Получаем историю видео по ID."""
         video_history = await self.repo.get_by_id(video_history_id)
         if not video_history:
             raise ValueError("Видео не найдено")
@@ -99,7 +105,7 @@ class VideoHistoryService:
         return video_history
 
     async def create(self, dto: VideoHistoryCreate):
-        # user_id = user.id if user.role != UserRole.ADMIN else None
+        """Создаем историю видео."""
         video_history = await self.repo.create(dto)
         if not video_history:
             raise ValueError("Ошибка при создании истории")
@@ -110,6 +116,7 @@ class VideoHistoryService:
         user: User,
         **filters
     ):
+        """Получаем агрегированную статистику просмотров по дате и артиклю."""
         filters = dict(filters)
         filters["user_ids"] = self._resolve_user_ids(
             user,
@@ -124,6 +131,7 @@ class VideoHistoryService:
         user: User,
         **filters
     ):
+        """Получаем агрегированную статистику просмотров по всем пользователям."""
         filters = dict(filters)
         filters["user_ids"] = self._resolve_user_ids(
             user,
@@ -142,6 +150,7 @@ class VideoHistoryService:
         pub_date_from: Optional[dt_date] = None,
         pub_date_to: Optional[dt_date] = None,
     ):
+        """Получаем статистику для CSV."""
         query = (
             select(Videos)
             .join(Videos.channel)
@@ -151,7 +160,6 @@ class VideoHistoryService:
             )
             .where(Videos.articles.isnot(None))
         )
-        # Фильтр по пользователю
         effective_user_ids = self._resolve_user_ids(
             user,
             target_user_id,
@@ -159,16 +167,13 @@ class VideoHistoryService:
         )
         if effective_user_ids:
             query = query.where(Channel.user_id.in_(effective_user_ids))
-        # Фильтр по типу канала
         if channel_type is not None:
             query = query.where(Channel.type == channel_type)
         result = await self.repo.db.execute(query)
         videos = result.scalars().all()
-        # Оставляем только с артиклем
         filtered_videos = [v for v in videos if v.articles]
         stats = []
         all_dates = set()
-        # Собираем данные и все возможные даты из истории
         for video in filtered_videos:
             daily_views = {}
             daily_likes = {}
@@ -217,6 +222,7 @@ class VideoHistoryService:
         user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ) -> List[DailyVideoCount]:
+        """Получаем ежедневную статистику видео с артиклем по всем пользователям."""
         base_view_date = func.date(VideoHistory.created_at)
         ranked_entries = (
             select(
@@ -305,6 +311,7 @@ class VideoHistoryService:
         user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ) -> List[DailyVideoCount]:
+        """Получаем ежедневную статистику видео по всем пользователям."""
         subq = (
             select(
                 func.date(VideoHistory.date_published).label("view_date"),

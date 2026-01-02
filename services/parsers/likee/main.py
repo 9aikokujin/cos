@@ -9,8 +9,9 @@ from utils.rabbit_client import RabbitMQParserClient
 
 if __name__ == "__main__":
     async def main():
+        """Запускаем парсер Likee."""
         try:
-            print("Starting Likee parser...", flush=True)
+            print("Начал парсить Likee...", flush=True)
             await asyncio.sleep(60)
             parser = LikeeParser(TCPLogger("likee_parser"))
             client = RabbitMQParserClient(
@@ -19,14 +20,14 @@ if __name__ == "__main__":
                 logger=TCPLogger("likee_parser"),
                 parser=parser
             )
-            print("Attempting to start consuming messages...", flush=True)
+            print("Начал потреблять сообщения из очереди...", flush=True)
             await client.consume()
-            print("Consume loop finished (unexpected). Exiting.", flush=True)
+            print("Потребление сообщений из очереди завершено. Выход.", flush=True)
 
         except Exception as e:
-            print(f"Critical error occurred: {e}. Waiting 1 minute before exit...", flush=True)
+            print(f"Ошибка при парсинге: {e}. Ожидание 1 минуты перед выходом...", flush=True)
             await asyncio.sleep(60)
-            print("Exiting after error and delay.", flush=True)
+            print("Выход после ошибки и задержки.", flush=True)
             raise
 
     asyncio.run(main())

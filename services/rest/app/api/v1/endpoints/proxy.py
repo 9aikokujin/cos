@@ -13,6 +13,7 @@ router = APIRouter()
 
 @router.get("/", response_model=list[ProxyRead])
 async def get_all(db: AsyncSession = Depends(get_db)):
+    """Получаем все прокси."""
     service = ProxyService(db)
     try:
         return await service.get_all()
@@ -22,6 +23,7 @@ async def get_all(db: AsyncSession = Depends(get_db)):
 
 @router.get("/{id}", response_model=ProxyRead)
 async def get_by_id(id: int, db: AsyncSession = Depends(get_db)):
+    """Получаем прокси по ID."""
     service = ProxyService(db)
     proxy = await service.get_by_id(id)
     if not proxy:
@@ -33,6 +35,7 @@ async def get_by_id(id: int, db: AsyncSession = Depends(get_db)):
 async def create_proxy(
     proxy_create: ProxyCreate, db: AsyncSession = Depends(get_db)
 ):
+    """Создаем прокси."""
     service = ProxyService(db)
     try:
         return await service.create_proxy(proxy_create)
@@ -45,6 +48,7 @@ async def bulk_create_proxies(
     payload: ProxyBulkCreateRequest,
     db: AsyncSession = Depends(get_db)
 ):
+    """Создаем множество прокси."""
     service = ProxyService(db)
     try:
         return await service.bulk_create_proxies(payload)
@@ -58,6 +62,7 @@ async def update_proxy(
     proxy_update: ProxyUpdate,
     db: AsyncSession = Depends(get_db)
 ):
+    """Обновляем прокси."""
     service = ProxyService(db)
     try:
         return await service.update_proxy(id, proxy_update)
@@ -67,6 +72,7 @@ async def update_proxy(
 
 @router.delete("/{id}", response_model=ProxyRead)
 async def delete_proxy(id: int, db: AsyncSession = Depends(get_db)):
+    """Удаляем прокси."""
     service = ProxyService(db)
     try:
         return await service.delete_proxy(id)
@@ -76,6 +82,7 @@ async def delete_proxy(id: int, db: AsyncSession = Depends(get_db)):
 
 @router.delete("/", response_model=ProxyBulkDeleteResponse)
 async def delete_all_proxies(db: AsyncSession = Depends(get_db)):
+    """Удаляем все прокси."""
     service = ProxyService(db)
     try:
         deleted = await service.delete_all_proxies()

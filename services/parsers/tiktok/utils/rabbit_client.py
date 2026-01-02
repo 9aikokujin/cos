@@ -7,8 +7,10 @@ from utils.logger import TCPLogger
 
 
 class RabbitMQParserClient:
+    """Клиент для работы с RabbitMQ для парсинга TikTok."""
     def __init__(self, amqp_url: str, queue_name: str,
                  logger: TCPLogger, parser: TikTokParser):
+        """Инициализируем клиент."""
         self.amqp_url = amqp_url
         self.queue_name = queue_name
         self.logger = logger
@@ -18,6 +20,7 @@ class RabbitMQParserClient:
         self.queue = None
 
     async def connect(self):
+        """Подключаемся к RabbitMQ."""
         self.connection = await connect_robust(self.amqp_url)
         self.channel = await self.connection.channel()
         await self.channel.set_qos(prefetch_count=1)
@@ -25,6 +28,7 @@ class RabbitMQParserClient:
             self.queue_name, durable=True)
 
     async def handle_message(self, message: IncomingMessage):
+        """Обрабатываем сообщение из очереди."""
         async with message.process():
             task_data_str = message.body.decode()
             task_data = json.loads(task_data_str)
@@ -46,6 +50,7 @@ class RabbitMQParserClient:
             #     data = await self.parser.parse_single_video(url, user_id, 3)
 
     async def consume(self):
+        """Запускаем потребление сообщений из очереди."""
         await self.connect()
         self.logger.send("INFO", f"Подключен к RabbitMQ, ожидаю задачи в очереди '{self.queue_name}'...")
         print("Подключен к RabbitMQ, ожидаю задачи в очереди")

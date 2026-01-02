@@ -6,12 +6,15 @@ from config import config
 
 
 class TCPLogger:
+    """Логгер для отправки логов в Logstash."""
     def __init__(self, service_name: str):
+        """Инициализируем логгер."""
         self.host = config.LOGSTASH_HOST
         self.port = config.LOGSTASH_PORT
         self.service_name = service_name
 
     def send(self, level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], message: str, **extra):
+        """Отправляем лог в Logstash."""
         log_data = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "level": level,
@@ -25,4 +28,4 @@ class TCPLogger:
                 s.connect((self.host, self.port))
                 s.sendall(json.dumps(log_data).encode("utf-8"))
         except Exception as e:
-            print(f"Failed to send log: {e}")
+            print(f"Не удалось отправить лог: {e}")

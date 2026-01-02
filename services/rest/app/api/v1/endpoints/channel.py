@@ -26,6 +26,7 @@ async def get_channels(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Получаем все каналы."""
     service = ChannelService(db)
 
     result = await service.get_all_filtered_paginated(
@@ -47,6 +48,7 @@ async def get_channel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Получаем канал по ID."""
     service = ChannelService(db)
     channel = await service.get_by_id(channel_id, user)
     return channel
@@ -59,6 +61,7 @@ async def create_channel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Создаем канал."""
     service = ChannelService(db)
 
     target_user_id = user_id if user_id is not None else user.id
@@ -80,6 +83,7 @@ async def update_channel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Обновляем канал."""
     service = ChannelService(db)
     updated_channel = await service.update(channel_id, channel_update, user)
     return updated_channel
@@ -91,6 +95,7 @@ async def delete_channel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER))
 ):
+    """Удаляем канал."""
     service = ChannelService(db)
     deleted_channel = await service.delete(channel_id, user)
     return deleted_channel

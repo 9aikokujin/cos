@@ -10,5 +10,6 @@ Base = declarative_base()
 
 
 async def get_db():
+    """Получаем сессию."""
     async with SessionLocal() as session:
         yield session

@@ -7,13 +7,15 @@ from sqlalchemy.sql.sqltypes import Enum
 
 
 class VideoType(enum.Enum):
-    YOUTUBE = "youtube"
-    TIKTOK = "tiktok"
-    INSTAGRAM = "instagram"
-    LIKEE = "likee"
+    """Тип видео."""
+    YOUTUBE = "youtube" # Ютуб
+    TIKTOK = "tiktok" # ТикТок
+    INSTAGRAM = "instagram" # Инстаграм
+    LIKEE = "likee" # Лайк
 
 
 class Videos(Base, TimestampMixin):
+    """Видео."""
     __tablename__ = "videos"
 
     id = Column(Integer, primary_key=True, index=True)

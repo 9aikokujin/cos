@@ -6,6 +6,7 @@ from app.models.channel import ChannelType
 
 
 class ChannelRead(BaseModel):
+    """Чтение канала."""
     id: int
     type: ChannelType
     link: str
@@ -21,6 +22,7 @@ class ChannelRead(BaseModel):
 
 
 class ChannelCreate(BaseModel):
+    """Создание канала."""
     type: ChannelType
     link: str
     name_channel: Optional[str] = None
@@ -30,6 +32,7 @@ class ChannelCreate(BaseModel):
 
 
 class ChannelUpdate(BaseModel):
+    """Обновление канала."""
     type: Optional[ChannelType] = None
     link: Optional[str] = None
     start_views: Optional[int] = 0
@@ -38,6 +41,7 @@ class ChannelUpdate(BaseModel):
 
 
 class ChannelFilter(BaseModel):
+    """Фильтр канала."""
     id: Optional[int] = None
     type: Optional[ChannelType] = None
     link: Optional[str] = None

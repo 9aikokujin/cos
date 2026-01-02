@@ -15,6 +15,7 @@ from app.models.channel import ChannelType
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Жизненный цикл приложения."""
     print("🚀 Приложение стартует...")
     async with SessionLocal() as db:
         try:

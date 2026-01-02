@@ -20,40 +20,41 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
     credentials: HTTPAuthorizationCredentials = Security(bearer_scheme),
 ) -> User:
+    """Получаем текущего пользователя."""
     token = credentials.credentials
 
     try:
         telegram_data = dict(pair.split("=") for pair in token.split("&"))
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Telegram token format")
+        raise HTTPException(status_code=400, detail="Неверный формат токена телеграма")
 
     # if not telegram_data or not check_telegram_auth(telegram_data):
     #     raise HTTPException(status_code=401, detail="Invalid Telegram authorization")
 
     if not telegram_data:
-        raise HTTPException(status_code=400, detail="Missing Telegram data")
+        raise HTTPException(status_code=400, detail="Данные телеграма не найдены")
 
     user_encoded = telegram_data.get("user")
     if not user_encoded:
-        raise HTTPException(status_code=400, detail="Missing 'user' data")
+        raise HTTPException(status_code=400, detail="Данные пользователя не найдены")
 
     user_json_str = urllib.parse.unquote(user_encoded)
     user_data = json.loads(user_json_str)
 
     telegram_id_str = user_data.get("id")
     if not telegram_id_str:
-        raise HTTPException(status_code=400, detail="Missing 'id' in Telegram data")
+        raise HTTPException(status_code=400, detail="ID в данных телеграма не найден")
 
     try:
         telegram_id = int(telegram_id_str)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid 'id' format")
+        raise HTTPException(status_code=400, detail="Неверный формат ID")
 
     user_service = UserService(db)
     user = await user_service.get_by_telegram_id(telegram_id)
 
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
     return user
 
 

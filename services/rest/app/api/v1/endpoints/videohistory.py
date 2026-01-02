@@ -26,6 +26,7 @@ async def get_all_video_history(
     params: HistoryParams = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
+    """Получаем все историю видео."""
     service = VideoHistoryService(db)
     if user_ids:
         params.user_ids = user_ids
@@ -45,6 +46,7 @@ async def get_filtered_history_with_article(
     params: HistoryParams = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
+    """Получаем историю видео с артиклями."""
     service = VideoHistoryService(db)
 
     if articles:
@@ -66,6 +68,7 @@ async def get_filtered_history_all(
     params: HistoryParams = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
+    """Получаем все истории видео."""
     service = VideoHistoryService(db)
     if user_ids:
         params.user_ids = user_ids
@@ -88,6 +91,10 @@ async def daily_video_with_article_count(
     articles: Optional[List[str]] = None,
     db: AsyncSession = Depends(get_db),
 ):
+    """
+    Получаем статистику видео с артиклем за выбранный день
+    отталкиваясь от даты публикации видео в соц сети.
+    """
     service = VideoHistoryService(db)
 
     result = await service.get_daily_video_with_article_count(
@@ -123,6 +130,7 @@ async def daily_video_count_all(
     articles: Optional[List[str]] = None,
     db: AsyncSession = Depends(get_db),
 ):
+    """Получаем количество видео за выбранный день."""
     service = VideoHistoryService(db)
 
     result = await service.get_daily_video_count_all(
@@ -151,6 +159,7 @@ async def download_video_stats_csv(
     date_to: Optional[dt_date] = Query(None, description="Дата публикации ДО (включительно)"),
     db: AsyncSession = Depends(get_db),
 ):
+    """Скачиваем статистику видео в CSV формате."""
     requested_user_ids = []
     if user_ids:
         requested_user_ids.extend(user_ids)
@@ -171,11 +180,11 @@ async def download_video_stats_csv(
     if channel_type:
         try:
             actual_channel_type = ChannelType(channel_type.lower())
-        except ValueError:
+        except ValueError as exc:
             raise HTTPException(
                 status_code=400,
                 detail=f"Неверный тип канала. Допустимые значения: {[t.value for t in ChannelType]}"
-            )
+            ) from exc
 
     service = VideoHistoryService(db)
     stats, sorted_dates = await service.get_video_stats_for_csv(
@@ -218,6 +227,7 @@ async def get_video_history(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role(UserRole.ADMIN, UserRole.USER)),
 ):
+    """Получаем историю видео по ID."""
     service = VideoHistoryService(db)
     result = await service.get_by_id(id, user)
     return result

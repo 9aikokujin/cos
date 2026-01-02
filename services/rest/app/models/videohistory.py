@@ -5,6 +5,7 @@ from .timestamp import TimestampMixin
 
 
 class VideoHistory(Base, TimestampMixin):
+    """История видео."""
     __tablename__ = "video_history"
 
     id = Column(Integer, primary_key=True, index=True)

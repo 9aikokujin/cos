@@ -10,7 +10,9 @@ from app.models.user import User, UserRole
 
 
 class ChannelRepository:
+    """Репозиторий для работы с каналами."""
     def __init__(self, db: AsyncSession):
+        """Инициализируем репозиторий."""
         self.db = db
 
     async def get_all_filtered_paginated(
@@ -24,6 +26,7 @@ class ChannelRepository:
         page: Optional[int] = None,
         size: Optional[int] = None
     ) -> dict:
+        """Получаем все каналы с фильтрацией и пагинацией."""
         query = select(Channel)
 
         if user.role != UserRole.ADMIN:
@@ -72,6 +75,7 @@ class ChannelRepository:
     async def get_by_id(
         self, channel_id: int, user: Optional[User] = None
     ) -> Optional[Channel]:
+        """Получаем канал по ID."""
         query = select(Channel).where(Channel.id == channel_id)
 
         if user is not None and user.role != UserRole.ADMIN:
@@ -81,6 +85,7 @@ class ChannelRepository:
         return result.scalar_one_or_none()
 
     async def get_videos_by_channel_id(self, channel_id: int, user: User) -> List[Videos]:
+        """Получаем видео по ID канала."""
         query = select(Videos).where(Videos.channel_id == channel_id)
 
         if user.role != UserRole.ADMIN:
@@ -90,10 +95,12 @@ class ChannelRepository:
         return result.scalars().all()
 
     async def get_by_link(self, link: str) -> Channel | None:
+        """Получаем канал по ссылке."""
         result = await self.db.execute(select(Channel).filter_by(link=link))
         return result.scalar_one_or_none()
 
     async def create(self, dto: ChannelCreate, user_id: int) -> Channel:
+        """Создаем канал."""
         channel_data = dto.model_dump()
         temp_channel = Channel(**channel_data, user_id=user_id)
         channel_name = temp_channel.grap_name_channel()
@@ -114,6 +121,7 @@ class ChannelRepository:
         return channel
 
     async def update(self, id: int, dto: ChannelUpdate) -> Channel | None:
+        """Обновляем канал."""
         result = await self.db.execute(select(Channel).filter_by(id=id))
         channel = result.scalar_one_or_none()
 
@@ -143,6 +151,7 @@ class ChannelRepository:
         return channel
 
     async def delete(self, id: int) -> bool:
+        """Удаляем канал."""
         result = await self.db.execute(select(Channel).filter_by(id=id))
         channel = result.scalar_one_or_none()
 

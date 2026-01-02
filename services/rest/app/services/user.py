@@ -7,11 +7,13 @@ from app.schemas.user import UserCreate, UserRead, UserRegister
 
 
 class UserService:
+    """Сервис для работы с пользователями."""
     def __init__(self, db: AsyncSession):
+        """Инициализируем сервис."""
         self.repo = UserRepository(db)
 
     async def get_all_paginated(self, page: int = 1, size: int = 10):
-        """Получение всех пользователей с пагинацией"""
+        """Получаем всех пользователей с пагинацией."""
         return await self.repo.get_all_paginated(page, size)
 
     async def search_users_by_name(self, name: str):
@@ -25,20 +27,24 @@ class UserService:
         return await self.repo.search_by_name_paginated(name, page, size)
 
     async def create_user(self, user_create: UserCreate):
+        """Создаем пользователя."""
         existing_user = await self.repo.get_by_tg_id(user_create.tg_id)
         if existing_user:
             raise ValueError("User already exists")
         return await self.repo.create(user_create)
 
     async def delete_user(self, user_id: int):
+        """Удаляем пользователя."""
         return await self.repo.delete(user_id)
 
     async def register_user(
         self, current_user: UserRead, user_register: UserRegister
     ):
+        """Регистрация пользователя."""
         return await self.repo.update_user(current_user.tg_id, user_register)
 
     async def get_by_telegram_id(self, tg_id: int):
+        """Получаем пользователя по telegram_id."""
         user = await self.repo.get_by_tg_id(tg_id)
         if not user:
             return None
@@ -89,6 +95,7 @@ class UserService:
         return await self.repo.update_user_by_id(current_user.id, user_update)
 
     async def get_by_id(self, user_id: int):
+        """Получаем пользователя по id."""
         user = await self.repo.get_by_id(user_id)
         if not user:
             return None

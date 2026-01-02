@@ -8,6 +8,7 @@ from .timestamp import TimestampMixin
 
 
 class Account(Base, TimestampMixin):
+    """Аккаунт."""
     __tablename__ = "account"
 
     id = Column(Integer, primary_key=True)
@@ -15,4 +16,5 @@ class Account(Base, TimestampMixin):
     is_active = Column(Boolean, default=True)
 
     def toggle_active(self):
+        """Переключаем активность аккаунта."""
         self.is_active = not self.is_active

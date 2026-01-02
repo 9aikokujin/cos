@@ -7,6 +7,7 @@ from app.models.videos import VideoType
 
 
 class VideosCreate(BaseModel):
+    """Создание видео."""
     type: VideoType
     link: str
     name: Optional[str] = None
@@ -21,6 +22,7 @@ class VideosCreate(BaseModel):
 
 
 class VideosUpdate(BaseModel):
+    """Обновление видео."""
     type: Optional[VideoType] = None
     link: Optional[str] = None
     name: Optional[str] = None
@@ -34,6 +36,7 @@ class VideosUpdate(BaseModel):
 
 
 class VideoFilter(BaseModel):
+    """Фильтр видео."""
     id: Optional[int] = None
     type: Optional[VideoType] = None
     link: Optional[str] = None

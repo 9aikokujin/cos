@@ -12,7 +12,9 @@ from app.models.channel import Channel
 
 
 class VideoHistoryRepository:
+    """Репозиторий для работы с историей видео."""
     def __init__(self, db: AsyncSession):
+        """Инициализируем репозиторий."""
         self.db = db
 
     async def get_filtered(
@@ -29,6 +31,7 @@ class VideoHistoryRepository:
         date_published_to: Optional[datetime] = None,
         date_published_from: Optional[datetime] = None,
     ):
+        """Получаем историю видео с фильтрацией."""
         query = (
             select(VideoHistory)
             .options(selectinload(VideoHistory.video))
@@ -73,6 +76,7 @@ class VideoHistoryRepository:
         return result.all()
 
     async def get_by_date_to(self, date_to: datetime) -> list[VideoHistory]:
+        """Получаем историю видео по дате до."""
         result = await self.db.execute(
             select(VideoHistory).where(VideoHistory.created_at <= date_to)
         )
@@ -80,34 +84,40 @@ class VideoHistoryRepository:
 
     async def get_by_date_from(self,
                                date_from: datetime) -> list[VideoHistory]:
+        """Получаем историю видео по дате от."""
         result = await self.db.execute(
             select(VideoHistory).where(VideoHistory.created_at >= date_from)
         )
         return result.scalars().all()
 
     async def get_by_date_published_to(self, date_published_to: datetime) -> list[VideoHistory]:
+        """Получаем историю видео по дате публикации до."""
         result = await self.db.execute(
             select(VideoHistory).where(VideoHistory.date_published <= date_published_to)
         )
         return result.scalars().all()
 
     async def get_by_date_published_from(self, date_published_from: datetime) -> list[VideoHistory]:
+        """Получаем историю видео по дате публикации от."""
         result = await self.db.execute(
             select(VideoHistory).where(VideoHistory.date_published >= date_published_from)
         )
         return result.scalars().all()
 
     async def get_by_id(self, id: int) -> VideoHistory | None:
+        """Получаем историю видео по ID."""
         result = await self.db.execute(select(VideoHistory).filter_by(id=id))
         return result.scalar_one_or_none()
 
     async def get_by_user_id(self, user_id: int) -> list[VideoHistory]:
+        """Получаем историю видео по ID пользователя."""
         result = await self.db.execute(
             select(VideoHistory).where(Channel.user_id == user_id)
         )
         return result.scalars().all()
 
     async def get_by_channel_id(self, channel_id: int) -> list[VideoHistory]:
+        """Получаем историю видео по ID канала."""
         result = await self.db.execute(
             select(VideoHistory).where(Videos.channel_id == channel_id)
         )
@@ -115,24 +125,28 @@ class VideoHistoryRepository:
 
     async def get_by_channel_type(self,
                                   channel_type: str) -> list[VideoHistory]:
+        """Получаем историю видео по типу канала."""
         result = await self.db.execute(
             select(VideoHistory).where(Channel.type == channel_type)
         )
         return result.scalars().all()
 
     async def get_by_article(self, articles: str) -> list[VideoHistory]:
+        """Получаем историю видео по артиклю."""
         result = await self.db.execute(
             select(VideoHistory).where(Videos.articles == articles)
         )
         return result.scalars().all()
 
     async def get_by_video_id(self, video_id: int) -> list[VideoHistory]:
+        """Получаем историю видео по ID видео."""
         query = select(VideoHistory).where(VideoHistory.video_id == video_id)
         result = await self.db.execute(query)
         return result.scalars().all()
 
     async def create(self, dto: VideoHistoryCreate,
                      user_id: Optional[int] = None) -> VideoHistory:
+        """Создаем историю видео."""
         if user_id is not None:
             result = await self.db.execute(
                 select(Videos)
@@ -150,6 +164,7 @@ class VideoHistoryRepository:
         return history
 
     async def delete(self, video_history_id: int):
+        """Удаляем историю видео."""
         video_history = await self.get_by_id(video_history_id)
 
         if not video_history:
@@ -174,6 +189,7 @@ class VideoHistoryRepository:
         user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ):
+        """Получаем агрегированную статистику просмотров по дате и артиклю."""
         query = (
             select(
                 func.date(VideoHistory.created_at).label("view_date"),
@@ -252,6 +268,7 @@ class VideoHistoryRepository:
         user_ids: Optional[List[int]] = None,
         articles: Optional[List[str]] = None,
     ):
+        """Получаем агрегированную статистику просмотров по всем пользователям."""
         view_date_expr = func.date(VideoHistory.created_at)
         daily_max_query = (
             select(

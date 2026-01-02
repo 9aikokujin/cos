@@ -3,6 +3,7 @@ from typing import Optional
 
 
 class Proxy(BaseModel):
+    """Прокси."""
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     proxy_str: str
     is_active: bool
@@ -14,10 +15,12 @@ class Proxy(BaseModel):
 
 
 class ProxyRead(Proxy):
+    """Чтение прокси."""
     id: int
 
 
 class ProxyCreate(BaseModel):
+    """Создание прокси."""
     model_config = ConfigDict(populate_by_name=True)
     proxy_str: str
     for_likee: bool = Field(
@@ -28,6 +31,7 @@ class ProxyCreate(BaseModel):
 
 
 class ProxyUpdate(BaseModel):
+    """Обновление прокси."""
     model_config = ConfigDict(populate_by_name=True)
     proxy_str: Optional[str] = None
     is_active: Optional[bool] = None
@@ -39,6 +43,7 @@ class ProxyUpdate(BaseModel):
 
 
 class ProxyBulkCreateRequest(BaseModel):
+    """Создание множества прокси."""
     model_config = ConfigDict(populate_by_name=True)
     raw_data: str
     for_likee: bool = Field(
@@ -49,4 +54,5 @@ class ProxyBulkCreateRequest(BaseModel):
 
 
 class ProxyBulkDeleteResponse(BaseModel):
+    """Удаление множества прокси."""
     deleted: int

@@ -6,18 +6,21 @@ from .timestamp import TimestampMixin
 
 
 class TaskSourceTypes(enum.Enum):
-    YOUTUBE = "youtube"
-    TIKTOK = "tiktok"
-    INSTAGRAM = "instagram"
-    LIKEE = "likee"
+    """Тип источника задачи."""
+    YOUTUBE = "youtube" # Ютуб
+    TIKTOK = "tiktok" # ТикТок
+    INSTAGRAM = "instagram" # Инстаграм
+    LIKEE = "likee" # Лайк
 
 
 class TaskTypes(enum.Enum):
-    CHANNEL = "channel"
-    VIDEO = "video"
+    """Тип задачи."""
+    CHANNEL = "channel" # Канал
+    # VIDEO = "video" # Видео
 
 
 class Task(Base, TimestampMixin):
+    """Задача."""
     __tablename__ = "task"
 
     id = Column(Integer, primary_key=True)
@@ -30,4 +33,5 @@ class Task(Base, TimestampMixin):
     channel = relationship("Channel", back_populates="tasks")
 
     def toggle_active(self):
+        """Переключаем активность задачи."""
         self.is_active = not self.is_active
