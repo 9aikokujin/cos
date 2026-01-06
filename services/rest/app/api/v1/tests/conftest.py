@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-# from starlette.testclient import LifespanManager
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from contextlib import asynccontextmanager
